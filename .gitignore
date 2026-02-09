@@ -1,0 +1,39 @@
+# Build directories
+build/
+result
+result-*
+.direnv/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Qt
+*.moc
+moc_*.cpp
+qrc_*.cpp
+*.qm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+._*
+
+# Nix
+.pre-commit-config.yaml

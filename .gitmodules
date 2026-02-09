@@ -1,0 +1,11 @@
+[submodule "vendor/logos-messaging-nim"]
+	path = vendor/logos-messaging-nim
+	url = https://github.com/logos-messaging/logos-messaging-nim.git
+	branch = feat-lmapi-lib
+	fetchRecurseSubmodules = true
+[submodule "vendor/logos-liblogos"]
+	path = vendor/logos-liblogos
+	url = https://github.com/logos-co/logos-liblogos
+[submodule "vendor/logos-cpp-sdk"]
+	path = vendor/logos-cpp-sdk
+	url = https://github.com/logos-co/logos-cpp-sdk
