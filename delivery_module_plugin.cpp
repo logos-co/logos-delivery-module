@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <semaphore>
 
 // Include the liblogosdelivery header from logos-messaging-nim
 // liblogosdelivery provides a high-level message-delivery API
@@ -92,40 +93,46 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
 
     if (msg && len > 0) {
         QString message = QString::fromUtf8(msg, len);
+        qDebug() << "DeliveryModulePlugin::event_callback message:" << message;
         
-        // Create event data with the message
-        QVariantList eventData;
-        eventData << message;
-        eventData << QDateTime::currentDateTime().toString(Qt::ISODate);
-
-        // Trigger event using emitEvent helper
-        plugin->emitEvent("messageReceived", eventData);
-    }
-}
-
-void DeliveryModulePlugin::send_message_callback(int callerRet, const char* msg, size_t len, void* userData)
-{
-    qDebug() << "DeliveryModulePlugin::send_message_callback called with ret:" << callerRet;
-
-    DeliveryModulePlugin* plugin = static_cast<DeliveryModulePlugin*>(userData);
-    if (!plugin) {
-        qWarning() << "DeliveryModulePlugin::send_message_callback: Invalid userData";
-        return;
-    }
-
-    if (msg && len > 0) {
-        QString message = QString::fromUtf8(msg, len);
-        qDebug() << "DeliveryModulePlugin::send_message_callback message:" << message;
-
-        // Create event data with the send result
-        QVariantList eventData;
-        eventData << message;
-        eventData << QDateTime::currentDateTime().toString(Qt::ISODate);
-
-        if (callerRet == RET_OK) {
+        // Parse JSON to determine event type
+        QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
+        if (!doc.isObject()) {
+            qWarning() << "DeliveryModulePlugin::event_callback: Invalid JSON";
+            return;
+        }
+        
+        QJsonObject jsonObj = doc.object();
+        QString eventType = jsonObj["eventType"].toString();
+        QString timestamp = QDateTime::currentDateTime().toString(Qt::ISODate);
+        
+        if (eventType == "message_sent") {
+            // MessageSentEvent: requestId, messageHash
+            QVariantList eventData;
+            eventData << jsonObj["requestId"].toString();
+            eventData << jsonObj["messageHash"].toString();
+            eventData << timestamp;
             plugin->emitEvent("messageSent", eventData);
-        } else {
+            
+        } else if (eventType == "message_error") {
+            // MessageErrorEvent: requestId, messageHash, error
+            QVariantList eventData;
+            eventData << jsonObj["requestId"].toString();
+            eventData << jsonObj["messageHash"].toString();
+            eventData << jsonObj["error"].toString();
+            eventData << timestamp;
             plugin->emitEvent("messageError", eventData);
+            
+        } else if (eventType == "message_propagated") {
+            // MessagePropagatedEvent: requestId, messageHash
+            QVariantList eventData;
+            eventData << jsonObj["requestId"].toString();
+            eventData << jsonObj["messageHash"].toString();
+            eventData << timestamp;
+            plugin->emitEvent("messagePropagated", eventData);
+            
+        } else {
+            qWarning() << "DeliveryModulePlugin::event_callback: Unknown event type:" << eventType;
         }
     }
 }
@@ -187,13 +194,6 @@ bool DeliveryModulePlugin::start()
     
     if (result == RET_OK) {
         qDebug() << "DeliveryModulePlugin: Messaging start initiated successfully";
-        
-        // Emit start event
-        QVariantList eventData;
-        eventData << "success";
-        eventData << QDateTime::currentDateTime().toString(Qt::ISODate);
-        emitEvent("deliveryStarted", eventData);
-        
         return true;
     } else {
         qWarning() << "DeliveryModulePlugin: Failed to start Messaging, error code:" << result;
@@ -221,8 +221,7 @@ bool DeliveryModulePlugin::stop()
         return false;
     }
 }
-
-bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload)
+bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload, QString &requestId)
 {
     qDebug() << "DeliveryModulePlugin::send called with contentTopic:" << contentTopic;
     qDebug() << "DeliveryModulePlugin::send payload:" << payload;
@@ -242,16 +241,56 @@ bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payl
     QJsonDocument doc(messageObj);
     QByteArray messageJson = doc.toJson(QJsonDocument::Compact);
     
-    // Call logosdelivery_send with JSON message
-    int result = logosdelivery_send(deliveryCtx, send_message_callback, this, messageJson.constData());
+    // Create semaphore and callback context for synchronous operation
+    struct CallbackContext {
+        std::binary_semaphore* sem;
+        QString strResult;
+        bool success;
+    };
     
-    if (result == RET_OK) {
-        qDebug() << "DeliveryModulePlugin: Send message initiated successfully for topic:" << contentTopic;
-        return true;
-    } else {
-        qWarning() << "DeliveryModulePlugin: Failed to send message to topic:" << contentTopic << ", error code:" << result;
+    std::binary_semaphore sem(0);
+    CallbackContext ctx{&sem, "", false};
+    
+    // Lambda callback that will be called when send completes
+    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+        qDebug() << "DeliveryModulePlugin::send callback called with ret:" << callerRet;
+        
+        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
+        if (!ctx) {
+            qWarning() << "DeliveryModulePlugin::send callback: Invalid userData";
+            if (ctx && ctx->sem) {
+                ctx->sem->release();
+            }
+            return;
+        }
+        
+        if (msg && len > 0) {
+            ctx->strResult = QString::fromUtf8(msg, len);
+            ctx->success = callerRet == RET_OK;
+            qDebug() << "DeliveryModulePlugin::send callback message (" << ctx->success << "):" << ctx->strResult;
+        }
+        
+        // Release semaphore to unblock the send method
+        ctx->sem->release();
+    };
+    
+    // Call logosdelivery_send with JSON message
+    int result = logosdelivery_send(deliveryCtx, callback, &ctx, messageJson.constData());
+    
+    if (result != RET_OK) {
+        qWarning() << "DeliveryModulePlugin: Failed to initiate send to topic:" << contentTopic << ", error code:" << result;
         return false;
     }
+    
+    qDebug() << "DeliveryModulePlugin: Waiting for send callback...";
+    
+    // Wait for callback to complete
+    sem.acquire();
+    if (ctx.success) {
+        requestId = ctx.strResult;
+    }
+    qDebug() << "DeliveryModulePlugin: Send initiated for topic:" << contentTopic << ", with success:" << ctx.success;
+    return ctx.success;
 }
 
 bool DeliveryModulePlugin::subscribe(const QString &contentTopic)

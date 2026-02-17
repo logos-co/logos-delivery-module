@@ -18,7 +18,7 @@ public:
     Q_INVOKABLE bool createNode(const QString &cfg) override;
     Q_INVOKABLE bool start() override;
     Q_INVOKABLE bool stop() override;
-    Q_INVOKABLE bool send(const QString &contentTopic, const QString &payload) override;
+    Q_INVOKABLE bool send(const QString &contentTopic, const QString &payload, QString &requestId) override;
     Q_INVOKABLE bool subscribe(const QString &contentTopic) override;
     Q_INVOKABLE bool unsubscribe(const QString &contentTopic) override;
     QString name() const override { return "delivery_module"; }
@@ -42,5 +42,4 @@ private:
     static void start_callback(int callerRet, const char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, const char* msg, size_t len, void* userData);
     static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
-    static void send_message_callback(int callerRet, const char* msg, size_t len, void* userData);
 };

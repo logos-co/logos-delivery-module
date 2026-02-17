@@ -2,99 +2,14 @@
   "name": "delivery_module",
   "version": "1.0.0",
   "description": "Logos Delivery Module - High-level message-delivery API",
-  "interface": "DeliveryModuleInterface",
-  "methods": [
-    {
-      "name": "createNode",
-      "description": "Initialize the delivery node with configuration",
-      "parameters": [
-        {
-          "name": "cfg",
-          "type": "QString",
-          "description": "JSON configuration string for the delivery node"
-        }
-      ],
-      "returns": "bool"
-    },
-    {
-      "name": "start",
-      "description": "Start the delivery node",
-      "parameters": [],
-      "returns": "bool"
-    },
-    {
-      "name": "stop",
-      "description": "Stop the delivery node",
-      "parameters": [],
-      "returns": "bool"
-    },
-    {
-      "name": "send",
-      "description": "Send a message through the delivery network",
-      "parameters": [
-        {
-          "name": "contentTopic",
-          "type": "QString",
-          "description": "The content topic for the message"
-        },
-        {
-          "name": "payload",
-          "type": "QString",
-          "description": "The message payload (base64 encoded)"
-        }
-      ],
-      "returns": "bool"
-    },
-    {
-      "name": "subscribe",
-      "description": "Subscribe to a content topic to receive messages",
-      "parameters": [
-        {
-          "name": "contentTopic",
-          "type": "QString",
-          "description": "The content topic to subscribe to"
-        }
-      ],
-      "returns": "bool"
-    },
-    {
-      "name": "unsubscribe",
-      "description": "Unsubscribe from a content topic",
-      "parameters": [
-        {
-          "name": "contentTopic",
-          "type": "QString",
-          "description": "The content topic to unsubscribe from"
-        }
-      ],
-      "returns": "bool"
-    }
-  ],
-  "events": [
-    {
-      "name": "deliveryInitialized",
-      "description": "Emitted when the delivery node is initialized",
-      "data": ["result", "timestamp"]
-    },
-    {
-      "name": "deliveryStarted",
-      "description": "Emitted when the delivery node is started",
-      "data": ["result", "timestamp"]
-    },
-    {
-      "name": "messageSent",
-      "description": "Emitted when a message is successfully sent",
-      "data": ["requestId", "messageHash", "timestamp"]
-    },
-    {
-      "name": "messageReceived",
-      "description": "Emitted when a message is received",
-      "data": ["contentTopic", "payload", "timestamp"]
-    },
-    {
-      "name": "messageError",
-      "description": "Emitted when an error occurs with message sending",
-      "data": ["requestId", "error", "timestamp"]
-    }
-  ]
+  "author": "Logos Core Team",
+  "type": "core",
+  "category": "protocol",
+  "main": "delivery_module_plugin",
+  "dependencies": [],
+  "include": [
+    "liblogosdelivery.so", 
+    "liblogosdelivery.dylib", 
+    "liblogosdelivery.dll"],
+  "capabilities": []
 }
