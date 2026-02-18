@@ -34,6 +34,9 @@ signals:
 private:
     void* deliveryCtx;
     
+    // Timeout for callback operations (in seconds)
+    static constexpr int CALLBACK_TIMEOUT_SECONDS = 30;
+    
     // Helper method for emitting events
     void emitEvent(const QString& eventName, const QVariantList& data);
     

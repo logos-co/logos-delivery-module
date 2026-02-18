@@ -163,8 +163,11 @@ bool DeliveryModulePlugin::createNode(const QString &cfg)
     if (!deliveryCtx) {
         qDebug() << "DeliveryModulePlugin: Waiting for createNode error callback...";
         
-        // Wait for callback to complete
-        sem.acquire();
+        // Wait for callback to complete with timeout
+        if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+            qWarning() << "DeliveryModulePlugin: Timeout waiting for createNode callback";
+            return false;
+        }
         
         qWarning() << "DeliveryModulePlugin: Failed to create Messaging context";
         return false;
@@ -227,8 +230,11 @@ bool DeliveryModulePlugin::start()
     
     qDebug() << "DeliveryModulePlugin: Waiting for start callback...";
     
-    // Wait for callback to complete
-    sem.acquire();
+    // Wait for callback to complete with timeout
+    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+        qWarning() << "DeliveryModulePlugin: Timeout waiting for start callback";
+        return false;
+    }
     
     qDebug() << "DeliveryModulePlugin: Messaging start completed with success:" << ctx.success;
     return ctx.success;
@@ -283,8 +289,11 @@ bool DeliveryModulePlugin::stop()
     
     qDebug() << "DeliveryModulePlugin: Waiting for stop callback...";
     
-    // Wait for callback to complete
-    sem.acquire();
+    // Wait for callback to complete with timeout
+    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+        qWarning() << "DeliveryModulePlugin: Timeout waiting for stop callback";
+        return false;
+    }
     
     qDebug() << "DeliveryModulePlugin: Messaging stop completed with success:" << ctx.success;
     return ctx.success;
@@ -352,8 +361,12 @@ bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payl
     
     qDebug() << "DeliveryModulePlugin: Waiting for send callback...";
     
-    // Wait for callback to complete
-    sem.acquire();
+    // Wait for callback to complete with timeout
+    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+        qWarning() << "DeliveryModulePlugin: Timeout waiting for send callback";
+        return false;
+    }
+    
     if (ctx.success) {
         requestId = ctx.strResult;
     }
@@ -413,8 +426,11 @@ bool DeliveryModulePlugin::subscribe(const QString &contentTopic)
     
     qDebug() << "DeliveryModulePlugin: Waiting for subscribe callback...";
     
-    // Wait for callback to complete
-    sem.acquire();
+    // Wait for callback to complete with timeout
+    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+        qWarning() << "DeliveryModulePlugin: Timeout waiting for subscribe callback";
+        return false;
+    }
     
     qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success:" << ctx.success;
     return ctx.success;
@@ -472,8 +488,11 @@ bool DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
     
     qDebug() << "DeliveryModulePlugin: Waiting for unsubscribe callback...";
     
-    // Wait for callback to complete
-    sem.acquire();
+    // Wait for callback to complete with timeout
+    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+        qWarning() << "DeliveryModulePlugin: Timeout waiting for unsubscribe callback";
+        return false;
+    }
     
     qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success:" << ctx.success;
     return ctx.success;
