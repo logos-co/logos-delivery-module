@@ -38,8 +38,5 @@ private:
     void emitEvent(const QString& eventName, const QVariantList& data);
     
     // Static callback functions for liblogosdelivery
-    static void init_callback(int callerRet, const char* msg, size_t len, void* userData);
-    static void start_callback(int callerRet, const char* msg, size_t len, void* userData);
-    static void stop_callback(int callerRet, const char* msg, size_t len, void* userData);
     static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
 };

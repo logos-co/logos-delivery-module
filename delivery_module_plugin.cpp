@@ -54,33 +54,6 @@ void DeliveryModulePlugin::emitEvent(const QString& eventName, const QVariantLis
     client->onEventResponse(this, eventName, data);
 }
 
-void DeliveryModulePlugin::init_callback(int callerRet, const char* msg, size_t len, void* userData)
-{
-    qDebug() << "DeliveryModulePlugin::init_callback called with ret:" << callerRet;
-    if (msg && len > 0) {
-        QString message = QString::fromUtf8(msg, len);
-        qDebug() << "DeliveryModulePlugin::init_callback message:" << message;
-    }
-}
-
-void DeliveryModulePlugin::start_callback(int callerRet, const char* msg, size_t len, void* userData)
-{
-    qDebug() << "DeliveryModulePlugin::start_callback called with ret:" << callerRet;
-    if (msg && len > 0) {
-        QString message = QString::fromUtf8(msg, len);
-        qDebug() << "DeliveryModulePlugin::start_callback message:" << message;
-    }
-}
-
-void DeliveryModulePlugin::stop_callback(int callerRet, const char* msg, size_t len, void* userData)
-{
-    qDebug() << "DeliveryModulePlugin::stop_callback called with ret:" << callerRet;
-    if (msg && len > 0) {
-        QString message = QString::fromUtf8(msg, len);
-        qDebug() << "DeliveryModulePlugin::stop_callback message:" << message;
-    }
-}
-
 void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
     qDebug() << "DeliveryModulePlugin::event_callback called with ret:" << callerRet;
@@ -151,33 +124,58 @@ bool DeliveryModulePlugin::createNode(const QString &cfg)
     // Convert QString to UTF-8 byte array
     QByteArray cfgUtf8 = cfg.toUtf8();
     
-    // Call logosdelivery_create_node with the configuration
-    deliveryCtx = logosdelivery_create_node(cfgUtf8.constData(), init_callback, this);
+    // Create semaphore and callback context for synchronous operation
+    // Callback is only called in failure case
+    struct CallbackContext {
+        std::binary_semaphore* sem;
+        bool callbackInvoked;
+    };
     
-    if (deliveryCtx) {
-        qDebug() << "DeliveryModulePlugin: Messaging context created successfully";
+    std::binary_semaphore sem(0);
+    CallbackContext ctx{&sem, false};
+    
+    // Lambda callback that will be called only on failure (when deliveryCtx is nullptr)
+    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+        qDebug() << "DeliveryModulePlugin::createNode callback called with ret:" << callerRet;
         
-        // Set up event callback
-        logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
+        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
+        if (!ctx) {
+            qWarning() << "DeliveryModulePlugin::createNode callback: Invalid userData";
+            return;
+        }
         
-        // Emit initialization event
-        QVariantList eventData;
-        eventData << "success";
-        eventData << QDateTime::currentDateTime().toString(Qt::ISODate);
-        emitEvent("deliveryInitialized", eventData);
+        if (msg && len > 0) {
+            QString message = QString::fromUtf8(msg, len);
+            qDebug() << "DeliveryModulePlugin::createNode callback message:" << message;
+        }
         
-        return true;
-    } else {
+        ctx->callbackInvoked = true;
+        
+        // Release semaphore to unblock the createNode method
+        ctx->sem->release();
+    };
+    
+    // Call logosdelivery_create_node with the configuration
+    // Important: Keep deliveryCtx assignment from the call
+    deliveryCtx = logosdelivery_create_node(cfgUtf8.constData(), callback, &ctx);
+    
+    // If deliveryCtx is nullptr, callback will be invoked with error details
+    if (!deliveryCtx) {
+        qDebug() << "DeliveryModulePlugin: Waiting for createNode error callback...";
+        
+        // Wait for callback to complete
+        sem.acquire();
+        
         qWarning() << "DeliveryModulePlugin: Failed to create Messaging context";
-        
-        // Emit error event
-        QVariantList eventData;
-        eventData << "error";
-        eventData << QDateTime::currentDateTime().toString(Qt::ISODate);
-        emitEvent("deliveryInitialized", eventData);
-        
         return false;
     }
+    
+    // Success case - deliveryCtx is valid, callback won't be called
+    qDebug() << "DeliveryModulePlugin: Messaging context created successfully";
+    
+    // Set up event callback
+    logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
+    return true;
 }
 
 bool DeliveryModulePlugin::start()
@@ -189,16 +187,51 @@ bool DeliveryModulePlugin::start()
         return false;
     }
     
-    // Call logosdelivery_start_node with the saved context
-    int result = logosdelivery_start_node(deliveryCtx, start_callback, this);
+    // Create semaphore and callback context for synchronous operation
+    struct CallbackContext {
+        std::binary_semaphore* sem;
+        bool success;
+    };
     
-    if (result == RET_OK) {
-        qDebug() << "DeliveryModulePlugin: Messaging start initiated successfully";
-        return true;
-    } else {
-        qWarning() << "DeliveryModulePlugin: Failed to start Messaging, error code:" << result;
+    std::binary_semaphore sem(0);
+    CallbackContext ctx{&sem, false};
+    
+    // Lambda callback that will be called when start completes
+    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+        qDebug() << "DeliveryModulePlugin::start callback called with ret:" << callerRet;
+        
+        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
+        if (!ctx) {
+            qWarning() << "DeliveryModulePlugin::start callback: Invalid userData";
+            return;
+        }
+        
+        if (msg && len > 0) {
+            QString message = QString::fromUtf8(msg, len);
+            qDebug() << "DeliveryModulePlugin::start callback message:" << message;
+        }
+        
+        ctx->success = callerRet == RET_OK;
+        
+        // Release semaphore to unblock the start method
+        ctx->sem->release();
+    };
+    
+    // Call logosdelivery_start_node with the saved context
+    int result = logosdelivery_start_node(deliveryCtx, callback, &ctx);
+    
+    if (result != RET_OK) {
+        qWarning() << "DeliveryModulePlugin: Failed to initiate start, error code:" << result;
         return false;
     }
+    
+    qDebug() << "DeliveryModulePlugin: Waiting for start callback...";
+    
+    // Wait for callback to complete
+    sem.acquire();
+    
+    qDebug() << "DeliveryModulePlugin: Messaging start completed with success:" << ctx.success;
+    return ctx.success;
 }
 
 bool DeliveryModulePlugin::stop()
@@ -210,16 +243,51 @@ bool DeliveryModulePlugin::stop()
         return false;
     }
     
-    // Call logosdelivery_stop_node
-    int result = logosdelivery_stop_node(deliveryCtx, stop_callback, this);
+    // Create semaphore and callback context for synchronous operation
+    struct CallbackContext {
+        std::binary_semaphore* sem;
+        bool success;
+    };
     
-    if (result == RET_OK) {
-        qDebug() << "DeliveryModulePlugin: Messaging stop initiated successfully";
-        return true;
-    } else {
-        qWarning() << "DeliveryModulePlugin: Failed to stop Messaging, error code:" << result;
+    std::binary_semaphore sem(0);
+    CallbackContext ctx{&sem, false};
+    
+    // Lambda callback that will be called when stop completes
+    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+        qDebug() << "DeliveryModulePlugin::stop callback called with ret:" << callerRet;
+        
+        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
+        if (!ctx) {
+            qWarning() << "DeliveryModulePlugin::stop callback: Invalid userData";
+            return;
+        }
+        
+        if (msg && len > 0) {
+            QString message = QString::fromUtf8(msg, len);
+            qDebug() << "DeliveryModulePlugin::stop callback message:" << message;
+        }
+        
+        ctx->success = callerRet == RET_OK;
+        
+        // Release semaphore to unblock the stop method
+        ctx->sem->release();
+    };
+    
+    // Call logosdelivery_stop_node
+    int result = logosdelivery_stop_node(deliveryCtx, callback, &ctx);
+    
+    if (result != RET_OK) {
+        qWarning() << "DeliveryModulePlugin: Failed to initiate stop, error code:" << result;
         return false;
     }
+    
+    qDebug() << "DeliveryModulePlugin: Waiting for stop callback...";
+    
+    // Wait for callback to complete
+    sem.acquire();
+    
+    qDebug() << "DeliveryModulePlugin: Messaging stop completed with success:" << ctx.success;
+    return ctx.success;
 }
 bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload, QString &requestId)
 {
@@ -305,16 +373,51 @@ bool DeliveryModulePlugin::subscribe(const QString &contentTopic)
     // Convert QString to UTF-8 byte array
     QByteArray topicUtf8 = contentTopic.toUtf8();
     
-    // Call logosdelivery_subscribe (signature: ctx, callback, userData, contentTopic)
-    int result = logosdelivery_subscribe(deliveryCtx, nullptr, this, topicUtf8.constData());
+    // Create semaphore and callback context for synchronous operation
+    struct CallbackContext {
+        std::binary_semaphore* sem;
+        bool success;
+    };
     
-    if (result == RET_OK) {
-        qDebug() << "DeliveryModulePlugin: Subscribe initiated successfully for topic:" << contentTopic;
-        return true;
-    } else {
-        qWarning() << "DeliveryModulePlugin: Failed to subscribe to topic:" << contentTopic << ", error code:" << result;
+    std::binary_semaphore sem(0);
+    CallbackContext ctx{&sem, false};
+    
+    // Lambda callback that will be called when subscribe completes
+    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+        qDebug() << "DeliveryModulePlugin::subscribe callback called with ret:" << callerRet;
+        
+        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
+        if (!ctx) {
+            qWarning() << "DeliveryModulePlugin::subscribe callback: Invalid userData";
+            return;
+        }
+        
+        if (msg && len > 0) {
+            QString message = QString::fromUtf8(msg, len);
+            qDebug() << "DeliveryModulePlugin::subscribe callback message:" << message;
+        }
+        
+        ctx->success = callerRet == RET_OK;
+        
+        // Release semaphore to unblock the subscribe method
+        ctx->sem->release();
+    };
+    
+    // Call logosdelivery_subscribe (signature: ctx, callback, userData, contentTopic)
+    int result = logosdelivery_subscribe(deliveryCtx, callback, &ctx, topicUtf8.constData());
+    
+    if (result != RET_OK) {
+        qWarning() << "DeliveryModulePlugin: Failed to initiate subscribe to topic:" << contentTopic << ", error code:" << result;
         return false;
     }
+    
+    qDebug() << "DeliveryModulePlugin: Waiting for subscribe callback...";
+    
+    // Wait for callback to complete
+    sem.acquire();
+    
+    qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success:" << ctx.success;
+    return ctx.success;
 }
 
 bool DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
@@ -329,14 +432,49 @@ bool DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
     // Convert QString to UTF-8 byte array
     QByteArray topicUtf8 = contentTopic.toUtf8();
     
-    // Call logosdelivery_unsubscribe (signature: ctx, callback, userData, contentTopic)
-    int result = logosdelivery_unsubscribe(deliveryCtx, nullptr, this, topicUtf8.constData());
+    // Create semaphore and callback context for synchronous operation
+    struct CallbackContext {
+        std::binary_semaphore* sem;
+        bool success;
+    };
     
-    if (result == RET_OK) {
-        qDebug() << "DeliveryModulePlugin: Unsubscribe initiated successfully for topic:" << contentTopic;
-        return true;
-    } else {
-        qWarning() << "DeliveryModulePlugin: Failed to unsubscribe from topic:" << contentTopic << ", error code:" << result;
+    std::binary_semaphore sem(0);
+    CallbackContext ctx{&sem, false};
+    
+    // Lambda callback that will be called when unsubscribe completes
+    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+        qDebug() << "DeliveryModulePlugin::unsubscribe callback called with ret:" << callerRet;
+        
+        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
+        if (!ctx) {
+            qWarning() << "DeliveryModulePlugin::unsubscribe callback: Invalid userData";
+            return;
+        }
+        
+        if (msg && len > 0) {
+            QString message = QString::fromUtf8(msg, len);
+            qDebug() << "DeliveryModulePlugin::unsubscribe callback message:" << message;
+        }
+        
+        ctx->success = callerRet == RET_OK;
+        
+        // Release semaphore to unblock the unsubscribe method
+        ctx->sem->release();
+    };
+    
+    // Call logosdelivery_unsubscribe (signature: ctx, callback, userData, contentTopic)
+    int result = logosdelivery_unsubscribe(deliveryCtx, callback, &ctx, topicUtf8.constData());
+    
+    if (result != RET_OK) {
+        qWarning() << "DeliveryModulePlugin: Failed to initiate unsubscribe from topic:" << contentTopic << ", error code:" << result;
         return false;
     }
+    
+    qDebug() << "DeliveryModulePlugin: Waiting for unsubscribe callback...";
+    
+    // Wait for callback to complete
+    sem.acquire();
+    
+    qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success:" << ctx.success;
+    return ctx.success;
 }
