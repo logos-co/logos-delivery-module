@@ -30,7 +30,7 @@
           lib = import ./nix/lib.nix { inherit pkgs common src logosDelivery; };
           
           # Include package (generated headers from plugin)
-          include = import ./nix/include.nix { inherit pkgs common src lib logosSdk logosDelivery; };
+          include = import ./nix/header.nix { inherit pkgs common src lib logosSdk logosDelivery; };
           
           # Combined package
           combined = pkgs.symlinkJoin {

@@ -21,7 +21,7 @@ DeliveryModulePlugin::DeliveryModulePlugin() : deliveryCtx(nullptr)
 
 DeliveryModulePlugin::~DeliveryModulePlugin() 
 {
-    // Clean up resources
+    // Clean up resources, this is not done in PluginInterface destructor
     if (logosAPI) {
         delete logosAPI;
         logosAPI = nullptr;
@@ -49,6 +49,8 @@ void DeliveryModulePlugin::emitEvent(const QString& eventName, const QVariantLis
     client->onEventResponse(this, eventName, data);
 }
 
+// Static callback function for liblogosdelivery events, this one is one time registered
+// on initialization and will be called for all events from the Nim FFI side.
 void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
     qDebug() << "DeliveryModulePlugin::event_callback called with ret:" << callerRet;

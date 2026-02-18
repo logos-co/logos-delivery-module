@@ -14,7 +14,7 @@ class DeliveryModulePlugin : public QObject, public DeliveryModuleInterface
 
 public:
     DeliveryModulePlugin();
-    ~DeliveryModulePlugin();
+    virtual ~DeliveryModulePlugin();
 
     Q_INVOKABLE bool createNode(const QString &cfg) override;
     Q_INVOKABLE bool start() override;

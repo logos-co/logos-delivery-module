@@ -24,10 +24,10 @@ struct CallbackPayload {
 };
 
 template <typename Func, typename... BoundArgs>
-auto bindApiCall(Func func, void* ctx, BoundArgs&&... boundArgs)
+auto bindApiCall(Func func, void* callbackCtx, BoundArgs&&... boundArgs)
 {
-    return [func, ctx, ... args = std::forward<BoundArgs>(boundArgs)](DeliveryCallback callback, void* userData) {
-        return func(ctx, callback, userData, args...);
+    return [func, callbackCtx, ... args = std::forward<BoundArgs>(boundArgs)](DeliveryCallback callback, void* userData) {
+        return func(callbackCtx, callback, userData, args...);
     };
 }
 
@@ -42,12 +42,12 @@ QExpected<void> callApiRetVoid(const QString& operationName, std::chrono::second
     static std::mutex pendingMutex;
     static std::unordered_map<void*, std::shared_ptr<CallbackContext>> pendingContexts;
 
-    auto ctx = std::make_shared<CallbackContext>();
-    void* callbackKey = static_cast<void*>(ctx.get());
+    auto callbackCtx = std::make_shared<CallbackContext>();
+    void* callbackKey = static_cast<void*>(callbackCtx.get());
 
     {
         std::lock_guard<std::mutex> lock(pendingMutex);
-        pendingContexts[callbackKey] = ctx;
+        pendingContexts[callbackKey] = callbackCtx;
     }
 
     auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
@@ -76,16 +76,16 @@ QExpected<void> callApiRetVoid(const QString& operationName, std::chrono::second
         return QExpected<void>::err("failed to initiate " + operationName);
     }
 
-    if (!ctx->sem.try_acquire_for(timeout)) {
+    if (!callbackCtx->sem.try_acquire_for(timeout)) {
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
         return QExpected<void>::err(operationName + " callback timeout");
     }
 
-    if (ctx->payload.callerRet != RET_OK) {
-        const QString message = ctx->payload.message.isEmpty()
+    if (callbackCtx->payload.callerRet != RET_OK) {
+        const QString message = callbackCtx->payload.message.isEmpty()
             ? operationName + " failed"
-            : ctx->payload.message;
+            : callbackCtx->payload.message;
         return QExpected<void>::err(message);
     }
 
@@ -108,12 +108,12 @@ QExpected<TResult> callApiRetValue(
     static std::mutex pendingMutex;
     static std::unordered_map<void*, std::shared_ptr<CallbackContext>> pendingContexts;
 
-    auto ctx = std::make_shared<CallbackContext>();
-    void* callbackKey = static_cast<void*>(ctx.get());
+    auto callbackCtx = std::make_shared<CallbackContext>();
+    void* callbackKey = static_cast<void*>(callbackCtx.get());
 
     {
         std::lock_guard<std::mutex> lock(pendingMutex);
-        pendingContexts[callbackKey] = ctx;
+        pendingContexts[callbackKey] = callbackCtx;
     }
 
     auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
@@ -142,19 +142,19 @@ QExpected<TResult> callApiRetValue(
         return QExpected<TResult>::err("failed to initiate " + operationName);
     }
 
-    if (!ctx->sem.try_acquire_for(timeout)) {
+    if (!callbackCtx->sem.try_acquire_for(timeout)) {
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
         return QExpected<TResult>::err(operationName + " callback timeout");
     }
 
-    if (ctx->payload.callerRet != RET_OK) {
-        const QString message = ctx->payload.message.isEmpty()
+    if (callbackCtx->payload.callerRet != RET_OK) {
+        const QString message = callbackCtx->payload.message.isEmpty()
             ? operationName + " failed"
-            : ctx->payload.message;
+            : callbackCtx->payload.message;
         return QExpected<TResult>::err(message);
     }
 
-    return QExpected<TResult>::ok(ctx->payload.message);
+    return QExpected<TResult>::ok(callbackCtx->payload.message);
 }
 } // namespace
