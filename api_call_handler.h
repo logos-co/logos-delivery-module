@@ -73,7 +73,7 @@ QExpected<void> callApiRetVoid(const QString& operationName, std::chrono::second
     if (startResult != RET_OK) {
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
-        return QExpected<void>::err(operationName + " failed to initiate");
+        return QExpected<void>::err("failed to initiate " + operationName);
     }
 
     if (!ctx->sem.try_acquire_for(timeout)) {
@@ -139,7 +139,7 @@ QExpected<TResult> callApiRetValue(
     if (startResult != RET_OK) {
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
-        return QExpected<TResult>::err(operationName + " failed to initiate");
+        return QExpected<TResult>::err("failed to initiate " + operationName);
     }
 
     if (!ctx->sem.try_acquire_for(timeout)) {
