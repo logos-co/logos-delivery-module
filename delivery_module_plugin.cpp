@@ -1,22 +1,17 @@
 #include "delivery_module_plugin.h"
 #include <QDebug>
-#include <QCoreApplication>
 #include <QVariantList>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <semaphore>
 
+#include "api_call_handler.h"
 // Include the liblogosdelivery header from logos-delivery
 // liblogosdelivery provides a high-level message-delivery API
 extern "C" {
 #include <liblogosdelivery.h>
 }
-
-// Return codes (similar to libwaku)
-#define RET_OK 0
-#define RET_ERR 1
-#define RET_MISSING_CALLBACK 2
 
 DeliveryModulePlugin::DeliveryModulePlugin() : deliveryCtx(nullptr)
 {
@@ -164,7 +159,7 @@ bool DeliveryModulePlugin::createNode(const QString &cfg)
         qDebug() << "DeliveryModulePlugin: Waiting for createNode error callback...";
         
         // Wait for callback to complete with timeout
-        if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
+        if (!sem.try_acquire_for(CALLBACK_TIMEOUT)) {
             qWarning() << "DeliveryModulePlugin: Timeout waiting for createNode callback";
             return false;
         }
@@ -190,54 +185,18 @@ bool DeliveryModulePlugin::start()
         return false;
     }
     
-    // Create semaphore and callback context for synchronous operation
-    struct CallbackContext {
-        std::binary_semaphore* sem;
-        bool success;
-    };
-    
-    std::binary_semaphore sem(0);
-    CallbackContext ctx{&sem, false};
-    
-    // Lambda callback that will be called when start completes
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        qDebug() << "DeliveryModulePlugin::start callback called with ret:" << callerRet;
-        
-        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
-        if (!ctx) {
-            qWarning() << "DeliveryModulePlugin::start callback: Invalid userData";
-            return;
-        }
-        
-        if (msg && len > 0) {
-            QString message = QString::fromUtf8(msg, len);
-            qDebug() << "DeliveryModulePlugin::start callback message:" << message;
-        }
-        
-        ctx->success = callerRet == RET_OK;
-        
-        // Release semaphore to unblock the start method
-        ctx->sem->release();
-    };
-    
-    // Call logosdelivery_start_node with the saved context
-    int result = logosdelivery_start_node(deliveryCtx, callback, &ctx);
-    
-    if (result != RET_OK) {
-        qWarning() << "DeliveryModulePlugin: Failed to initiate start, error code:" << result;
+    auto outcome = callApiRetVoid(
+        "start",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_start_node, deliveryCtx));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Start failed:" << outcome.error();
         return false;
     }
-    
-    qDebug() << "DeliveryModulePlugin: Waiting for start callback...";
-    
-    // Wait for callback to complete with timeout
-    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
-        qWarning() << "DeliveryModulePlugin: Timeout waiting for start callback";
-        return false;
-    }
-    
-    qDebug() << "DeliveryModulePlugin: Messaging start completed with success:" << ctx.success;
-    return ctx.success;
+
+    qDebug() << "DeliveryModulePlugin: Messaging start completed with success: true";
+    return true;
 }
 
 bool DeliveryModulePlugin::stop()
@@ -249,63 +208,27 @@ bool DeliveryModulePlugin::stop()
         return false;
     }
     
-    // Create semaphore and callback context for synchronous operation
-    struct CallbackContext {
-        std::binary_semaphore* sem;
-        bool success;
-    };
-    
-    std::binary_semaphore sem(0);
-    CallbackContext ctx{&sem, false};
-    
-    // Lambda callback that will be called when stop completes
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        qDebug() << "DeliveryModulePlugin::stop callback called with ret:" << callerRet;
-        
-        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
-        if (!ctx) {
-            qWarning() << "DeliveryModulePlugin::stop callback: Invalid userData";
-            return;
-        }
-        
-        if (msg && len > 0) {
-            QString message = QString::fromUtf8(msg, len);
-            qDebug() << "DeliveryModulePlugin::stop callback message:" << message;
-        }
-        
-        ctx->success = callerRet == RET_OK;
-        
-        // Release semaphore to unblock the stop method
-        ctx->sem->release();
-    };
-    
-    // Call logosdelivery_stop_node
-    int result = logosdelivery_stop_node(deliveryCtx, callback, &ctx);
-    
-    if (result != RET_OK) {
-        qWarning() << "DeliveryModulePlugin: Failed to initiate stop, error code:" << result;
+    auto outcome = callApiRetVoid(
+        "stop",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_stop_node, deliveryCtx));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Stop failed:" << outcome.error();
         return false;
     }
-    
-    qDebug() << "DeliveryModulePlugin: Waiting for stop callback...";
-    
-    // Wait for callback to complete with timeout
-    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
-        qWarning() << "DeliveryModulePlugin: Timeout waiting for stop callback";
-        return false;
-    }
-    
-    qDebug() << "DeliveryModulePlugin: Messaging stop completed with success:" << ctx.success;
-    return ctx.success;
+
+    qDebug() << "DeliveryModulePlugin: Messaging stop completed with success: true";
+    return true;
 }
-bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload, QString &requestId)
+QExpected<QString> DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload)
 {
     qDebug() << "DeliveryModulePlugin::send called with contentTopic:" << contentTopic;
     qDebug() << "DeliveryModulePlugin::send payload:" << payload;
     
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot send message - context not initialized. Call createNode first.";
-        return false;
+        return QExpected<QString>::err("Context not initialized");
     }
     
     // Construct JSON message according to logosdelivery_send API
@@ -318,60 +241,19 @@ bool DeliveryModulePlugin::send(const QString &contentTopic, const QString &payl
     QJsonDocument doc(messageObj);
     QByteArray messageJson = doc.toJson(QJsonDocument::Compact);
     
-    // Create semaphore and callback context for synchronous operation
-    struct CallbackContext {
-        std::binary_semaphore* sem;
-        QString strResult;
-        bool success;
-    };
-    
-    std::binary_semaphore sem(0);
-    CallbackContext ctx{&sem, "", false};
-    
-    // Lambda callback that will be called when send completes
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        qDebug() << "DeliveryModulePlugin::send callback called with ret:" << callerRet;
-        
-        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
-        if (!ctx) {
-            qWarning() << "DeliveryModulePlugin::send callback: Invalid userData";
-            if (ctx && ctx->sem) {
-                ctx->sem->release();
-            }
-            return;
-        }
-        
-        if (msg && len > 0) {
-            ctx->strResult = QString::fromUtf8(msg, len);
-            ctx->success = callerRet == RET_OK;
-            qDebug() << "DeliveryModulePlugin::send callback message (" << ctx->success << "):" << ctx->strResult;
-        }
-        
-        // Release semaphore to unblock the send method
-        ctx->sem->release();
-    };
-    
-    // Call logosdelivery_send with JSON message
-    int result = logosdelivery_send(deliveryCtx, callback, &ctx, messageJson.constData());
-    
-    if (result != RET_OK) {
-        qWarning() << "DeliveryModulePlugin: Failed to initiate send to topic:" << contentTopic << ", error code:" << result;
-        return false;
+    auto outcome = callApiRetValue<QString>(
+        "send",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_send, deliveryCtx, messageJson.constData()));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Send failed for topic:" << contentTopic << ", reason:" << outcome.error();
+        return QExpected<QString>::err(outcome.error());
     }
-    
-    qDebug() << "DeliveryModulePlugin: Waiting for send callback...";
-    
-    // Wait for callback to complete with timeout
-    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
-        qWarning() << "DeliveryModulePlugin: Timeout waiting for send callback";
-        return false;
-    }
-    
-    if (ctx.success) {
-        requestId = ctx.strResult;
-    }
-    qDebug() << "DeliveryModulePlugin: Send initiated for topic:" << contentTopic << ", with success:" << ctx.success;
-    return ctx.success;
+
+    const QString responseMessage = outcome.value();
+    qDebug() << "DeliveryModulePlugin: Send initiated for topic:" << contentTopic << ", with success: true";
+    return QExpected<QString>::ok(responseMessage);
 }
 
 bool DeliveryModulePlugin::subscribe(const QString &contentTopic)
@@ -386,54 +268,18 @@ bool DeliveryModulePlugin::subscribe(const QString &contentTopic)
     // Convert QString to UTF-8 byte array
     QByteArray topicUtf8 = contentTopic.toUtf8();
     
-    // Create semaphore and callback context for synchronous operation
-    struct CallbackContext {
-        std::binary_semaphore* sem;
-        bool success;
-    };
-    
-    std::binary_semaphore sem(0);
-    CallbackContext ctx{&sem, false};
-    
-    // Lambda callback that will be called when subscribe completes
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        qDebug() << "DeliveryModulePlugin::subscribe callback called with ret:" << callerRet;
-        
-        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
-        if (!ctx) {
-            qWarning() << "DeliveryModulePlugin::subscribe callback: Invalid userData";
-            return;
-        }
-        
-        if (msg && len > 0) {
-            QString message = QString::fromUtf8(msg, len);
-            qDebug() << "DeliveryModulePlugin::subscribe callback message:" << message;
-        }
-        
-        ctx->success = callerRet == RET_OK;
-        
-        // Release semaphore to unblock the subscribe method
-        ctx->sem->release();
-    };
-    
-    // Call logosdelivery_subscribe (signature: ctx, callback, userData, contentTopic)
-    int result = logosdelivery_subscribe(deliveryCtx, callback, &ctx, topicUtf8.constData());
-    
-    if (result != RET_OK) {
-        qWarning() << "DeliveryModulePlugin: Failed to initiate subscribe to topic:" << contentTopic << ", error code:" << result;
+    auto outcome = callApiRetVoid(
+        "subscribe",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_subscribe, deliveryCtx, topicUtf8.constData()));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Subscribe failed for topic:" << contentTopic << ", reason:" << outcome.error();
         return false;
     }
-    
-    qDebug() << "DeliveryModulePlugin: Waiting for subscribe callback...";
-    
-    // Wait for callback to complete with timeout
-    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
-        qWarning() << "DeliveryModulePlugin: Timeout waiting for subscribe callback";
-        return false;
-    }
-    
-    qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success:" << ctx.success;
-    return ctx.success;
+
+    qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success: true";
+    return true;
 }
 
 bool DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
@@ -448,52 +294,16 @@ bool DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
     // Convert QString to UTF-8 byte array
     QByteArray topicUtf8 = contentTopic.toUtf8();
     
-    // Create semaphore and callback context for synchronous operation
-    struct CallbackContext {
-        std::binary_semaphore* sem;
-        bool success;
-    };
-    
-    std::binary_semaphore sem(0);
-    CallbackContext ctx{&sem, false};
-    
-    // Lambda callback that will be called when unsubscribe completes
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        qDebug() << "DeliveryModulePlugin::unsubscribe callback called with ret:" << callerRet;
-        
-        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
-        if (!ctx) {
-            qWarning() << "DeliveryModulePlugin::unsubscribe callback: Invalid userData";
-            return;
-        }
-        
-        if (msg && len > 0) {
-            QString message = QString::fromUtf8(msg, len);
-            qDebug() << "DeliveryModulePlugin::unsubscribe callback message:" << message;
-        }
-        
-        ctx->success = callerRet == RET_OK;
-        
-        // Release semaphore to unblock the unsubscribe method
-        ctx->sem->release();
-    };
-    
-    // Call logosdelivery_unsubscribe (signature: ctx, callback, userData, contentTopic)
-    int result = logosdelivery_unsubscribe(deliveryCtx, callback, &ctx, topicUtf8.constData());
-    
-    if (result != RET_OK) {
-        qWarning() << "DeliveryModulePlugin: Failed to initiate unsubscribe from topic:" << contentTopic << ", error code:" << result;
+    auto outcome = callApiRetVoid(
+        "unsubscribe",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_unsubscribe, deliveryCtx, topicUtf8.constData()));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Unsubscribe failed for topic:" << contentTopic << ", reason:" << outcome.error();
         return false;
     }
-    
-    qDebug() << "DeliveryModulePlugin: Waiting for unsubscribe callback...";
-    
-    // Wait for callback to complete with timeout
-    if (!sem.try_acquire_for(std::chrono::seconds(CALLBACK_TIMEOUT_SECONDS))) {
-        qWarning() << "DeliveryModulePlugin: Timeout waiting for unsubscribe callback";
-        return false;
-    }
-    
-    qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success:" << ctx.success;
-    return ctx.success;
+
+    qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success: true";
+    return true;
 }

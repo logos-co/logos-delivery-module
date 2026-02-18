@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtCore/QObject>
+#include <chrono>
 #include "delivery_module_interface.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
@@ -18,7 +19,7 @@ public:
     Q_INVOKABLE bool createNode(const QString &cfg) override;
     Q_INVOKABLE bool start() override;
     Q_INVOKABLE bool stop() override;
-    Q_INVOKABLE bool send(const QString &contentTopic, const QString &payload, QString &requestId) override;
+    Q_INVOKABLE QExpected<QString> send(const QString &contentTopic, const QString &payload) override;
     Q_INVOKABLE bool subscribe(const QString &contentTopic) override;
     Q_INVOKABLE bool unsubscribe(const QString &contentTopic) override;
     QString name() const override { return "delivery_module"; }
@@ -34,8 +35,8 @@ signals:
 private:
     void* deliveryCtx;
     
-    // Timeout for callback operations (in seconds)
-    static constexpr int CALLBACK_TIMEOUT_SECONDS = 30;
+    // Timeout for callback operations
+    static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
     
     // Helper method for emitting events
     void emitEvent(const QString& eventName, const QVariantList& data);
