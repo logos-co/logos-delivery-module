@@ -1,36 +1,36 @@
 {
-  description = "Logos Messaging Module";
+  description = "Logos Delivery Module";
 
   inputs = {
     # Follow the same nixpkgs as logos-liblogos to ensure compatibility
     nixpkgs.follows = "logos-liblogos/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk?ref=feat/logos-result";
     logos-liblogos.url = "github:logos-co/logos-liblogos";
-    logos-messaging.url =  "git+https://github.com/logos-messaging/logos-messaging-nim?ref=feat-lmapi-lib&rev=417c55786888a15f12288586997faef5c97cb403&submodules=1";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
   };
 
-  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-messaging }:
+  outputs = { self, nixpkgs, logos-cpp-sdk, logos-liblogos, logos-delivery }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
         pkgs = import nixpkgs { inherit system; };
         logosSdk = logos-cpp-sdk.packages.${system}.default;
         logosLiblogos = logos-liblogos.packages.${system}.default;
-        logosMessagingNim = logos-messaging.packages.${system}.liblogosdelivery;
+        logosDelivery = logos-delivery.packages.${system}.liblogosdelivery;
       });
     in
     {
-      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosMessagingNim }:
+      packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosDelivery }:
         let
           # Common configuration
-          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosMessagingNim; };
+          common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosDelivery; };
           src = ./.;
           
           # Library package (plugin + libcodex)
-          lib = import ./nix/lib.nix { inherit pkgs common src logosMessagingNim; };
+          lib = import ./nix/lib.nix { inherit pkgs common src logosDelivery; };
           
           # Include package (generated headers from plugin)
-          include = import ./nix/include.nix { inherit pkgs common src lib logosSdk logosMessagingNim; };
+          include = import ./nix/include.nix { inherit pkgs common src lib logosSdk logosDelivery; };
           
           # Combined package
           combined = pkgs.symlinkJoin {
@@ -48,7 +48,7 @@
         }
       );
 
-      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosMessagingNim }: {
+      devShells = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosDelivery }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.cmake
@@ -63,11 +63,11 @@
           shellHook = ''
             export LOGOS_CPP_SDK_ROOT="${logosSdk}"
             export LOGOS_LIBLOGOS_ROOT="${logosLiblogos}"
-            export LOGOS_MESSAGING_NIM_ROOT="${logosMessagingNim}"
+            export LOGOS_DELIVERY_ROOT="${logosDelivery}"
             echo "Logos Delivery Module development environment"
             echo "LOGOS_CPP_SDK_ROOT: $LOGOS_CPP_SDK_ROOT"
             echo "LOGOS_LIBLOGOS_ROOT: $LOGOS_LIBLOGOS_ROOT"
-            echo "LOGOS_MESSAGING_NIM_ROOT: $LOGOS_MESSAGING_NIM_ROOT"
+            echo "LOGOS_DELIVERY_ROOT: $LOGOS_DELIVERY_ROOT"
           '';
         };
       });

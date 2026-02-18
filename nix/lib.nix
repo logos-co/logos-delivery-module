@@ -1,5 +1,5 @@
 # Builds the logos-delivery-module library
-{ pkgs, common, src, logosMessagingNim }:
+{ pkgs, common, src, logosDelivery }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-lib";
@@ -14,14 +14,18 @@ pkgs.stdenv.mkDerivation {
   postInstall = ''
     mkdir -p $out/lib
 
-    # Copy the lib to $out/lib folder
-    if [ -f "$out/share/logos-delivery-module/generated/''${libdeliveryLib}" ]; then
+    # Copy liblogosdelivery directly from the delivery package
+    if [ -f "${logosDelivery}/bin/''${libdeliveryLib}" ]; then
+        cp "${logosDelivery}/bin/''${libdeliveryLib}" "$out/lib/''${libdeliveryLib}"
+    elif [ -f "$out/share/logos-delivery-module/generated/''${libdeliveryLib}" ]; then
         cp "$out/share/logos-delivery-module/generated/''${libdeliveryLib}" "$out/lib/''${libdeliveryLib}"
     fi
 
-    # Fix the install name of libstorage on macOS
+    # Fix the install name of liblogosdelivery on macOS
     ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-      ${pkgs.darwin.cctools}/bin/install_name_tool -id "@rpath/''${libdeliveryLib}" "$out/lib/''${libdeliveryLib}"
+      if [ -f "$out/lib/''${libdeliveryLib}" ]; then
+        ${pkgs.darwin.cctools}/bin/install_name_tool -id "@rpath/''${libdeliveryLib}" "$out/lib/''${libdeliveryLib}"
+      fi
     ''}
 
     # Copy the storage module plugin from the installed location

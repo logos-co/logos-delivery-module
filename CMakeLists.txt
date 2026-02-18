@@ -43,8 +43,8 @@ if(NOT DEFINED LOGOS_CPP_SDK_ROOT)
     endif()
 endif()
 
-if(NOT DEFINED LOGOS_MESSAGING_NIM_ROOT)
-    set(LOGOS_MESSAGING_NIM_ROOT "$ENV{LOGOS_MESSAGING_NIM_ROOT}")
+if(NOT DEFINED LOGOS_DELIVERY_ROOT)
+    set(LOGOS_DELIVERY_ROOT "$ENV{LOGOS_DELIVERY_ROOT}")
 endif()
 
 # Check if dependencies are available (support both source and installed layouts)
@@ -129,7 +129,7 @@ else()
 endif()
 
 # Find liblogosdelivery library
-set(LIBLOGOSDELIVERY_DIR "${LOGOS_MESSAGING_NIM_ROOT}/bin")
+set(LIBLOGOSDELIVERY_DIR "${LOGOS_DELIVERY_ROOT}/bin")
 # Prioritize platform-specific library names
 if(APPLE)
     set(LIBLOGOSDELIVERY_NAMES liblogosdelivery.dylib liblogosdelivery.so)
@@ -207,11 +207,11 @@ target_include_directories(delivery_module_plugin PRIVATE
     ${LIBLOGOSDELIVERY_DIR}
 )
 
-# Look for liblogosdelivery.h in logos-messaging-nim
-if(EXISTS "${LOGOS_MESSAGING_NIM_ROOT}/include/liblogosdelivery.h")
-    target_include_directories(delivery_module_plugin PRIVATE ${LOGOS_MESSAGING_NIM_ROOT}/include)
-elseif(EXISTS "${LOGOS_MESSAGING_NIM_ROOT}/liblogosdelivery/liblogosdelivery.h")
-    target_include_directories(delivery_module_plugin PRIVATE ${LOGOS_MESSAGING_NIM_ROOT}/liblogosdelivery)
+# Look for liblogosdelivery.h in logos-delivery
+if(EXISTS "${LOGOS_DELIVERY_ROOT}/include/liblogosdelivery.h")
+    target_include_directories(delivery_module_plugin PRIVATE ${LOGOS_DELIVERY_ROOT}/include)
+elseif(EXISTS "${LOGOS_DELIVERY_ROOT}/liblogosdelivery/liblogosdelivery.h")
+    target_include_directories(delivery_module_plugin PRIVATE ${LOGOS_DELIVERY_ROOT}/liblogosdelivery)
 endif()
 
 # Add include directories based on layout type

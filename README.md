@@ -2,7 +2,7 @@
 
 Wrap LogosMessaging API (liblogosdelivery) and make it available as a Logos Core module.
 
-This module provides high-level message delivery capabilities through the liblogosdelivery interface from [logos-messaging-nim](https://github.com/logos-messaging/logos-messaging-nim), packaged as a Logos module plugin compatible with logos-core.
+This module provides high-level message delivery capabilities through the liblogosdelivery interface from [logos-delivery](https://github.com/logos-messaging/logos-delivery), packaged as a Logos module plugin compatible with logos-core.
 
 ## How to Build
 
@@ -18,11 +18,11 @@ nix build
 nix build '.#default'
 ```
 
-**Current Status**: The build will compile the plugin successfully but fail at the install phase when looking for liblogosdelivery.dylib, as it's not yet available from logos-messaging-nim.
+**Current Status**: The build will compile the plugin successfully but fail at the install phase when looking for liblogosdelivery.dylib, as it's not yet available from logos-delivery.
 
 The result will include (once liblogosdelivery is available):
 - `/lib/logos/modules/delivery_module_plugin.dylib` (or `.so` on Linux) - The Delivery module plugin
-- Symlink to `liblogosdelivery.dylib` (or `.so` on Linux) from logos-messaging-nim
+- Symlink to `liblogosdelivery.dylib` (or `.so` on Linux) from logos-delivery
 - `/share/logos-delivery-module/metadata.json` - Module metadata
 - `/share/logos-delivery-module/generated/` - Generated module files
 
@@ -82,7 +82,7 @@ Both libraries must remain in the same directory, as `delivery_module_plugin.dyl
 - Qt6 Remote Objects (qtremoteobjects)
 - logos-liblogos (provided via Nix)
 - logos-cpp-sdk (provided via Nix)
-- logos-messaging-nim with liblogosdelivery target (provided via Nix)
+- logos-delivery with liblogosdelivery target (provided via Nix)
 
 All dependencies are automatically handled by the Nix flake configuration.
 
@@ -125,14 +125,14 @@ The module emits the following events:
                ▼
 ┌─────────────────────────────────────┐
 │  liblogosdelivery                   │
-│  (from logos-messaging-nim)         │
+│  (from logos-delivery)              │
 │  High-level Message-delivery API    │
 └──────────────┬──────────────────────┘
                │
                │ Nim API
                ▼
 ┌─────────────────────────────────────┐
-│ logos-messaging-nim                 │
+│ logos-delivery                      │
 │ Core message-delivery implementation│
 └─────────────────────────────────────┘
 ```
@@ -149,7 +149,7 @@ nix develop
 cmake -B build -S . -GNinja \
   -DLOGOS_CPP_SDK_ROOT=$LOGOS_CPP_SDK_ROOT \
   -DLOGOS_LIBLOGOS_ROOT=$LOGOS_LIBLOGOS_ROOT \
-  -DLOGOS_MESSAGING_NIM_ROOT=$LOGOS_MESSAGING_NIM_ROOT
+  -DLOGOS_DELIVERY_ROOT=$LOGOS_DELIVERY_ROOT
 
 # Build
 ninja -C build

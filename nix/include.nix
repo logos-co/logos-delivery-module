@@ -1,5 +1,5 @@
 # Generates headers from the messaging module plugin using logos-cpp-generator
-{ pkgs, common, src, lib, logosSdk, logosMessagingNim }:
+{ pkgs, common, src, lib, logosSdk, logosDelivery }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-headers";
@@ -67,13 +67,13 @@ pkgs.stdenv.mkDerivation {
       echo "# Generated headers from metadata.json" > $out/include/.generated
     fi
 
-    # Copy header from logos-messaging-nim
-    echo "Copying header from logos-messaging-nim..."
-    if [ -d "${logosMessagingNim}/include" ]; then
-      echo "Found include directory in logos-messaging-nim"
-      cp -r "${logosMessagingNim}/include"/* $out/include/
+    # Copy header from logos-delivery
+    echo "Copying header from logos-delivery..."
+    if [ -d "${logosDelivery}/include" ]; then
+      echo "Found include directory in logos-delivery"
+      cp -r "${logosDelivery}/include"/* $out/include/
     else
-      echo "Warning: No include directory found in logos-messaging-nim"
+      echo "Warning: No include directory found in logos-delivery"
     fi
 
     echo "Copied include files:"

@@ -1,5 +1,5 @@
 # Common build configuration shared across all packages
-{ pkgs, logosSdk, logosLiblogos, logosMessagingNim }:
+{ pkgs, logosSdk, logosLiblogos, logosDelivery }:
 
 {
   pname = "logos-delivery-module";
@@ -24,7 +24,7 @@
     "-GNinja"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
     "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
-    "-DLOGOS_MESSAGING_NIM_ROOT=${logosMessagingNim}"
+    "-DLOGOS_DELIVERY_ROOT=${logosDelivery}"
     "-DLOGOS_MESSAGING_MODULE_USE_VENDOR=OFF"
   ];
   
@@ -32,7 +32,7 @@
   env = {
     LOGOS_CPP_SDK_ROOT = "${logosSdk}";
     LOGOS_LIBLOGOS_ROOT = "${logosLiblogos}";
-    LOGOS_MESSAGING_NIM_ROOT = "${logosMessagingNim}";
+    LOGOS_DELIVERY_ROOT = "${logosDelivery}";
   };
   
   # Metadata

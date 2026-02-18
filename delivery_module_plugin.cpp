@@ -7,7 +7,7 @@
 #include <QJsonObject>
 #include <semaphore>
 
-// Include the liblogosdelivery header from logos-messaging-nim
+// Include the liblogosdelivery header from logos-delivery
 // liblogosdelivery provides a high-level message-delivery API
 extern "C" {
 #include <liblogosdelivery.h>

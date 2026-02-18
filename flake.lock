@@ -46,7 +46,7 @@
     },
     "logos-cpp-sdk_2": {
       "inputs": {
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_3"
       },
       "locked": {
         "lastModified": 1761230734,
@@ -64,7 +64,7 @@
     },
     "logos-cpp-sdk_3": {
       "inputs": {
-        "nixpkgs": "nixpkgs_3"
+        "nixpkgs": "nixpkgs_4"
       },
       "locked": {
         "lastModified": 1761230734,
@@ -82,7 +82,7 @@
     },
     "logos-cpp-sdk_4": {
       "inputs": {
-        "nixpkgs": "nixpkgs_4"
+        "nixpkgs": "nixpkgs_5"
       },
       "locked": {
         "lastModified": 1767724329,
@@ -100,7 +100,7 @@
     },
     "logos-cpp-sdk_5": {
       "inputs": {
-        "nixpkgs": "nixpkgs_5"
+        "nixpkgs": "nixpkgs_6"
       },
       "locked": {
         "lastModified": 1767724329,
@@ -114,6 +114,27 @@
         "owner": "logos-co",
         "repo": "logos-cpp-sdk",
         "type": "github"
+      }
+    },
+    "logos-delivery": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2",
+        "zerokit": "zerokit"
+      },
+      "locked": {
+        "lastModified": 1771395675,
+        "narHash": "sha256-YYNs+ayugUcKrIWUaQhf4WkMaziNmD6NR+16a4le4HI=",
+        "ref": "refs/heads/master",
+        "rev": "2f3f56898f3251254523703cc3a3dec905eedbee",
+        "revCount": 2222,
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/logos-messaging/logos-delivery"
+      },
+      "original": {
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/logos-messaging/logos-delivery"
       }
     },
     "logos-liblogos": {
@@ -166,29 +187,6 @@
         "type": "github"
       }
     },
-    "logos-messaging": {
-      "inputs": {
-        "nixpkgs": "nixpkgs_6",
-        "zerokit": "zerokit"
-      },
-      "locked": {
-        "lastModified": 1771295751,
-        "narHash": "sha256-zIc6qDqVhZIp/BUvoSCucqaUMQcnN2gYKUizUGkqf+M=",
-        "ref": "feat-lmapi-lib",
-        "rev": "417c55786888a15f12288586997faef5c97cb403",
-        "revCount": 2232,
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/logos-messaging/logos-messaging-nim"
-      },
-      "original": {
-        "ref": "feat-lmapi-lib",
-        "rev": "417c55786888a15f12288586997faef5c97cb403",
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/logos-messaging/logos-messaging-nim"
-      }
-    },
     "logos-module": {
       "inputs": {
         "logos-cpp-sdk": "logos-cpp-sdk_5",
@@ -231,17 +229,17 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1759036355,
-        "narHash": "sha256-0m27AKv6ka+q270dw48KflE0LwQYrO7Fm4/2//KCVWg=",
+        "lastModified": 1757590060,
+        "narHash": "sha256-EWwwdKLMZALkgHFyKW7rmyhxECO74+N+ZO5xTDnY/5c=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "e9f00bd893984bc8ce46c895c3bf7cac95331127",
+        "rev": "0ef228213045d2cdb5a169a95d63ded38670b293",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-unstable",
         "repo": "nixpkgs",
+        "rev": "0ef228213045d2cdb5a169a95d63ded38670b293",
         "type": "github"
       }
     },
@@ -295,25 +293,25 @@
     },
     "nixpkgs_6": {
       "locked": {
-        "lastModified": 1757590060,
-        "narHash": "sha256-EWwwdKLMZALkgHFyKW7rmyhxECO74+N+ZO5xTDnY/5c=",
+        "lastModified": 1759036355,
+        "narHash": "sha256-0m27AKv6ka+q270dw48KflE0LwQYrO7Fm4/2//KCVWg=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "0ef228213045d2cdb5a169a95d63ded38670b293",
+        "rev": "e9f00bd893984bc8ce46c895c3bf7cac95331127",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
+        "ref": "nixos-unstable",
         "repo": "nixpkgs",
-        "rev": "0ef228213045d2cdb5a169a95d63ded38670b293",
         "type": "github"
       }
     },
     "root": {
       "inputs": {
         "logos-cpp-sdk": "logos-cpp-sdk",
+        "logos-delivery": "logos-delivery",
         "logos-liblogos": "logos-liblogos",
-        "logos-messaging": "logos-messaging",
         "nixpkgs": [
           "logos-liblogos",
           "nixpkgs"
@@ -323,7 +321,7 @@
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
-          "logos-messaging",
+          "logos-delivery",
           "zerokit",
           "nixpkgs"
         ]
@@ -345,7 +343,7 @@
     "zerokit": {
       "inputs": {
         "nixpkgs": [
-          "logos-messaging",
+          "logos-delivery",
           "nixpkgs"
         ],
         "rust-overlay": "rust-overlay"

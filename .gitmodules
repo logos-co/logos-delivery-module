@@ -1,7 +1,7 @@
-[submodule "vendor/logos-messaging-nim"]
-	path = vendor/logos-messaging-nim
-	url = https://github.com/logos-messaging/logos-messaging-nim.git
-	branch = feat-lmapi-lib
+[submodule "vendor/logos-delivery"]
+	path = vendor/logos-delivery
+	url = https://github.com/logos-messaging/logos-delivery.git
+	branch = master
 	fetchRecurseSubmodules = true
 [submodule "vendor/logos-liblogos"]
 	path = vendor/logos-liblogos
