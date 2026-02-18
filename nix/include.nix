@@ -80,6 +80,5 @@ pkgs.stdenv.mkDerivation {
     ls -la $out/include/
 
     runHook postInstall
-    runHook postInstall
   '';
 }

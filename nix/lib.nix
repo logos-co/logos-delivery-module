@@ -32,10 +32,10 @@ pkgs.stdenv.mkDerivation {
     if [ -f "$out/lib/logos/modules/delivery_module_plugin.dylib" ]; then
       cp "$out/lib/logos/modules/delivery_module_plugin.dylib" "$out/lib/"
 
-      # Fix the plugin's reference to libstorage on macOS
+      # Fix the plugin's reference to liblogosdelivery on macOS
       ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-        # Find what libstorage path the plugin is referencing and change it to @rpath
-        for dep in $(${pkgs.darwin.cctools}/bin/otool -L "$out/lib/delivery_module_plugin.dylib" | grep libstorage | awk '{print $1}'); do
+        # Find what liblogosdelivery path the plugin is referencing and change it to @rpath
+        for dep in $(${pkgs.darwin.cctools}/bin/otool -L "$out/lib/delivery_module_plugin.dylib" | grep liblogosdelivery | awk '{print $1}'); do
           ${pkgs.darwin.cctools}/bin/install_name_tool -change "$dep" "@rpath/''${libdeliveryLib}" "$out/lib/delivery_module_plugin.dylib"
         done
       ''}
