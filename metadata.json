@@ -1,0 +1,15 @@
+{
+  "name": "delivery_module",
+  "version": "1.0.0",
+  "description": "Logos Delivery Module - High-level message-delivery API",
+  "author": "Logos Core Team",
+  "type": "core",
+  "category": "protocol",
+  "main": "delivery_module_plugin",
+  "dependencies": [],
+  "include": [
+    "liblogosdelivery.so", 
+    "liblogosdelivery.dylib", 
+    "liblogosdelivery.dll"],
+  "capabilities": []
+}
