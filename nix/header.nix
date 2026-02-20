@@ -10,9 +10,11 @@ pkgs.stdenv.mkDerivation {
   
   # We need the generator and the built plugin
   nativeBuildInputs = [ logosSdk ];
+  buildInputs = [ pkgs.qt6.qtbase pkgs.qt6.qtremoteobjects ];
   
   # No configure phase needed
   dontConfigure = true;
+  dontWrapQtApps = true;
   
   buildPhase = ''
     runHook preBuild
@@ -34,7 +36,7 @@ pkgs.stdenv.mkDerivation {
     if [ "$(uname -s)" = "Darwin" ]; then
       export DYLD_LIBRARY_PATH="${lib}/lib:''${DYLD_LIBRARY_PATH:-}"
     else
-      export LD_LIBRARY_PATH="${lib}/lib:''${LD_LIBRARY_PATH:-}"
+      export LD_LIBRARY_PATH="${lib}/lib:${pkgs.qt6.qtbase}/lib:${pkgs.qt6.qtremoteobjects}/lib:''${LD_LIBRARY_PATH:-}"
     fi
     
     # Run logos-cpp-generator on the built plugin with --module-only flag
@@ -60,7 +62,7 @@ pkgs.stdenv.mkDerivation {
     if [ -d ./generated_headers ] && [ "$(ls -A ./generated_headers 2>/dev/null)" ]; then
       echo "Copying generated headers..."
       ls -la ./generated_headers
-      cp -r ./generated_headers/* $out/include/
+      cp -r ./generated_headers/. $out/include/
     else
       echo "Warning: No generated headers found, creating empty include directory"
       # Create a placeholder file to indicate headers should be generated from metadata
@@ -71,7 +73,7 @@ pkgs.stdenv.mkDerivation {
     echo "Copying header from logos-delivery..."
     if [ -d "${logosDelivery}/include" ]; then
       echo "Found include directory in logos-delivery"
-      cp -r "${logosDelivery}/include"/* $out/include/
+      cp -r "${logosDelivery}/include"/. $out/include/
     else
       echo "Warning: No include directory found in logos-delivery"
     fi
