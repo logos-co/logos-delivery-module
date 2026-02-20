@@ -16,7 +16,9 @@
         pkgs = import nixpkgs { inherit system; };
         logosSdk = logos-cpp-sdk.packages.${system}.default;
         logosLiblogos = logos-liblogos.packages.${system}.default;
-        logosDelivery = logos-delivery.packages.${system}.liblogosdelivery;
+        logosDelivery = (logos-delivery.packages.${system}.liblogosdelivery).overrideAttrs (old: {
+          NIMFLAGS = (old.NIMFLAGS or "") + " -d:postgres  -d:nimDebugDlOpen -d:chronicles_colors:none  ";
+        });
       });
     in
     {

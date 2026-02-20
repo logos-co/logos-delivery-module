@@ -10,6 +10,11 @@
   "include": [
     "liblogosdelivery.so", 
     "liblogosdelivery.dylib", 
-    "liblogosdelivery.dll"],
+    "liblogosdelivery.dll",
+    "libpq.so",
+    "libpq.so.5",
+    "libpq.dylib",
+    "libpq.5.dylib",
+    "libpq.dll"],
   "capabilities": []
 }

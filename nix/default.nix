@@ -17,6 +17,7 @@
   buildInputs = [ 
     pkgs.qt6.qtbase 
     pkgs.qt6.qtremoteobjects 
+    pkgs.postgresql
   ];
   
   # Common CMake flags
