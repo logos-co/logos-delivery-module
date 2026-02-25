@@ -10,7 +10,7 @@
 class DeliveryModulePlugin : public QObject, public DeliveryModuleInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID DeliveryModuleInterface_iid FILE "metadata.json")
+    Q_PLUGIN_METADATA(IID DeliveryModuleInterface_iid FILE "../metadata.json")
     Q_INTERFACES(DeliveryModuleInterface PluginInterface)
 
 public:

@@ -142,9 +142,9 @@ find_library(LIBLOGOSDELIVERY_PATH NAMES ${LIBLOGOSDELIVERY_NAMES} PATHS ${LIBLO
 
 # Plugin sources
 set(PLUGIN_SOURCES
-    delivery_module_plugin.cpp
-    delivery_module_plugin.h
-    delivery_module_interface.h
+    src/delivery_module_plugin.cpp
+    src/delivery_module_plugin.h
+    src/delivery_module_interface.h
 )
 
 # Add liblogos interface header
@@ -203,7 +203,7 @@ endif()
 
 # Include directories
 target_include_directories(delivery_module_plugin PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${LIBLOGOSDELIVERY_DIR}
 )
 
