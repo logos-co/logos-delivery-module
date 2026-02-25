@@ -2,6 +2,7 @@
 
 #include <QtCore/QObject>
 #include <chrono>
+#include <mutex>
 #include "delivery_module_interface.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
@@ -34,6 +35,7 @@ signals:
 
 private:
     void* deliveryCtx;
+    std::mutex createNodeMutex;
     
     // Timeout for callback operations
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
