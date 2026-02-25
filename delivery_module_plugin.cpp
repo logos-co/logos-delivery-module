@@ -101,6 +101,12 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
             eventData << timestamp;
             plugin->emitEvent("messagePropagated", eventData);
             
+        } else if (eventType == "connection_status_change") {
+            QVariantList eventData;
+            eventData << jsonObj["connectionStatus"].toString();
+            eventData << timestamp;
+            plugin->emitEvent("connectionStateChanged", eventData);
+            
         } else {
             qWarning() << "DeliveryModulePlugin::event_callback: Unknown event type:" << eventType;
         }
