@@ -4,7 +4,10 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <memory>
+#include <mutex>
 #include <semaphore>
+#include <unordered_map>
 
 #include "api_call_handler.h"
 // Include the liblogosdelivery header from logos-delivery
@@ -116,61 +119,98 @@ void DeliveryModulePlugin::initLogos(LogosAPI* logosAPIInstance) {
 
 bool DeliveryModulePlugin::createNode(const QString &cfg)
 {
+    std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
+
+    if (deliveryCtx != nullptr) {
+        qWarning() << "DeliveryModulePlugin: createNode rejected - context already initialized";
+        return false;
+    }
+
     qDebug() << "DeliveryModulePlugin::createNode called with cfg:" << cfg;
     
     // Convert QString to UTF-8 byte array
     QByteArray cfgUtf8 = cfg.toUtf8();
     
-    // Create semaphore and callback context for synchronous operation
-    // Callback is only called in failure case
+    // Create callback context for synchronous createNode result.
+    // The context is kept in a pending map so late callbacks can be safely ignored.
     struct CallbackContext {
-        std::binary_semaphore* sem;
-        bool callbackInvoked;
+        std::binary_semaphore sem{0};
+        int callerRet{RET_ERR};
+        QString message;
     };
+
+    static std::mutex pendingMutex;
+    static std::unordered_map<void*, std::shared_ptr<CallbackContext>> pendingContexts;
+
+    auto callbackCtx = std::make_shared<CallbackContext>();
+    void* callbackKey = static_cast<void*>(callbackCtx.get());
+
+    {
+        std::lock_guard<std::mutex> lock(pendingMutex);
+        pendingContexts[callbackKey] = callbackCtx;
+    }
     
-    std::binary_semaphore sem(0);
-    CallbackContext ctx{&sem, false};
-    
-    // Lambda callback that will be called only on failure (when deliveryCtx is nullptr)
+    // Callback is expected in both success and error cases.
     auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
         qDebug() << "DeliveryModulePlugin::createNode callback called with ret:" << callerRet;
-        
-        CallbackContext* ctx = static_cast<CallbackContext*>(userData);
-        if (!ctx) {
-            qWarning() << "DeliveryModulePlugin::createNode callback: Invalid userData";
+
+        std::shared_ptr<CallbackContext> callbackCtx;
+        {
+            std::lock_guard<std::mutex> lock(pendingMutex);
+            auto it = pendingContexts.find(userData);
+            if (it == pendingContexts.end()) {
+                return;
+            }
+            callbackCtx = it->second;
+            pendingContexts.erase(it);
+        }
+
+        if (!callbackCtx) {
             return;
         }
-        
+
+        callbackCtx->callerRet = callerRet;
         if (msg && len > 0) {
-            QString message = QString::fromUtf8(msg, len);
-            qDebug() << "DeliveryModulePlugin::createNode callback message:" << message;
+            callbackCtx->message = QString::fromUtf8(msg, len);
+            qDebug() << "DeliveryModulePlugin::createNode callback message:" << callbackCtx->message;
         }
-        
-        ctx->callbackInvoked = true;
-        
+
         // Release semaphore to unblock the createNode method
-        ctx->sem->release();
+        callbackCtx->sem.release();
     };
     
     // Call logosdelivery_create_node with the configuration
-    // Important: Keep deliveryCtx assignment from the call
-    deliveryCtx = logosdelivery_create_node(cfgUtf8.constData(), callback, &ctx);
-    
-    // If deliveryCtx is nullptr, callback will be invoked with error details
-    if (!deliveryCtx) {
-        qDebug() << "DeliveryModulePlugin: Waiting for createNode error callback...";
-        
-        // Wait for callback to complete with timeout
-        if (!sem.try_acquire_for(CALLBACK_TIMEOUT)) {
-            qWarning() << "DeliveryModulePlugin: Timeout waiting for createNode callback";
-            return false;
+    // Important: Keep deliveryCtx assignment from the call,
+    // creating of the context is immediate and not depends on the callback.
+    deliveryCtx = logosdelivery_create_node(cfgUtf8.constData(), callback, callbackKey);
+
+    qDebug() << "DeliveryModulePlugin: Waiting for createNode callback...";
+
+    // Wait for callback result regardless of immediate pointer value.
+    // Callback ensures that the underlying node object is properly created.
+    if (!callbackCtx->sem.try_acquire_for(CALLBACK_TIMEOUT)) {
+        std::lock_guard<std::mutex> lock(pendingMutex);
+        pendingContexts.erase(callbackKey);
+
+        deliveryCtx = nullptr;
+
+        qWarning() << "DeliveryModulePlugin: Timeout waiting for createNode callback";
+        return false;
+    }
+
+    // Any issue happened during node creation means the context is destroyed and must not be user.
+    if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
+        if (!callbackCtx->message.isEmpty()) {
+            qWarning() << "DeliveryModulePlugin: createNode callback error:" << callbackCtx->message;
         }
-        
+
+        deliveryCtx = nullptr;
+
         qWarning() << "DeliveryModulePlugin: Failed to create Messaging context";
         return false;
     }
     
-    // Success case - deliveryCtx is valid, callback won't be called
+    // Success case - deliveryCtx is valid and callback returned RET_OK.
     qDebug() << "DeliveryModulePlugin: Messaging context created successfully";
     
     // Set up event callback

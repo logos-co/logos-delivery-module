@@ -23,6 +23,7 @@
   # Common CMake flags
   cmakeFlags = [ 
     "-GNinja"
+    "-DBUILD_TESTING=ON"
     "-DLOGOS_CPP_SDK_ROOT=${logosSdk}"
     "-DLOGOS_LIBLOGOS_ROOT=${logosLiblogos}"
     "-DLOGOS_DELIVERY_ROOT=${logosDelivery}"

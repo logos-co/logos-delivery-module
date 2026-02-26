@@ -8,6 +8,13 @@ pkgs.stdenv.mkDerivation {
   inherit src;
   inherit (common) nativeBuildInputs buildInputs cmakeFlags meta env;
 
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    ctest --output-on-failure
+    runHook postCheck
+  '';
+
   # Determine platform-specific library extension
   libdeliveryLib = if pkgs.stdenv.hostPlatform.isDarwin then "liblogosdelivery.dylib" else "liblogosdelivery.so";
   libpqPattern = if pkgs.stdenv.hostPlatform.isDarwin then "libpq*.dylib" else "libpq.so*";

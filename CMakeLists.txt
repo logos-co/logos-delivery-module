@@ -142,9 +142,9 @@ find_library(LIBLOGOSDELIVERY_PATH NAMES ${LIBLOGOSDELIVERY_NAMES} PATHS ${LIBLO
 
 # Plugin sources
 set(PLUGIN_SOURCES
-    delivery_module_plugin.cpp
-    delivery_module_plugin.h
-    delivery_module_interface.h
+    src/delivery_module_plugin.cpp
+    src/delivery_module_plugin.h
+    src/delivery_module_interface.h
 )
 
 # Add liblogos interface header
@@ -203,7 +203,7 @@ endif()
 
 # Include directories
 target_include_directories(delivery_module_plugin PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${LIBLOGOSDELIVERY_DIR}
 )
 
@@ -300,3 +300,82 @@ install(DIRECTORY "${PLUGINS_OUTPUT_DIR}/"
     DESTINATION ${CMAKE_INSTALL_DATADIR}/logos-delivery-module/generated
     OPTIONAL
 )
+
+include(CTest)
+
+if(BUILD_TESTING)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test)
+
+    add_executable(delivery_module_plugin_integration_test
+        test/test_create_node_integration.cpp
+        src/delivery_module_plugin.cpp
+        src/delivery_module_plugin.h
+        src/delivery_module_interface.h
+        src/api_call_handler.h
+        src/QExpected.h
+    )
+
+    target_include_directories(delivery_module_plugin_integration_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+    if(EXISTS "${LOGOS_DELIVERY_ROOT}/include/liblogosdelivery.h")
+        target_include_directories(delivery_module_plugin_integration_test PRIVATE ${LOGOS_DELIVERY_ROOT}/include)
+    elseif(EXISTS "${LOGOS_DELIVERY_ROOT}/liblogosdelivery/liblogosdelivery.h")
+        target_include_directories(delivery_module_plugin_integration_test PRIVATE ${LOGOS_DELIVERY_ROOT}/liblogosdelivery)
+    endif()
+
+    if(_liblogos_is_source)
+        target_include_directories(delivery_module_plugin_integration_test PRIVATE ${LOGOS_LIBLOGOS_ROOT})
+    else()
+        target_include_directories(delivery_module_plugin_integration_test PRIVATE ${LOGOS_LIBLOGOS_ROOT}/include)
+    endif()
+
+    if(_cpp_sdk_is_source)
+        target_include_directories(delivery_module_plugin_integration_test PRIVATE 
+            ${LOGOS_CPP_SDK_ROOT}/cpp
+            ${LOGOS_CPP_SDK_ROOT}/cpp/generated
+        )
+    else()
+        target_include_directories(delivery_module_plugin_integration_test PRIVATE 
+            ${LOGOS_CPP_SDK_ROOT}/include
+            ${LOGOS_CPP_SDK_ROOT}/include/cpp
+            ${LOGOS_CPP_SDK_ROOT}/include/core
+        )
+    endif()
+
+    target_link_libraries(delivery_module_plugin_integration_test PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::RemoteObjects
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+
+    if(NOT _cpp_sdk_is_source)
+        target_link_libraries(delivery_module_plugin_integration_test PRIVATE ${LOGOS_SDK_LIB})
+    else()
+        target_sources(delivery_module_plugin_integration_test PRIVATE
+            ${LOGOS_CPP_SDK_ROOT}/cpp/logos_api.cpp
+            ${LOGOS_CPP_SDK_ROOT}/cpp/logos_api_client.cpp
+            ${LOGOS_CPP_SDK_ROOT}/cpp/logos_api_consumer.cpp
+            ${LOGOS_CPP_SDK_ROOT}/cpp/logos_api_provider.cpp
+            ${LOGOS_CPP_SDK_ROOT}/cpp/token_manager.cpp
+            ${LOGOS_CPP_SDK_ROOT}/cpp/module_proxy.cpp
+        )
+    endif()
+
+    if(LIBLOGOSDELIVERY_PATH)
+        target_link_libraries(delivery_module_plugin_integration_test PRIVATE ${LIBLOGOSDELIVERY_PATH})
+
+        if(APPLE)
+            add_custom_command(TARGET delivery_module_plugin_integration_test POST_BUILD
+                COMMAND ${CMAKE_COMMAND}
+                    -DTEST_BIN=$<TARGET_FILE:delivery_module_plugin_integration_test>
+                    -DREAL_LIB=${LIBLOGOSDELIVERY_PATH}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix_liblogosdelivery_id.cmake
+                COMMENT "Rewriting liblogosdelivery install name for integration test runtime"
+            )
+        endif()
+    endif()
+
+    add_test(NAME delivery_module_plugin_integration_test COMMAND delivery_module_plugin_integration_test)
+endif()
