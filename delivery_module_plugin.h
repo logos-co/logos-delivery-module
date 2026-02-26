@@ -67,8 +67,8 @@ public:
     /**
      * @brief Creates a liblogosdelivery node from a NodeConfig JSON document.
      *
-     * The JSON is parsed by Nim-side `decodeNodeConfigFromJson` and maps to
-     * `NodeConfig` from `waku/api/api_conf.nim`.
+     * The JSON is parsed by logos-delivery (liblogosdelivery folder) side and maps to
+     * `NodeConfig` from `waku/api/api_conf.nim` (https://github.com/logos-messaging/logos-delivery).
      *
      * ## Top-level keys (`NodeConfig`)
      * - `mode` (`"Core" | "Edge"`, optional, default: `"Core"`)
@@ -80,7 +80,7 @@ public:
      * - `logFormat` (`"TEXT" | "JSON"`, optional, default: `"TEXT"`)
      *
      * ## `protocolsConfig` keys
-     * - `entryNodes` (array of string (in formats: enr, multiaddress), 
+     * - `entryNodes` (array of string (in formats: enrtree, multiaddress), 
      *                required when `protocolsConfig` is present)
      * - `staticStoreNodes` (array of string (in formats: enr, multiaddress), 
      *                      optional, default: `[]`)
@@ -89,7 +89,7 @@ public:
      *   - `numShardsInCluster` (number/uint16, required if object present)
      * - `messageValidation` (object, optional)
      *   - `maxMessageSize` (string, required if object present; e.g. `"150 KiB"`)
-     *   - `rlnConfig` (object or `null`, optional, default: `null`)
+     *   - `rlnConfig` Rate Limit Nullifier configuration (object or `null`, optional, default: `null`)
      *     - `contractAddress` (string, required if object present)
      *     - `chainId` (number/uint, required if object present)
      *     - `epochSizeSec` (number/uint64, required if object present)
@@ -160,7 +160,7 @@ public:
      * - `messageError` emitted in case module can't sent the message
      * - `messagePropagated` emitted if message has hit the network, you can expect delivery but 
      *                       module could not validate it yet.
-     * - `messageSent` emitted after message sending is validated by a network store node.
+     * - `messageSent` emitted after the sent message is validated by the network.
      * 
      * @param contentTopic Destination content topic.
      * @param payload Raw message bytes represented as QString; converted to UTF-8
