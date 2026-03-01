@@ -1,17 +1,20 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs, src }:
 
 pkgs.stdenv.mkDerivation {
   pname = "example-simple";
   version = "0.1";
 
-  # Source directory of the project
-  src = ./.;
+  # Disable default source handling
+  dontUnpack = true;
+
+  nativeBuildInputs = [
+    pkgs.qt6.wrapQtAppsNoGuiHook
+  ];
 
   # Dependencies
   buildInputs = [
     pkgs.qt6.qtbase
     pkgs.gcc
-    pkgs.make
   ];
 
   # Build the simple.cpp example
