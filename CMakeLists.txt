@@ -300,3 +300,7 @@ install(DIRECTORY "${PLUGINS_OUTPUT_DIR}/"
     DESTINATION ${CMAKE_INSTALL_DATADIR}/logos-delivery-module/generated
     OPTIONAL
 )
+
+# Include examples build
+include(examples/CMakesLists.txt)
+
