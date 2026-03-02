@@ -23,7 +23,8 @@ public:
     Q_INVOKABLE bool subscribe(const QString &contentTopic) override;
     Q_INVOKABLE bool unsubscribe(const QString &contentTopic) override;
     QString name() const override { return "delivery_module"; }
-    QString version() const override { return "1.0.0"; }
+    QString version() const;
+    Q_INVOKABLE QString my_version() const;
 
     // LogosAPI initialization
     Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);

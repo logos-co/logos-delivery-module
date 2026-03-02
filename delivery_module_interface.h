@@ -14,6 +14,7 @@ public:
     Q_INVOKABLE virtual QExpected<QString> send(const QString &contentTopic, const QString &payload) = 0;
     Q_INVOKABLE virtual bool subscribe(const QString &contentTopic) = 0;
     Q_INVOKABLE virtual bool unsubscribe(const QString &contentTopic) = 0;
+    Q_INVOKABLE virtual QString my_version() const = 0;
 
 signals:
     // for now this is required for events, later it might not be necessary if using a proxy

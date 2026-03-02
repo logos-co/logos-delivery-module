@@ -302,5 +302,5 @@ install(DIRECTORY "${PLUGINS_OUTPUT_DIR}/"
 )
 
 # Include examples build
-include(examples/CMakesLists.txt)
+include(examples/CMakeLists.txt)
 
