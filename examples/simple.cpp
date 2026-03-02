@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
         if (input == "exit") {
             break;
         } else if (!input.empty()) {
-            auto result = delivery->send("/simple-example/2/ivan/proto", QString::fromStdString(input));
+            auto result = delivery->send("/simple-example/2/delivery/proto", QString::fromStdString(input));
             if (!result.isErr())
                 qDebug() << "Send result:" << result.value();
             else
