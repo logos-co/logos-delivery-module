@@ -24,29 +24,23 @@
     {
       packages = forAllSystems ({ pkgs, logosSdk, logosLiblogos, logosDelivery }:
         let
-          # Common configuration
           common = import ./nix/default.nix { inherit pkgs logosSdk logosLiblogos logosDelivery; };
           src = ./.;
-          
-          # Library package (plugin + libcodex)
           lib = import ./nix/lib.nix { inherit pkgs common src logosDelivery; };
-          
-          # Include package (generated headers from plugin)
           include = import ./nix/header.nix { inherit pkgs common src lib logosSdk logosDelivery; };
-          
-          # Combined package
+          simple = import ./nix/examples.nix { inherit pkgs src logosSdk logosLiblogos logosDelivery; };
           combined = pkgs.symlinkJoin {
             name = "logos-delivery-module";
-            paths = [ lib include ];
+            paths = [ lib include simple ];
           };
         in
         {
-          # Individual outputs
           lib = lib;
           include = include;
-          
-          # Default package (combined)
           default = combined;
+
+          # Add new output
+          simple = simple;
         }
       );
 

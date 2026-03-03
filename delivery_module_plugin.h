@@ -22,8 +22,11 @@ public:
     Q_INVOKABLE QExpected<QString> send(const QString &contentTopic, const QString &payload) override;
     Q_INVOKABLE bool subscribe(const QString &contentTopic) override;
     Q_INVOKABLE bool unsubscribe(const QString &contentTopic) override;
+    Q_INVOKABLE QString getAvailableNodeInfoIDs() override;
+    Q_INVOKABLE QString getNodeInfo(const QString &contentTopic) override;
+    Q_INVOKABLE QString getAvailableConfigs() override;
     QString name() const override { return "delivery_module"; }
-    QString version() const override { return "1.0.0"; }
+    QString version() const;
 
     // LogosAPI initialization
     Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);

@@ -315,3 +315,72 @@ bool DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
     qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success: true";
     return true;
 }
+
+QString DeliveryModulePlugin::version() const {
+    QString moduleVersion = "1.0.0";
+    if (!deliveryCtx) {
+        qWarning() << "DeliveryModulePlugin: Cannot subscribe - context not initialized. Call createNode first.";
+        return moduleVersion + " (liblogosdelivery version unknown, context not initialized)";
+    }
+
+    auto attributeName = "Version";
+    auto liblogosDeliveryVersion = callApiRetValue<QString>(
+        "get_node_info",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx, attributeName));
+
+    if (liblogosDeliveryVersion.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Get node info failed getting version, reason:" <<
+            liblogosDeliveryVersion.error();
+        return moduleVersion + " (liblogosdelivery version unknown)";
+    }
+
+    const QString version = liblogosDeliveryVersion.value();
+    qDebug() << "DeliveryModulePlugin: Get node info completed for attribute:" <<
+        attributeName << ", with success: " << version;
+
+    return moduleVersion + " (liblogosdelivery version: " + version + ")";
+}
+
+QString DeliveryModulePlugin::getAvailableNodeInfoIDs() {
+    auto outcome = callApiRetValue<QString>(
+        "get_available_node_info_ids",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Get available node info IDs failed, reason:" << outcome.error();
+        return QString();
+    }
+
+    return outcome.value();
+}
+
+QString DeliveryModulePlugin::getNodeInfo(const QString &nodeInfoId) {
+    auto outcome = callApiRetValue<QString>(
+        "get_node_info",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx, nodeInfoId.toUtf8().constData()));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Get node info failed for ID:" << nodeInfoId <<
+            ", reason:" << outcome.error();
+        return QString();
+    }
+
+    return outcome.value();
+}
+
+QString DeliveryModulePlugin::getAvailableConfigs() {
+    auto outcome = callApiRetValue<QString>(
+        "get_available_configs",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_get_available_configs, deliveryCtx));
+
+    if (outcome.isErr()) {
+        qWarning() << "DeliveryModulePlugin: Get available configs failed, reason:" << outcome.error();
+        return QString();
+    }
+
+    return outcome.value();
+}
