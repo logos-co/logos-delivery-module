@@ -72,7 +72,7 @@ public:
      *
      * ## Top-level keys (`NodeConfig`)
      * - `mode` (`"Core" | "Edge"`, optional, default: `"Core"`)
-     * - `protocolsConfig` (object, optional, default: network preset)
+     * - `protocolsConfig` (object, optional, default: `TheWakuNetwork`) # Notice: about to change!
      * - `networkingConfig` (object, optional, default shown below)
      * - `ethRpcEndpoints` (array of string, optional, default: `[]`)
      * - `p2pReliability` (boolean, optional, default: `false`)
