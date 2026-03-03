@@ -183,7 +183,17 @@ public:
      */
     Q_INVOKABLE bool unsubscribe(const QString &contentTopic) override;
     Q_INVOKABLE QString getAvailableNodeInfoIDs() override;
-    Q_INVOKABLE QString getNodeInfo(const QString &contentTopic) override;
+
+    /**
+     * @brief Semantic version of this plugin implementation.
+     * @param nodeInfoId Identifier for the requested node info item.
+     * @return UTF-16 string containing UTF-8 serializable JSON data, or an empty string on error.
+     */
+    Q_INVOKABLE QString getNodeInfo(const QString &nodeInfoId) override;
+
+    /**
+     * @brief Information about the available configuration parameters to be used in `createNode`.
+     */
     Q_INVOKABLE QString getAvailableConfigs() override;
     QString name() const override { return "delivery_module"; }
     QString version() const;

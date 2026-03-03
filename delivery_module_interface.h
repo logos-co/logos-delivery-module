@@ -15,7 +15,7 @@ public:
     Q_INVOKABLE virtual bool subscribe(const QString &contentTopic) = 0;
     Q_INVOKABLE virtual bool unsubscribe(const QString &contentTopic) = 0;
     Q_INVOKABLE virtual QString getAvailableNodeInfoIDs() = 0;
-    Q_INVOKABLE virtual QString getNodeInfo(const QString &contentTopic) = 0;
+    Q_INVOKABLE virtual QString getNodeInfo(const QString &nodeInfoId) = 0;
     Q_INVOKABLE virtual QString getAvailableConfigs() = 0;
 
 signals:
