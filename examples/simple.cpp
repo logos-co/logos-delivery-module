@@ -92,6 +92,12 @@ int main(int argc, char *argv[])
 
     qDebug() << "Plugin loaded. Type a message to send, or 'exit' to quit.";
 
+    QString contentTopicOfInterest = "/simple-example/2/delivery/proto";
+    if (!delivery->subscribe(contentTopicOfInterest)) {
+        qDebug() << "Failed to subscribe to topic:" << contentTopicOfInterest;
+        return -1;
+    }
+
     // ------------------------
     // Interactive loop
     // ------------------------
@@ -103,7 +109,7 @@ int main(int argc, char *argv[])
         if (input == "exit") {
             break;
         } else if (!input.empty()) {
-            auto result = delivery->send("/simple-example/2/delivery/proto", QString::fromStdString(input));
+            auto result = delivery->send(contentTopicOfInterest, QString::fromStdString(input));
             if (!result.isErr())
                 qDebug() << "Send result:" << result.value();
             else
