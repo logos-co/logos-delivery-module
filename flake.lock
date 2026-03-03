@@ -122,17 +122,16 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1772226887,
-        "narHash": "sha256-8ZYbbjjhUvJ/TY+JUawNlfW3WWosoisAGvvPJy+URR8=",
-        "ref": "add-debug-api",
-        "rev": "e069167cdda1cf9aed5cd4ca42530f6b5048fb54",
-        "revCount": 2229,
+        "lastModified": 1772541165,
+        "narHash": "sha256-BqXn0MSuJqCB15PLQC5Riw6ah3GyS8XIMaFKM58Eamw=",
+        "ref": "refs/heads/master",
+        "rev": "09618a2656195f3c2d529e97d0447ec13d4f118a",
+        "revCount": 2231,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
-        "ref": "add-debug-api",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"

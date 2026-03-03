@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QCommandLineParser>
 #include <QString>
+#include <QStringList>
 #include <iostream>
 #include "../delivery_module_interface.h"
 
@@ -97,6 +98,38 @@ int main(int argc, char *argv[])
         qDebug() << "Failed to subscribe to topic:" << contentTopicOfInterest;
         return -1;
     }
+
+    qDebug() << "Subscribed to topic:" << contentTopicOfInterest;
+
+    // ------------------------
+    // Show available node info items
+    // ------------------------
+
+    qDebug() << "Retrieving all available node info IDs...";
+    QString nodeInfoIDs = delivery->getAvailableNodeInfoIDs();
+    qDebug() << "Available node info IDs:" << nodeInfoIDs;
+
+    // Remove "@[" at start and "]" at end
+    if (nodeInfoIDs.startsWith("@[") && nodeInfoIDs.endsWith("]")) {
+        nodeInfoIDs = nodeInfoIDs.mid(2, nodeInfoIDs.length() - 3);
+    }
+
+    QStringList configItems = nodeInfoIDs.split(",", Qt::SkipEmptyParts);
+
+    for (QString &item : configItems) {
+        item = item.trimmed();
+        qDebug() << "Retrieving node info for ID:" << item;
+        QString nodeInfo = delivery->getNodeInfo(item);
+        qDebug() << nodeInfo;
+        qDebug() << "-----------------------------";
+    }
+
+    // ------------------------
+    // Show available node info items
+    // ------------------------
+    qDebug() << "Retrieving available configs...";
+    QString availableConfigs = delivery->getAvailableConfigs();
+    qDebug() << "Available configs:" << availableConfigs;
 
     // ------------------------
     // Interactive loop
