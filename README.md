@@ -189,6 +189,11 @@ carries a `QVariantList data` with positional values:
   - `data[0]` (`QString`): request id
   - `data[1]` (`QString`): message hash
   - `data[2]` (`QString`): local timestamp (ISO-8601)
+- **`messageReceived`** – a message arrived on a subscribed topic
+  - `data[0]` (`QString`): message hash
+  - `data[1]` (`QString`): content topic
+  - `data[2]` (`QString`): payload (base64-encoded)
+  - `data[3]` (`QString`): timestamp (nanoseconds since epoch)
 - **`connectionStateChanged`** – node connectivity change
   - `data[0]` (`QString`): connection status
   - `data[1]` (`QString`): local timestamp (ISO-8601)

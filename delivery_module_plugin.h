@@ -34,6 +34,11 @@
  *   - `data[0]` (`QString`): request id
  *   - `data[1]` (`QString`): message hash
  *   - `data[2]` (`QString`): local timestamp (ISO-8601)
+ * - `messageReceived` (emitted when a message arrives on a subscribed topic)
+ *   - `data[0]` (`QString`): message hash
+ *   - `data[1]` (`QString`): content topic
+ *   - `data[2]` (`QString`): payload (base64-encoded)
+ *   - `data[3]` (`QString`): timestamp (nanoseconds since epoch)
  * - `connectionStateChanged`
  *   - `data[0]` (`QString`): connection status
  *   - `data[1]` (`QString`): local timestamp (ISO-8601)
@@ -42,6 +47,7 @@
  * - `message_sent` -> `messageSent`
  * - `message_error` -> `messageError`
  * - `message_propagated` -> `messagePropagated`
+ * - `message_received` -> `messageReceived`
  * - `connection_status_change` -> `connectionStateChanged`
  * 
  * As a general concept consider using proper content_topic format for your purpose.
