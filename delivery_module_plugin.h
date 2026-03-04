@@ -43,6 +43,9 @@
  * - `message_error` -> `messageError`
  * - `message_propagated` -> `messagePropagated`
  * - `connection_status_change` -> `connectionStateChanged`
+ * 
+ * As a general concept consider using proper content_topic format for your purpose.
+ * --> https://lip.logos.co/messaging/informational/23/topics.html#content-topics
  */
 class DeliveryModulePlugin : public QObject, public DeliveryModuleInterface
 {

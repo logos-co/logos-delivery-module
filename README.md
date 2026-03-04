@@ -144,6 +144,33 @@ Minimal example using the `logos.dev` preset:
 }
 ```
 
+### Content Topics
+
+Content topics identify message channels for publishing and subscribing. Use a
+properly structured content topic for your application following the format
+specified in
+[LIP-23: Topics](https://lip.logos.co/messaging/informational/23/topics.html#content-topics).
+
+Example: `"/myapp/1/chat/proto"`
+
+### Sending Messages (`send`)
+
+`send(contentTopic, payload)` accepts a content topic and a raw payload string.
+The plugin converts the payload to UTF-8 bytes, base64-encodes it, and wraps it
+in a JSON envelope before crossing the FFI boundary:
+
+```json
+{ "contentTopic": "<topic>", "payload": "<base64>", "ephemeral": false }
+```
+
+The call is synchronous and returns a **request id** on success. The actual
+network delivery is asynchronous — track results via the emitted events:
+
+- **`messageError`** – the module could not send the message.
+- **`messagePropagated`** – the message reached the network but is not yet
+  validated.
+- **`messageSent`** – the message has been confirmed by the network.
+
 ### Events
 
 Asynchronous events are emitted off-thread as Logos Plugin events. Each event
