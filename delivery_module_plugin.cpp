@@ -101,6 +101,16 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
             eventData << timestamp;
             plugin->emitEvent("messagePropagated", eventData);
             
+        } else if (eventType == "message_received") {
+            // MessageReceivedEvent: messageHash, message (WakuMessage)
+            QJsonObject msgObj = jsonObj["message"].toObject();
+            QVariantList eventData;
+            eventData << jsonObj["messageHash"].toString();
+            eventData << msgObj["contentTopic"].toString();
+            eventData << msgObj["payload"].toString();
+            eventData << QString::number(msgObj["timestamp"].toDouble(), 'f', 0);
+            plugin->emitEvent("messageReceived", eventData);
+
         } else if (eventType == "connection_status_change") {
             QVariantList eventData;
             eventData << jsonObj["connectionStatus"].toString();
