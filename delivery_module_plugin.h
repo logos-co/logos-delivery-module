@@ -65,66 +65,59 @@ public:
     virtual ~DeliveryModulePlugin();
 
     /**
-     * @brief Creates a liblogosdelivery node from a NodeConfig JSON document.
+     * @brief Creates a liblogosdelivery node from a WakuNodeConf JSON document.
      *
      * The JSON is parsed by logos-delivery (liblogosdelivery folder) side and maps to
-     * `NodeConfig` from `waku/api/api_conf.nim` (https://github.com/logos-messaging/logos-delivery).
+     * `WakuNodeConf` from `tools/confutils/cli_args.nim`
+     * (https://github.com/logos-messaging/logos-delivery).
      *
-     * ## Top-level keys (`NodeConfig`)
-     * - `mode` (`"Core" | "Edge"`, optional, default: `"Core"`)
-     * - `protocolsConfig` (object, optional, default: `TheWakuNetwork`) # Notice: about to change!
-     * - `networkingConfig` (object, optional, default shown below)
-     * - `ethRpcEndpoints` (array of string, optional, default: `[]`)
-     * - `p2pReliability` (boolean, optional, default: `false`)
-     * - `logLevel` (enum string, optional, default: `"INFO"`)
-     * - `logFormat` (`"TEXT" | "JSON"`, optional, default: `"TEXT"`)
+     * The configuration is a **flat** JSON object whose keys correspond to
+     * `WakuNodeConf` Nim field names (camelCase). Unknown keys are silently
+     * ignored. Every field has a built-in default, so only the values that
+     * differ from defaults need to be supplied.
      *
-     * ## `protocolsConfig` keys
-     * - `entryNodes` (array of string (in formats: enrtree, multiaddress), 
-     *                required when `protocolsConfig` is present)
-     * - `staticStoreNodes` (array of string (in formats: enr, multiaddress), 
-     *                      optional, default: `[]`)
-     * - `clusterId` (number/uint16, required when `protocolsConfig` is present)
-     * - `autoShardingConfig` (object, optional)
-     *   - `numShardsInCluster` (number/uint16, required if object present)
-     * - `messageValidation` (object, optional)
-     *   - `maxMessageSize` (string, required if object present; e.g. `"150 KiB"`)
-     *   - `rlnConfig` Rate Limit Nullifier configuration (object or `null`, optional, default: `null`)
-     *     - `contractAddress` (string, required if object present)
-     *     - `chainId` (number/uint, required if object present)
-     *     - `epochSizeSec` (number/uint64, required if object present)
+     * ## Commonly used keys
+     * | Key                  | Type             | Default    | Description                                 |
+     * |----------------------|------------------|------------|---------------------------------------------|
+     * | `mode`               | string           | `"noMode"` | `"Core"`, `"Edge"`, or `"noMode"`           |
+     * | `preset`             | string           | `""`       | Network preset (`"twn"`, `"logos.dev"`, …)  |
+     * | `clusterId`          | number (uint16)  | `0`        | Cluster identifier                          |
+     * | `entryNodes`         | array of string  | `[]`       | Bootstrap peers (enrtree / multiaddress)    |
+     * | `relay`              | boolean          | `false`    | Enable relay protocol                       |
+     * | `rlnRelay`           | boolean          | `false`    | Enable RLN rate-limit nullifier             |
+     * | `tcpPort`            | number (uint16)  | `60000`    | P2P TCP listen port                         |
+     * | `numShardsInNetwork` | number (uint16)  | `1`        | Auto-sharding shard count                   |
+     * | `logLevel`           | string           | `"INFO"`   | `"TRACE"`, `"DEBUG"`, `"INFO"`, `"WARN"`, … |
+     * | `logFormat`          | string           | `"TEXT"`   | `"TEXT"` or `"JSON"`                        |
+     * | `maxMessageSize`     | string           | `"150KiB"` | Maximum message payload size                |
      *
-     * ## `networkingConfig` keys
-     * - `listenIpv4` (string IPv4, required if object present)
-     * - `p2pTcpPort` (number/uint16, required if object present)
-     * - `discv5UdpPort` (number/uint16, required if object present)
+     * ## Presets
+     * Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and
+     * other network-specific defaults automatically. Individual keys supplied
+     * alongside a preset override the preset values.
+     * - `"twn"` – The RLN-protected Waku Network (cluster 1).
+     * - `"logos.dev"` – Logos Dev Network (cluster 2, mix enabled,
+     *   p2pReliability on, 8 auto-shards, built-in bootstrap nodes).
      *
-     * @note Unknown keys at any level are rejected by the decoder.
-     * @note Omitting `protocolsConfig` entirely is valid and uses the preset.
-     * @note If `protocolsConfig` is present, both `entryNodes` and `clusterId`
-     *       must be provided.
+     * Minimal `logos.dev` example:
+     * @code{.json}
+     * {
+     *   "logLevel": "INFO",
+     *   "mode": "Core",
+     *   "preset": "logos.dev"
+     * }
+     * @endcode
      *
-     * Example:
+     * Full override example:
      * @code{.json}
      * {
      *   "mode": "Core",
-     *   "protocolsConfig": {
-     *     "entryNodes": ["enrtree://TREE@nodes.example.com"],
-     *     "staticStoreNodes": [],
-     *     "clusterId": 1,
-     *     "autoShardingConfig": { "numShardsInCluster": 8 },
-     *     "messageValidation": {
-     *       "maxMessageSize": "150 KiB",
-     *       "rlnConfig": null
-     *     }
-     *   },
-     *   "networkingConfig": {
-     *     "listenIpv4": "0.0.0.0",
-     *     "p2pTcpPort": 60000,
-     *     "discv5UdpPort": 9000
-     *   },
-     *   "ethRpcEndpoints": [],
-     *   "p2pReliability": false,
+     *   "clusterId": 42,
+     *   "entryNodes": ["enrtree://TREE@nodes.example.com"],
+     *   "relay": true,
+     *   "tcpPort": 60000,
+     *   "numShardsInNetwork": 8,
+     *   "maxMessageSize": "150KiB",
      *   "logLevel": "INFO",
      *   "logFormat": "TEXT"
      * }
@@ -195,7 +188,9 @@ public:
      * @brief Information about the available configuration parameters to be used in `createNode`.
      */
     Q_INVOKABLE QString getAvailableConfigs() override;
+
     QString name() const override { return "delivery_module"; }
+
     QString version() const;
 
     /**
