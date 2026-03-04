@@ -122,10 +122,10 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1772610727,
+        "lastModified": 1772614128,
         "narHash": "sha256-VdCFKJb+xG/YxslYpiFOYISc6wo5CUgiF6UVxUNTb64=",
         "ref": "refs/heads/master",
-        "rev": "91c48fa2a7efe997d81df4bd7ad72a3ff5dc4fff",
+        "rev": "0ad55159b39ed74ba6b88b5a9d72db766b4b0f08",
         "revCount": 2234,
         "submodules": true,
         "type": "git",
