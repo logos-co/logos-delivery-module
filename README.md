@@ -4,6 +4,8 @@ Wrap LogosMessaging API (liblogosdelivery) and make it available as a Logos Core
 
 This module provides high-level message delivery capabilities through the liblogosdelivery interface from [logos-delivery](https://github.com/logos-messaging/logos-delivery), packaged as a Logos module plugin compatible with logos-core.
 
+Full API documentation is in [`src/delivery_module_plugin.h`](src/delivery_module_plugin.h) (`DeliveryModulePlugin`).
+
 ## How to Build
 
 ### Using Nix (Recommended)
@@ -13,17 +15,14 @@ This module provides high-level message delivery capabilities through the liblog
 ```bash
 # Build everything (default)
 nix build
-
-# Or explicitly
-nix build '.#default'
 ```
 
-**Current Status**: The build will compile the plugin successfully but fail at the install phase when looking for liblogosdelivery.dylib, as it's not yet available from logos-delivery.
-
-The result will include (once liblogosdelivery is available):
-- `/lib/logos/modules/delivery_module_plugin.dylib` (or `.so` on Linux) - The Delivery module plugin
-- Symlink to `liblogosdelivery.dylib` (or `.so` on Linux) from logos-delivery
-- `/share/logos-delivery-module/metadata.json` - Module metadata
+The result will include:
+- `/lib/delivery_module_plugin.dylib` (or `.so` on Linux) - The Delivery module plugin
+- `/lib/liblogosdelivery.dylib` (or `.so` on linux) - The logos-delivery library
+- `/lib/librln.dylib` (or `.so` in linux) - Zerokit's RLN library
+- `/lib/libpq.dylib` (or `.so` on Linux) - PostgreSQL runtime library
+- `/lib/libpq.5.dylib` (or `.so.5` on Linux)
 
 #### Build Individual Components
 
@@ -61,16 +60,13 @@ When built with Nix, the module produces:
 
 ```
 result/
-├── lib/
-│   ├── liblogosdelivery.dylib        # Logos Messaging library (symlinked)
-│   └── delivery_module_plugin.dylib  # Logos module plugin
-└── include/
-    ├── delivery_module_plugin.h      # Generated API header
-    └── delivery_module_plugin.cpp    # Generated API implementation
-    └── liblogosdelivery.h            # Header for liblogosdelivery
+└── lib/
+    ├── delivery_module_plugin.dylib  # or .so on Linux — Logos module plugin
+    ├── liblogosdelivery.dylib
+    ├── librln.dylib
+    ├── libpq.dylib                   # or .so on Linux — PostgreSQL runtime
+    └── libpq.5.dylib                 # or .so.5 on Linux
 ```
-
-Both libraries must remain in the same directory, as `delivery_module_plugin.dylib` is configured with `@loader_path` to find `liblogosdelivery.dylib` relative to itself.
 
 ### Requirements
 
@@ -84,7 +80,8 @@ Both libraries must remain in the same directory, as `delivery_module_plugin.dyl
 - Qt6 Remote Objects (qtremoteobjects)
 - logos-liblogos (provided via Nix)
 - logos-cpp-sdk (provided via Nix)
-- logos-delivery with liblogosdelivery target (provided via Nix)
+- logos-delivery / liblogosdelivery — target (provided via Nix)
+- PostgreSQL (libpq) — runtime dependency bundled by the Nix build
 
 All dependencies are automatically handled by the Nix flake configuration.
 
@@ -235,14 +232,11 @@ carries a `QVariantList data` with positional values:
 ### Local Development
 
 ```bash
-# Enter development shell
+# Enter development shell (exports LOGOS_MODULE_BUILDER_ROOT and all other deps)
 nix develop
 
-# Now you have access to all build tools and dependencies
-cmake -B build -S . -GNinja \
-  -DLOGOS_CPP_SDK_ROOT=$LOGOS_CPP_SDK_ROOT \
-  -DLOGOS_LIBLOGOS_ROOT=$LOGOS_LIBLOGOS_ROOT \
-  -DLOGOS_DELIVERY_ROOT=$LOGOS_DELIVERY_ROOT
+# Configure — env vars are exported automatically by the dev shell
+cmake -B build -S . -GNinja
 
 # Build
 ninja -C build
