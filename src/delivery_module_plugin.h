@@ -6,6 +6,7 @@
 #include "delivery_module_interface.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
+#include "logos_types.h"
 
 /**
  * @brief Concrete Qt plugin implementing the delivery messaging module.
@@ -137,19 +138,19 @@ public:
      * @return `true` if context creation succeeds and callback returns `RET_OK`,
      *         otherwise `false`.
      */
-    Q_INVOKABLE LogosResult createNode(const QString &cfg) override;
+    Q_INVOKABLE QVariant createNode(const QString &cfg) override;
 
     /**
      * @brief Starts the delivery node.
      * @return `true` on success; `false` when no context exists or start fails.
      */
-    Q_INVOKABLE LogosResult start() override;
+    Q_INVOKABLE QVariant start() override;
 
     /**
      * @brief Stops the delivery node.
      * @return `true` on success; `false` when no context exists or stop fails.
      */
-    Q_INVOKABLE LogosResult stop() override;
+    Q_INVOKABLE QVariant stop() override;
 
     /**
      * @brief Sends a message over the active node.
@@ -170,34 +171,34 @@ public:
      *                bytes and base64-encoded before crossing the FFI boundary.
      * @return Success with request id, or error details.
      */
-    Q_INVOKABLE LogosResult send(const QString &contentTopic, const QString &payload) override;
+    Q_INVOKABLE QVariant send(const QString &contentTopic, const QString &payload) override;
 
     /**
      * @brief Subscribes to the supplied content topic.
      * @param contentTopic Topic identifier.
      * @return `true` when subscribed successfully, otherwise `false`.
      */
-    Q_INVOKABLE LogosResult subscribe(const QString &contentTopic) override;
+    Q_INVOKABLE QVariant subscribe(const QString &contentTopic) override;
 
     /**
      * @brief Unsubscribes from the supplied content topic.
      * @param contentTopic Topic identifier.
      * @return `true` when unsubscribed successfully, otherwise `false`.
      */
-    Q_INVOKABLE LogosResult unsubscribe(const QString &contentTopic) override;
-    Q_INVOKABLE LogosResult getAvailableNodeInfoIDs() override;
+    Q_INVOKABLE QVariant unsubscribe(const QString &contentTopic) override;
+    Q_INVOKABLE QVariant getAvailableNodeInfoIDs() override;
 
     /**
      * @brief Semantic version of this plugin implementation.
      * @param nodeInfoId Identifier for the requested node info item.
      * @return UTF-16 string containing UTF-8 serializable JSON data, or an empty string on error.
      */
-    Q_INVOKABLE LogosResult getNodeInfo(const QString &nodeInfoId) override;
+    Q_INVOKABLE QVariant getNodeInfo(const QString &nodeInfoId) override;
 
     /**
      * @brief Information about the available configuration parameters to be used in `createNode`.
      */
-    Q_INVOKABLE LogosResult getAvailableConfigs() override;
+    Q_INVOKABLE QVariant getAvailableConfigs() override;
 
     QString name() const override { return "delivery_module"; }
 

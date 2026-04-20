@@ -17,6 +17,16 @@ extern "C" {
 #include <liblogosdelivery.h>
 }
 
+static QVariant logosResultToJson(const LogosResult& r) {
+    QJsonObject obj;
+    obj["success"] = r.success;
+    if (r.value.isValid() && !r.value.isNull())
+        obj["value"] = QJsonValue::fromVariant(r.value);
+    if (r.error.isValid() && !r.error.isNull())
+        obj["error"] = QJsonValue::fromVariant(r.error);
+    return QVariant(QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)));
+}
+
 DeliveryModulePlugin::DeliveryModulePlugin() : deliveryCtx(nullptr)
 {
     qDebug() << "DeliveryModulePlugin: Initializing...";
@@ -149,13 +159,13 @@ void DeliveryModulePlugin::initLogos(LogosAPI* logosAPIInstance) {
     logosAPI = logosAPIInstance;
 }
 
-LogosResult DeliveryModulePlugin::createNode(const QString &cfg)
+QVariant DeliveryModulePlugin::createNode(const QString &cfg)
 {
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
 
     if (deliveryCtx != nullptr) {
         qWarning() << "DeliveryModulePlugin: createNode rejected - context already initialized";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
 
     qDebug() << "DeliveryModulePlugin::createNode called with cfg:" << cfg;
@@ -227,7 +237,7 @@ LogosResult DeliveryModulePlugin::createNode(const QString &cfg)
         deliveryCtx = nullptr;
 
         qWarning() << "DeliveryModulePlugin: Timeout waiting for createNode callback";
-        return {false, QVariant(), QStringLiteral("Timeout waiting for createNode callback")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Timeout waiting for createNode callback")});
     }
 
     // Any issue happened during node creation means the context is destroyed and must not be user.
@@ -239,26 +249,26 @@ LogosResult DeliveryModulePlugin::createNode(const QString &cfg)
         deliveryCtx = nullptr;
 
         qWarning() << "DeliveryModulePlugin: Failed to create Delivery context";
-        return {false, QVariant(), QStringLiteral("Failed to create Delivery context")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Failed to create Delivery context")});
     }
-    
+
     // Success case - deliveryCtx is valid and callback returned RET_OK.
     qDebug() << "DeliveryModulePlugin: Delivery context created successfully";
-    
+
     // Set up event callback
     logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
-    return {true, {}};
+    return logosResultToJson({true, {}});
 }
 
-LogosResult DeliveryModulePlugin::start()
+QVariant DeliveryModulePlugin::start()
 {
     qDebug() << "DeliveryModulePlugin::start called";
     
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot start Delivery - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
-    
+
     auto outcome = callApiRetVoid(
         "start",
         CALLBACK_TIMEOUT,
@@ -269,18 +279,18 @@ LogosResult DeliveryModulePlugin::start()
     }
 
     qDebug() << "DeliveryModulePlugin: Delivery start completed with success";
-    return outcome;
+    return logosResultToJson(outcome);
 }
 
-LogosResult DeliveryModulePlugin::stop()
+QVariant DeliveryModulePlugin::stop()
 {
     qDebug() << "DeliveryModulePlugin::stop called";
     
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot stop Delivery - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
-    
+
     auto outcome = callApiRetVoid(
         "stop",
         CALLBACK_TIMEOUT,
@@ -291,16 +301,16 @@ LogosResult DeliveryModulePlugin::stop()
     }
 
     qDebug() << "DeliveryModulePlugin: Delivery stop completed with success";
-    return outcome;
+    return logosResultToJson(outcome);
 }
-LogosResult DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload)
+QVariant DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload)
 {
     qDebug() << "DeliveryModulePlugin::send called with contentTopic:" << contentTopic;
     qDebug() << "DeliveryModulePlugin::send payload:" << payload;
 
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot send message - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
 
     // Construct JSON message according to logosdelivery_send API
@@ -324,21 +334,21 @@ LogosResult DeliveryModulePlugin::send(const QString &contentTopic, const QStrin
 
     const QString responseMessage = outcome.getString();
     qDebug() << "DeliveryModulePlugin: Send initiated for topic:" << contentTopic << ", with success, requestId: " << responseMessage;
-    return outcome;
+    return logosResultToJson(outcome);
 }
 
-LogosResult DeliveryModulePlugin::subscribe(const QString &contentTopic)
+QVariant DeliveryModulePlugin::subscribe(const QString &contentTopic)
 {
     qDebug() << "DeliveryModulePlugin::subscribe called with contentTopic:" << contentTopic;
     
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot subscribe - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
-    
+
     // Convert QString to UTF-8 byte array
     QByteArray topicUtf8 = contentTopic.toUtf8();
-    
+
     auto outcome = callApiRetVoid(
         "subscribe",
         CALLBACK_TIMEOUT,
@@ -349,21 +359,21 @@ LogosResult DeliveryModulePlugin::subscribe(const QString &contentTopic)
     }
 
     qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success";
-    return outcome;
+    return logosResultToJson(outcome);
 }
 
-LogosResult DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
+QVariant DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
 {
     qDebug() << "DeliveryModulePlugin::unsubscribe called with contentTopic:" << contentTopic;
     
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot unsubscribe - context not initialized.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
-    
+
     // Convert QString to UTF-8 byte array
     QByteArray topicUtf8 = contentTopic.toUtf8();
-    
+
     auto outcome = callApiRetVoid(
         "unsubscribe",
         CALLBACK_TIMEOUT,
@@ -374,7 +384,7 @@ LogosResult DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
     }
 
     qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success";
-    return outcome;
+    return logosResultToJson(outcome);
 }
 
 QString DeliveryModulePlugin::version() const {
@@ -403,13 +413,13 @@ QString DeliveryModulePlugin::version() const {
     return moduleVersion + " (liblogosdelivery version: " + version + ")";
 }
 
-LogosResult DeliveryModulePlugin::getAvailableNodeInfoIDs() {
+QVariant DeliveryModulePlugin::getAvailableNodeInfoIDs() {
     
     qDebug() << "DeliveryModulePlugin::getAvailableNodeInfoIDs called";
 
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot get available node info IDs - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
     auto outcome = callApiRetValue(
         "get_available_node_info_ids",
@@ -419,15 +429,15 @@ LogosResult DeliveryModulePlugin::getAvailableNodeInfoIDs() {
     if (!outcome.success) {
         qWarning() << "DeliveryModulePlugin: Get available node info IDs failed, reason:" << outcome.getError();
     }
-    return outcome;
+    return logosResultToJson(outcome);
 }
 
-LogosResult DeliveryModulePlugin::getNodeInfo(const QString &nodeInfoId) {
+QVariant DeliveryModulePlugin::getNodeInfo(const QString &nodeInfoId) {
     qDebug() << "DeliveryModulePlugin::getNodeInfo called with nodeInfoId:" << nodeInfoId;
 
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot get node info - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
     auto outcome = callApiRetValue(
         "get_node_info",
@@ -439,15 +449,15 @@ LogosResult DeliveryModulePlugin::getNodeInfo(const QString &nodeInfoId) {
             ", reason:" << outcome.getError();
     }
 
-    return outcome;
+    return logosResultToJson(outcome);
 }
 
-LogosResult DeliveryModulePlugin::getAvailableConfigs() {
+QVariant DeliveryModulePlugin::getAvailableConfigs() {
     qDebug() << "DeliveryModulePlugin::getAvailableConfigs called";
 
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot get available configs - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        return logosResultToJson({false, QVariant(), QStringLiteral("Context not initialized")});
     }
     auto outcome = callApiRetValue(
         "get_available_configs",
@@ -458,5 +468,5 @@ LogosResult DeliveryModulePlugin::getAvailableConfigs() {
         qWarning() << "DeliveryModulePlugin: Get available configs failed, reason:" << outcome.getError();
     }
 
-    return outcome;
+    return logosResultToJson(outcome);
 }
