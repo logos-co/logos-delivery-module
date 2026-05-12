@@ -11,7 +11,7 @@ public:
     Q_INVOKABLE virtual LogosResult createNode(const QString &cfg) = 0;
     Q_INVOKABLE virtual LogosResult start() = 0;
     Q_INVOKABLE virtual LogosResult stop() = 0;
-    Q_INVOKABLE virtual LogosResult send(const QString &contentTopic, const QString &payload) = 0;
+    Q_INVOKABLE virtual LogosResult send(const QString &contentTopic, const QByteArray &payload) = 0;
     Q_INVOKABLE virtual LogosResult subscribe(const QString &contentTopic) = 0;
     Q_INVOKABLE virtual LogosResult unsubscribe(const QString &contentTopic) = 0;
     Q_INVOKABLE virtual LogosResult getAvailableNodeInfoIDs() = 0;

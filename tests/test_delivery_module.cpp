@@ -108,7 +108,7 @@ LOGOS_TEST(send_fails_without_createNode) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModulePlugin plugin;
 
-    LogosResult result = plugin.send("/test/1/delivery/proto", "hello");
+    LogosResult result = plugin.send("/test/1/delivery/proto", QByteArray("hello"));
     LOGOS_ASSERT_FALSE(result.success);
 }
 
@@ -117,7 +117,7 @@ LOGOS_TEST(send_succeeds_and_returns_request_id) {
     auto* plugin = createInitializedPlugin(t);
 
     t.mockCFunction("logosdelivery_send").returns("req-id-abc123");
-    LogosResult result = plugin->send("/test/1/delivery/proto", "hello world");
+    LogosResult result = plugin->send("/test/1/delivery/proto", QByteArray("hello world"));
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.getString().toStdString(), std::string("req-id-abc123"));
@@ -126,12 +126,12 @@ LOGOS_TEST(send_succeeds_and_returns_request_id) {
     delete plugin;
 }
 
-LOGOS_TEST(send_calls_ffi_with_base64_encoded_payload) {
+LOGOS_TEST(send_calls_ffi_with_byte_array_payload) {
     auto t = LogosTestContext("delivery_module");
     auto* plugin = createInitializedPlugin(t);
 
     t.mockCFunction("logosdelivery_send").returns("req-id-xyz");
-    LogosResult result = plugin->send("/test/1/delivery/proto", "test-payload");
+    LogosResult result = plugin->send("/test/1/delivery/proto", QByteArray("test-payload"));
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_send"), 1);
@@ -144,7 +144,7 @@ LOGOS_TEST(send_returns_error_on_ffi_failure) {
     auto* plugin = createInitializedPlugin(t);
 
     DeliveryModulePlugin pluginNoCtx;
-    LogosResult failResult = pluginNoCtx.send("/topic", "payload");
+    LogosResult failResult = pluginNoCtx.send("/topic", QByteArray("payload"));
     LOGOS_ASSERT_FALSE(failResult.success);
     LOGOS_ASSERT_FALSE(failResult.getError<QString>().isEmpty());
 

@@ -38,7 +38,7 @@
  * - `messageReceived` (emitted when a message arrives on a subscribed topic)
  *   - `data[0]` (`QString`): message hash
  *   - `data[1]` (`QString`): content topic
- *   - `data[2]` (`QString`): payload (base64-encoded)
+ *   - `data[2]` (`QByteArray`): payload (raw bytes)
  *   - `data[3]` (`QString`): timestamp (nanoseconds since epoch)
  * - `connectionStateChanged`
  *   - `data[0]` (`QString`): connection status
@@ -166,11 +166,10 @@ public:
      * - `messageSent` emitted after the sent message is validated by the network.
      * 
      * @param contentTopic Destination content topic.
-     * @param payload Raw message bytes represented as QString; converted to UTF-8
-     *                bytes and base64-encoded before crossing the FFI boundary.
+     * @param payload Raw message bytes; base64-encoded before crossing the FFI boundary.
      * @return Success with request id, or error details.
      */
-    Q_INVOKABLE LogosResult send(const QString &contentTopic, const QString &payload) override;
+    Q_INVOKABLE LogosResult send(const QString &contentTopic, const QByteArray &payload) override;
 
     /**
      * @brief Subscribes to the supplied content topic.

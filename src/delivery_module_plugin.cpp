@@ -112,8 +112,6 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
             eventData << jsonObj["messageHash"].toString();
             eventData << msgObj["contentTopic"].toString();
 
-            // The waku API returns payload as a JSON byte array (e.g. [106,106,106,106]).
-            // Convert it to a base64 string to match the documented event contract.
             QJsonValue payloadValue = msgObj["payload"];
             if (payloadValue.isArray()) {
                 QJsonArray payloadArray = payloadValue.toArray();
@@ -122,9 +120,9 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
                 for (const QJsonValue& val : payloadArray) {
                     payloadBytes.append(static_cast<char>(val.toInt()));
                 }
-                eventData << QString::fromLatin1(payloadBytes.toBase64());
+                eventData << payloadBytes;
             } else {
-                eventData << payloadValue.toString();
+                eventData << QByteArray::fromBase64(payloadValue.toString().toLatin1());
             }
 
             eventData << QString::number(msgObj["timestamp"].toDouble(), 'f', 0);
@@ -293,10 +291,9 @@ LogosResult DeliveryModulePlugin::stop()
     qDebug() << "DeliveryModulePlugin: Delivery stop completed with success";
     return outcome;
 }
-LogosResult DeliveryModulePlugin::send(const QString &contentTopic, const QString &payload)
+LogosResult DeliveryModulePlugin::send(const QString &contentTopic, const QByteArray &payload)
 {
     qDebug() << "DeliveryModulePlugin::send called with contentTopic:" << contentTopic;
-    qDebug() << "DeliveryModulePlugin::send payload:" << payload;
 
     if (!deliveryCtx) {
         qWarning() << "DeliveryModulePlugin: Cannot send message - context not initialized. Call createNode first.";
@@ -307,7 +304,7 @@ LogosResult DeliveryModulePlugin::send(const QString &contentTopic, const QStrin
     // The payload should be base64-encoded as per the API spec
     QJsonObject messageObj;
     messageObj["contentTopic"] = contentTopic;
-    messageObj["payload"] = QString::fromUtf8(payload.toUtf8().toBase64());
+    messageObj["payload"] = QString::fromUtf8(payload.toBase64());
     messageObj["ephemeral"] = false;
 
     QJsonDocument doc(messageObj);
