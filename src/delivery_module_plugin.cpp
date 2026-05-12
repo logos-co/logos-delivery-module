@@ -78,7 +78,7 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
         
         QJsonObject jsonObj = doc.object();
         QString eventType = jsonObj["eventType"].toString();
-        QString timestamp = QDateTime::currentDateTime().toString(Qt::ISODate);
+        qint64 timestamp = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch() * Q_INT64_C(1000000);
         
         if (eventType == "message_sent") {
             // MessageSentEvent: requestId, messageHash
@@ -125,7 +125,7 @@ void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t
                 eventData << QByteArray::fromBase64(payloadValue.toString().toLatin1());
             }
 
-            eventData << QString::number(msgObj["timestamp"].toDouble(), 'f', 0);
+            eventData << static_cast<qint64>(msgObj["timestamp"].toDouble());
             plugin->emitEvent("messageReceived", eventData);
 
         } else if (eventType == "connection_status_change") {
