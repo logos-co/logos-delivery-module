@@ -96,4 +96,10 @@ int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_callback cb
     return RET_OK;
 }
 
+int logosdelivery_query_store(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*jsonQuery*/, const char* /*peerAddr*/, int /*timeoutMs*/) {
+    LOGOS_CMOCK_RECORD("logosdelivery_query_store");
+    invokeOk("logosdelivery_query_store", cb, userData);
+    return RET_OK;
+}
+
 } // extern "C"

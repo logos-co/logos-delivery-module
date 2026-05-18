@@ -14,6 +14,7 @@ public:
     Q_INVOKABLE virtual LogosResult send(const QString &contentTopic, const QByteArray &payload) = 0;
     Q_INVOKABLE virtual LogosResult subscribe(const QString &contentTopic) = 0;
     Q_INVOKABLE virtual LogosResult unsubscribe(const QString &contentTopic) = 0;
+    Q_INVOKABLE virtual LogosResult queryStore(const QString &jsonQuery, const QString &peerAddr, int timeoutMs) = 0;
     Q_INVOKABLE virtual LogosResult getAvailableNodeInfoIDs() = 0;
     Q_INVOKABLE virtual LogosResult getNodeInfo(const QString &nodeInfoId) = 0;
     Q_INVOKABLE virtual LogosResult getAvailableConfigs() = 0;

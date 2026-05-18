@@ -16,7 +16,7 @@
  * Lifecycle contract:
  * - call @ref createNode exactly once per context
  * - call @ref start before message operations
- * - use @ref subscribe / @ref send / @ref unsubscribe as needed
+ * - use @ref subscribe / @ref send / @ref unsubscribe / @ref queryStore as needed
  * - call @ref stop before shutdown
  * Notice all of these calls are synchronous.
  * 
@@ -184,6 +184,19 @@ public:
      * @return `true` when unsubscribed successfully, otherwise `false`.
      */
     Q_INVOKABLE LogosResult unsubscribe(const QString &contentTopic) override;
+
+    /**
+     * @brief Queries a peer via Waku Store (historical messages).
+     *
+     * Forwards to ``logosdelivery_query_store`` in liblogosdelivery. ``jsonQuery`` is the
+     * UTF-8 Store query JSON (same shape as ``library/kernel_api/protocols/store_api``).
+     * ``peerAddr`` is comma-separated multiaddrs understood by logos-delivery peer parsing.
+     * ``timeoutMs`` bounds how long the module waits for the FFI callback; values ``<= 0`` use 30 seconds.
+     *
+     * On success, ``LogosResult`` data is a QString holding UTF-8 JSON (hex-encoded store response).
+     */
+    Q_INVOKABLE LogosResult queryStore(const QString &jsonQuery, const QString &peerAddr, int timeoutMs) override;
+
     Q_INVOKABLE LogosResult getAvailableNodeInfoIDs() override;
 
     /**

@@ -187,6 +187,43 @@ LOGOS_TEST(unsubscribe_succeeds_with_context) {
     delete plugin;
 }
 
+// queryStore
+
+LOGOS_TEST(queryStore_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModulePlugin plugin;
+
+    LogosResult result = plugin.queryStore(R"({"requestId":"r1","includeData":false,"paginationForward":true})", "/ip4/127.0.0.1/tcp/60000/p2p/16Uiu", 5000);
+    LOGOS_ASSERT_FALSE(result.success);
+}
+
+LOGOS_TEST(queryStore_succeeds_with_context) {
+    auto t = LogosTestContext("delivery_module");
+    auto* plugin = createInitializedPlugin(t);
+
+    t.mockCFunction("logosdelivery_query_store").returns(R"({"mock":"store-response"})");
+    LogosResult result = plugin->queryStore(R"({"requestId":"r1","includeData":false,"paginationForward":true})", "/ip4/127.0.0.1/tcp/60000/p2p/16Uiu", 5000);
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_EQ(result.getString().toStdString(), std::string(R"({"mock":"store-response"})"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_query_store"));
+
+    delete plugin;
+}
+
+LOGOS_TEST(queryStore_uses_default_timeout_when_non_positive) {
+    auto t = LogosTestContext("delivery_module");
+    auto* plugin = createInitializedPlugin(t);
+
+    t.mockCFunction("logosdelivery_query_store").returns("{}");
+    LogosResult result = plugin->queryStore("{}", "/ip4/127.0.0.1/tcp/60000/p2p/16Uiu", 0);
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_query_store"), 1);
+
+    delete plugin;
+}
+
 // getAvailableNodeInfoIDs
 
 LOGOS_TEST(getAvailableNodeInfoIDs_returns_mocked_string) {

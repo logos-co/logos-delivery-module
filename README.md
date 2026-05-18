@@ -95,6 +95,10 @@ The delivery module provides the following API methods (all synchronous, all ret
 - `send(contentTopic: QString, payload: QString)` - Send a message (returns a request id)
 - `subscribe(contentTopic: QString)` - Subscribe to receive messages on a topic
 - `unsubscribe(contentTopic: QString)` - Unsubscribe from a topic
+- `queryStore(jsonQuery: QString, peerAddr: QString, timeoutMs: int)` -
+  Query historical messages via Waku Store (`jsonQuery` is Store request JSON;
+  `peerAddr` is comma-separated multiaddrs; `timeoutMs` caps wait for the FFI
+  callback, defaulting to 30s when `<= 0`)
 - `getAvailableNodeInfoIDs()` - List queryable node info identifiers
 - `getNodeInfo(nodeInfoId: QString)` - Retrieve node info by identifier
 - `getAvailableConfigs()` - Retrieve available configuration parameter descriptions
@@ -165,10 +169,22 @@ in a JSON envelope before crossing the FFI boundary:
 The call is synchronous and returns a **request id** on success. The actual
 network delivery is asynchronous — track results via the emitted events:
 
+
 - **`messageError`** – the module could not send the message.
 - **`messagePropagated`** – the message reached the network but is not yet
   validated.
 - **`messageSent`** – the message has been confirmed by the network.
+
+### Historical messages (`queryStore`)
+
+`queryStore(jsonQuery, peerAddr, timeoutMs)` forwards to `logosdelivery_query_store` in
+liblogosdelivery. `jsonQuery` is the UTF-8 Store request JSON (same fields as
+`library/kernel_api/protocols/store_api.nim` in logos-delivery). `peerAddr` is a
+comma-separated list of multiaddrs for the store peer. `timeoutMs` caps how long the
+module waits for the FFI callback; values less than or equal to zero use 30 seconds.
+
+On success, `LogosResult` carries a `QString` whose UTF-8 bytes are JSON describing the
+hex-encoded store response.
 
 ### Events
 

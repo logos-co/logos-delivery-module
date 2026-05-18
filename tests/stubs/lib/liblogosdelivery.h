@@ -51,6 +51,9 @@ int logosdelivery_get_available_node_info_ids(void* ctx, logosdelivery_callback 
 // Retrieve available configuration parameter descriptions.
 int logosdelivery_get_available_configs(void* ctx, logosdelivery_callback cb, void* userData);
 
+// Waku Store query: jsonQuery is Store request JSON; peerAddr comma-separated multiaddrs.
+int logosdelivery_query_store(void* ctx, logosdelivery_callback cb, void* userData, const char* jsonQuery, const char* peerAddr, int timeoutMs);
+
 #ifdef __cplusplus
 }
 #endif

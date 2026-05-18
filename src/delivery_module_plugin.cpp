@@ -5,6 +5,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <algorithm>
+#include <climits>
 #include <memory>
 #include <mutex>
 #include <semaphore>
@@ -346,6 +348,45 @@ LogosResult DeliveryModulePlugin::subscribe(const QString &contentTopic)
     }
 
     qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success";
+    return outcome;
+}
+
+LogosResult DeliveryModulePlugin::queryStore(const QString &jsonQuery, const QString &peerAddr, int timeoutMs)
+{
+    qDebug() << "DeliveryModulePlugin::queryStore called";
+
+    if (!deliveryCtx) {
+        qWarning() << "DeliveryModulePlugin: Cannot query Store - context not initialized. Call createNode first.";
+        return {false, QVariant(), QStringLiteral("Context not initialized")};
+    }
+
+    QByteArray jsonUtf8 = jsonQuery.toUtf8();
+    QByteArray peerUtf8 = peerAddr.toUtf8();
+
+    long long effectiveMs = timeoutMs > 0 ? static_cast<long long>(timeoutMs) : 30000LL;
+    if (effectiveMs > INT_MAX) {
+        effectiveMs = INT_MAX;
+    }
+
+    // callApiRetValue expects std::chrono::seconds (same as send/subscribe helpers).
+    const std::chrono::seconds callbackWaitSeconds(
+        std::max<long long>(1LL, (effectiveMs + 999) / 1000));
+    const int ffiTimeoutMs = static_cast<int>(effectiveMs);
+
+    auto outcome = callApiRetValue(
+        "query_store",
+        callbackWaitSeconds,
+        bindApiCall(
+            logosdelivery_query_store,
+            deliveryCtx,
+            jsonUtf8.constData(),
+            peerUtf8.constData(),
+            ffiTimeoutMs));
+
+    if (!outcome.success) {
+        qWarning() << "DeliveryModulePlugin: queryStore failed:" << outcome.getError();
+    }
+
     return outcome;
 }
 
