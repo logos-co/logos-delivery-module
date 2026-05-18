@@ -25,24 +25,24 @@
  * - `messageSent` (see `send` method)
  *   - `data[0]` (`QString`): request id
  *   - `data[1]` (`QString`): message hash
- *   - `data[2]` (`QString`): local timestamp (nanoseconds since epoch)
+ *   - `data[2]` (`qint64`): local timestamp (nanoseconds since epoch)
  * - `messageError` (see `send` method)
  *   - `data[0]` (`QString`): request id
  *   - `data[1]` (`QString`): message hash
  *   - `data[2]` (`QString`): error message
- *   - `data[3]` (`QString`): local timestamp (nanoseconds since epoch)
+ *   - `data[3]` (`qint64`): local timestamp (nanoseconds since epoch)
  * - `messagePropagated` (see `send` method)
  *   - `data[0]` (`QString`): request id
  *   - `data[1]` (`QString`): message hash
- *   - `data[2]` (`QString`): local timestamp (nanoseconds since epoch)
+ *   - `data[2]` (`qint64`): local timestamp (nanoseconds since epoch)
  * - `messageReceived` (emitted when a message arrives on a subscribed topic)
  *   - `data[0]` (`QString`): message hash
  *   - `data[1]` (`QString`): content topic
  *   - `data[2]` (`QByteArray`): payload (raw bytes)
- *   - `data[3]` (`QString`): message timestamp (nanoseconds since epoch)
+ *   - `data[3]` (`qint64`): message timestamp (nanoseconds since epoch)
  * - `connectionStateChanged`
  *   - `data[0]` (`QString`): connection status
- *   - `data[1]` (`QString`): local timestamp (nanoseconds since epoch)
+ *   - `data[1]` (`qint64`): local timestamp (nanoseconds since epoch)
  *
  * The raw FFI `eventType` values mapped into these plugin events are:
  * - `message_sent` -> `messageSent`
