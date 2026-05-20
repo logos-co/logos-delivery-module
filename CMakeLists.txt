@@ -17,10 +17,8 @@ endif()
 logos_module(
     NAME delivery_module
     SOURCES
-        src/delivery_module_interface.h
         src/delivery_module_plugin.h
         src/delivery_module_plugin.cpp
-        src/api_call_handler.h
     EXTERNAL_LIBS
         logosdelivery
     INCLUDE_DIRS

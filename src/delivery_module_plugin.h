@@ -1,17 +1,20 @@
 #pragma once
 
-#include <QtCore/QObject>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
-#include "delivery_module_interface.h"
-#include "logos_api.h"
-#include "logos_api_client.h"
+#include <string>
+#include <vector>
+
+#include <logos_module_context.h>
+#include <logos_result.h>
 
 /**
- * @brief Concrete Qt plugin implementing the delivery messaging module.
+ * @brief Pure C++ implementation of the delivery messaging module.
  *
- * This class adapts the host plugin API to liblogosdelivery C-FFI calls and
- * forwards asynchronous events back to the host through Logos API clients.
+ * This class adapts the universal module API to liblogosdelivery C-FFI calls
+ * and forwards asynchronous events back to the host through typed events
+ * declared in the `logos_events:` section.
  *
  * Lifecycle contract:
  * - call @ref createNode exactly once per context
@@ -19,60 +22,26 @@
  * - use @ref subscribe / @ref send / @ref unsubscribe as needed
  * - call @ref stop before shutdown
  * Notice all of these calls are synchronous.
- * 
- * Asynchronous events are emitted off thread as Logos Plugin events.
- * Emitted plugin event contracts (name + `QVariantList data` indices):
- * - `messageSent` (see `send` method)
- *   - `data[0]` (`QString`): request id
- *   - `data[1]` (`QString`): message hash
- *   - `data[2]` (`qint64`): local timestamp (nanoseconds since epoch)
- * - `messageError` (see `send` method)
- *   - `data[0]` (`QString`): request id
- *   - `data[1]` (`QString`): message hash
- *   - `data[2]` (`QString`): error message
- *   - `data[3]` (`qint64`): local timestamp (nanoseconds since epoch)
- * - `messagePropagated` (see `send` method)
- *   - `data[0]` (`QString`): request id
- *   - `data[1]` (`QString`): message hash
- *   - `data[2]` (`qint64`): local timestamp (nanoseconds since epoch)
- * - `messageReceived` (emitted when a message arrives on a subscribed topic)
- *   - `data[0]` (`QString`): message hash
- *   - `data[1]` (`QString`): content topic
- *   - `data[2]` (`QByteArray`): payload (raw bytes)
- *   - `data[3]` (`qint64`): message timestamp (nanoseconds since epoch)
- * - `connectionStateChanged`
- *   - `data[0]` (`QString`): connection status
- *   - `data[1]` (`qint64`): local timestamp (nanoseconds since epoch)
  *
- * The raw FFI `eventType` values mapped into these plugin events are:
+ * Asynchronous events are emitted via typed `logos_events:` declarations.
+ * The codegen generates method bodies that route through
+ * LogosModuleContext::emitEventImpl_.
+ *
+ * The raw FFI `eventType` values mapped into these typed events are:
  * - `message_sent` -> `messageSent`
  * - `message_error` -> `messageError`
  * - `message_propagated` -> `messagePropagated`
  * - `message_received` -> `messageReceived`
  * - `connection_status_change` -> `connectionStateChanged`
- * 
+ *
  * As a general concept consider using proper content_topic format for your purpose.
  * --> https://lip.logos.co/messaging/informational/23/topics.html#content-topics
  */
-class DeliveryModulePlugin : public QObject, public DeliveryModuleInterface
+class DeliveryModuleImpl : public LogosModuleContext
 {
-    Q_OBJECT
-    Q_PLUGIN_METADATA(IID DeliveryModuleInterface_iid FILE "metadata.json")
-    Q_INTERFACES(DeliveryModuleInterface PluginInterface)
-
 public:
-    /**
-     * @brief Constructs the plugin with no active delivery context.
-     */
-    DeliveryModulePlugin();
-
-    /**
-     * @brief Destroys the plugin and releases owned resources.
-     *
-     * If present, the owned `LogosAPI` instance is deleted and the underlying
-     * liblogosdelivery context is destroyed.
-     */
-    virtual ~DeliveryModulePlugin();
+    DeliveryModuleImpl();
+    ~DeliveryModuleImpl();
 
     /**
      * @brief Creates a liblogosdelivery node from a WakuNodeConf JSON document.
@@ -133,125 +102,93 @@ public:
      * }
      * @endcode
      *
-     * @param cfg UTF-16 Qt string containing a UTF-8 serializable JSON payload.
+     * @param cfg UTF-8 JSON payload string.
      * @return `true` if context creation succeeds and callback returns `RET_OK`,
      *         otherwise `false`.
      */
-    Q_INVOKABLE LogosResult createNode(const QString &cfg) override;
+    StdLogosResult createNode(const std::string& cfg);
 
     /**
      * @brief Starts the delivery node.
      * @return `true` on success; `false` when no context exists or start fails.
      */
-    Q_INVOKABLE LogosResult start() override;
+    StdLogosResult start();
 
     /**
      * @brief Stops the delivery node.
      * @return `true` on success; `false` when no context exists or stop fails.
      */
-    Q_INVOKABLE LogosResult stop() override;
+    StdLogosResult stop();
 
     /**
      * @brief Sends a message over the active node.
      *
-     * This method builds a JSON envelope expected by `logosdelivery_send`:
-     * `{ "contentTopic": string, "payload": base64, "ephemeral": (bool, default: false) }`.
+     * Builds a JSON envelope expected by `logosdelivery_send`:
+     * `{ "contentTopic": string, "payload": base64, "ephemeral": false }`.
      *
-     * `send` call validates the input and returns with an associated requestId.
-     * After all the exact send operation is done async and user can expect Message events in response
-     * The requestId helps keep track of send operation results.
-     * - `messageError` emitted in case module can't sent the message
-     * - `messagePropagated` emitted if message has hit the network, you can expect delivery but 
-     *                       module could not validate it yet.
-     * - `messageSent` emitted after the sent message is validated by the network.
-     * 
+     * Returns a requestId on success. Async results come via typed events:
+     * - `messageError` emitted if the module can't send the message
+     * - `messagePropagated` emitted if the message has hit the network
+     * - `messageSent` emitted after the message is validated by the network
+     *
      * @param contentTopic Destination content topic.
      * @param payload Raw message bytes; base64-encoded before crossing the FFI boundary.
      * @return Success with request id, or error details.
      */
-    Q_INVOKABLE LogosResult send(const QString &contentTopic, const QByteArray &payload) override;
+    StdLogosResult send(const std::string& contentTopic, const std::vector<uint8_t>& payload);
 
     /**
      * @brief Subscribes to the supplied content topic.
      * @param contentTopic Topic identifier.
      * @return `true` when subscribed successfully, otherwise `false`.
      */
-    Q_INVOKABLE LogosResult subscribe(const QString &contentTopic) override;
+    StdLogosResult subscribe(const std::string& contentTopic);
 
     /**
      * @brief Unsubscribes from the supplied content topic.
      * @param contentTopic Topic identifier.
      * @return `true` when unsubscribed successfully, otherwise `false`.
      */
-    Q_INVOKABLE LogosResult unsubscribe(const QString &contentTopic) override;
-    Q_INVOKABLE LogosResult getAvailableNodeInfoIDs() override;
+    StdLogosResult unsubscribe(const std::string& contentTopic);
+
+    StdLogosResult getAvailableNodeInfoIDs();
 
     /**
-     * @brief Semantic version of this plugin implementation.
+     * @brief Returns information for the given node info item.
      * @param nodeInfoId Identifier for the requested node info item.
-     * @return UTF-16 string containing UTF-8 serializable JSON data, or an empty string on error.
+     * @return JSON data string on success, or error details.
      */
-    Q_INVOKABLE LogosResult getNodeInfo(const QString &nodeInfoId) override;
+    StdLogosResult getNodeInfo(const std::string& nodeInfoId);
 
     /**
-     * @brief Information about the available configuration parameters to be used in `createNode`.
+     * @brief Information about the available configuration parameters for `createNode`.
      */
-    Q_INVOKABLE LogosResult getAvailableConfigs() override;
+    StdLogosResult getAvailableConfigs();
 
-    QString name() const override { return "delivery_module"; }
+    std::string name() const { return "delivery_module"; }
 
-    QString version() const override;
+    std::string version() const;
 
-    /**
-     * @brief Injects/replaces the Logos API bridge used for event forwarding.
-     *
-     * Ownership is transferred to this plugin instance.
-     *
-     * @param logosAPIInstance Heap-allocated API object or `nullptr`.
-     */
-    Q_INVOKABLE void initLogos(LogosAPI* logosAPIInstance);
-
-signals:
-    /**
-     * @brief Module event signal (currently retained for compatibility).
-     * @param eventName Event identifier.
-     * @param data Event payload as positional values.
-     */
-    void eventResponse(const QString& eventName, const QVariantList& data);
+logos_events:
+    void messageSent(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+    void messageError(const std::string& requestId, const std::string& messageHash, const std::string& error, int64_t timestamp);
+    void messagePropagated(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+    void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
+    void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
 
 private:
-    /**
-     * @brief Opaque liblogosdelivery context pointer.
-     */
     void* deliveryCtx;
 
-    /**
-     * @brief Serializes node creation to a single in-flight operation.
-     */
     std::mutex createNodeMutex;
-    
-    /**
-     * @brief Common timeout for FFI operations that complete via callback.
-     */
+
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
-    
-    /**
-     * @brief Forwards normalized events to the registered Logos API client.
-     * @param eventName Canonical event name.
-     * @param data Event payload list.
-     */
-    void emitEvent(const QString& eventName, const QVariantList& data);
-    
+
     /**
      * @brief Global C callback used by liblogosdelivery to report async events.
-     *
-     * Expected event payload format is a JSON document containing an `eventType`
-     * discriminator and event-specific fields.
-     *
      * @param callerRet FFI return code associated with callback dispatch.
      * @param msg UTF-8 JSON event payload buffer.
      * @param len Message length in bytes.
-     * @param userData Opaque pointer expected to be `DeliveryModulePlugin*`.
+     * @param userData Opaque pointer expected to be `DeliveryModuleImpl*`.
      */
     static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
 };

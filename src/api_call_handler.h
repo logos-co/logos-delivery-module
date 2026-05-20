@@ -1,14 +1,14 @@
 #pragma once
 
-#include <QString>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <semaphore>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
-#include "logos_types.h"
+#include <logos_result.h>
 
 extern "C" {
 #include <liblogosdelivery.h>
@@ -19,7 +19,7 @@ using DeliveryCallback = void (*)(int, const char*, size_t, void*);
 
 struct CallbackPayload {
     int callerRet{RET_ERR};
-    QString message;
+    std::string message;
 };
 
 template <typename Func, typename... BoundArgs>
@@ -31,7 +31,7 @@ auto bindApiCall(Func func, void* callbackCtx, BoundArgs&&... boundArgs)
 }
 
 template <typename BoundInvoke>
-LogosResult callApiRetVoid(const QString& operationName, std::chrono::seconds timeout, BoundInvoke&& invoke)
+StdLogosResult callApiRetVoid(const std::string& operationName, std::chrono::seconds timeout, BoundInvoke&& invoke)
 {
     struct CallbackContext {
         std::binary_semaphore sem{0};
@@ -63,7 +63,7 @@ LogosResult callApiRetVoid(const QString& operationName, std::chrono::seconds ti
 
         callbackCtx->payload.callerRet = callerRet;
         if (msg && len > 0) {
-            callbackCtx->payload.message = QString::fromUtf8(msg, len);
+            callbackCtx->payload.message = std::string(msg, len);
         }
         callbackCtx->sem.release();
     };
@@ -82,7 +82,7 @@ LogosResult callApiRetVoid(const QString& operationName, std::chrono::seconds ti
     }
 
     if (callbackCtx->payload.callerRet != RET_OK) {
-        const QString message = callbackCtx->payload.message.isEmpty()
+        std::string message = callbackCtx->payload.message.empty()
             ? operationName + " failed"
             : callbackCtx->payload.message;
         return {false, {}, message};
@@ -92,8 +92,8 @@ LogosResult callApiRetVoid(const QString& operationName, std::chrono::seconds ti
 }
 
 template <typename BoundInvoke>
-LogosResult callApiRetValue(
-    const QString& operationName,
+StdLogosResult callApiRetValue(
+    const std::string& operationName,
     std::chrono::seconds timeout,
     BoundInvoke&& invoke)
 {
@@ -127,7 +127,7 @@ LogosResult callApiRetValue(
 
         callbackCtx->payload.callerRet = callerRet;
         if (msg && len > 0) {
-            callbackCtx->payload.message = QString::fromUtf8(msg, len);
+            callbackCtx->payload.message = std::string(msg, len);
         }
         callbackCtx->sem.release();
     };
@@ -146,7 +146,7 @@ LogosResult callApiRetValue(
     }
 
     if (callbackCtx->payload.callerRet != RET_OK) {
-        const QString message = callbackCtx->payload.message.isEmpty()
+        std::string message = callbackCtx->payload.message.empty()
             ? operationName + " failed"
             : callbackCtx->payload.message;
         return {false, {}, message};

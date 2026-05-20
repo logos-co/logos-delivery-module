@@ -1,172 +1,155 @@
 #include "delivery_module_plugin.h"
-#include <QDebug>
-#include <QVariantList>
-#include <QDateTime>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
+#include <cstdio>
+#include <ctime>
 #include <memory>
 #include <mutex>
 #include <semaphore>
 #include <unordered_map>
 
+#include <nlohmann/json.hpp>
+#include <boost/beast/core/detail/base64.hpp>
+
 #include "api_call_handler.h"
-// Include the liblogosdelivery header from logos-delivery
-// liblogosdelivery provides a high-level message-delivery API
 extern "C" {
 #include <liblogosdelivery.h>
 }
 
-DeliveryModulePlugin::DeliveryModulePlugin() : deliveryCtx(nullptr)
-{
-    qDebug() << "DeliveryModulePlugin: Initializing...";
-    qDebug() << "DeliveryModulePlugin: Initialized successfully";
+namespace {
+namespace b64 = boost::beast::detail::base64;
+
+std::string base64Encode(const std::vector<uint8_t>& data) {
+    std::string out;
+    out.resize(b64::encoded_size(data.size()));
+    out.resize(b64::encode(out.data(), data.data(), data.size()));
+    return out;
 }
 
-DeliveryModulePlugin::~DeliveryModulePlugin() 
+std::vector<uint8_t> base64Decode(const std::string& encoded) {
+    std::vector<uint8_t> out;
+    out.resize(b64::decoded_size(encoded.size()));
+    auto [written, read] = b64::decode(out.data(), encoded.data(), encoded.size());
+    out.resize(written);
+    return out;
+}
+
+int64_t currentTimestampNs() {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
+}
+} // namespace
+
+DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 {
-    // Clean up resources, this is not done in PluginInterface destructor
-    if (logosAPI) {
-        delete logosAPI;
-        logosAPI = nullptr;
-    }
-    
-    // Clean up delivery context if it exists
+    fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
+    fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
+}
+
+DeliveryModuleImpl::~DeliveryModuleImpl()
+{
     if (deliveryCtx) {
         logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
         deliveryCtx = nullptr;
     }
 }
 
-void DeliveryModulePlugin::emitEvent(const QString& eventName, const QVariantList& data) {
-    if (!logosAPI) {
-        qWarning() << "DeliveryModulePlugin: LogosAPI not available, cannot emit" << eventName;
-        return;
-    }
-
-    LogosAPIClient* client = logosAPI->getClient("delivery_module");
-    if (!client) {
-        qWarning() << "DeliveryModulePlugin: Failed to get delivery_module client for event" << eventName;
-        return;
-    }
-
-    client->onEventResponse(this, eventName, data);
-}
-
-// Static callback function for liblogosdelivery events, this one is one time registered
-// on initialization and will be called for all events from the Nim FFI side.
-void DeliveryModulePlugin::event_callback(int callerRet, const char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
-    qDebug() << "DeliveryModulePlugin::event_callback called with ret:" << callerRet;
+    fprintf(stderr, "DeliveryModuleImpl::event_callback called with ret: %d\n", callerRet);
 
-    DeliveryModulePlugin* plugin = static_cast<DeliveryModulePlugin*>(userData);
-    if (!plugin) {
-        qWarning() << "DeliveryModulePlugin::event_callback: Invalid userData";
+    DeliveryModuleImpl* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid userData\n");
         return;
     }
 
     if (msg && len > 0) {
-        QString message = QString::fromUtf8(msg, len);
-        qDebug() << "DeliveryModulePlugin::event_callback message:" << message;
-        
-        // Parse JSON to determine event type
-        QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
-        if (!doc.isObject()) {
-            qWarning() << "DeliveryModulePlugin::event_callback: Invalid JSON";
+        std::string message(msg, len);
+        fprintf(stderr, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
+
+        nlohmann::json jsonObj;
+        try {
+            jsonObj = nlohmann::json::parse(message);
+        } catch (const nlohmann::json::parse_error&) {
+            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
             return;
         }
-        
-        QJsonObject jsonObj = doc.object();
-        QString eventType = jsonObj["eventType"].toString();
-        qint64 timestamp = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch() * Q_INT64_C(1000000);
-        
-        if (eventType == "message_sent") {
-            // MessageSentEvent: requestId, messageHash
-            QVariantList eventData;
-            eventData << jsonObj["requestId"].toString();
-            eventData << jsonObj["messageHash"].toString();
-            eventData << timestamp;
-            plugin->emitEvent("messageSent", eventData);
-            
-        } else if (eventType == "message_error") {
-            // MessageErrorEvent: requestId, messageHash, error
-            QVariantList eventData;
-            eventData << jsonObj["requestId"].toString();
-            eventData << jsonObj["messageHash"].toString();
-            eventData << jsonObj["error"].toString();
-            eventData << timestamp;
-            plugin->emitEvent("messageError", eventData);
-            
-        } else if (eventType == "message_propagated") {
-            // MessagePropagatedEvent: requestId, messageHash
-            QVariantList eventData;
-            eventData << jsonObj["requestId"].toString();
-            eventData << jsonObj["messageHash"].toString();
-            eventData << timestamp;
-            plugin->emitEvent("messagePropagated", eventData);
-            
-        } else if (eventType == "message_received") {
-            // MessageReceivedEvent: messageHash, message (WakuMessage)
-            QJsonObject msgObj = jsonObj["message"].toObject();
-            QVariantList eventData;
-            eventData << jsonObj["messageHash"].toString();
-            eventData << msgObj["contentTopic"].toString();
 
-            QJsonValue payloadValue = msgObj["payload"];
-            if (payloadValue.isArray()) {
-                QJsonArray payloadArray = payloadValue.toArray();
-                QByteArray payloadBytes;
-                payloadBytes.reserve(payloadArray.size());
-                for (const QJsonValue& val : payloadArray) {
-                    payloadBytes.append(static_cast<char>(val.toInt()));
+        if (!jsonObj.is_object()) {
+            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
+            return;
+        }
+
+        std::string eventType = jsonObj.value("eventType", "");
+        int64_t timestamp = currentTimestampNs();
+
+        if (eventType == "message_sent") {
+            impl->messageSent(
+                jsonObj.value("requestId", ""),
+                jsonObj.value("messageHash", ""),
+                timestamp);
+
+        } else if (eventType == "message_error") {
+            impl->messageError(
+                jsonObj.value("requestId", ""),
+                jsonObj.value("messageHash", ""),
+                jsonObj.value("error", ""),
+                timestamp);
+
+        } else if (eventType == "message_propagated") {
+            impl->messagePropagated(
+                jsonObj.value("requestId", ""),
+                jsonObj.value("messageHash", ""),
+                timestamp);
+
+        } else if (eventType == "message_received") {
+            auto msgObj = jsonObj.value("message", nlohmann::json::object());
+
+            std::string hash = jsonObj.value("messageHash", "");
+            std::string topic = msgObj.value("contentTopic", "");
+
+            std::vector<uint8_t> payloadBytes;
+            if (msgObj.contains("payload")) {
+                auto& payloadValue = msgObj["payload"];
+                if (payloadValue.is_array()) {
+                    payloadBytes.reserve(payloadValue.size());
+                    for (const auto& val : payloadValue) {
+                        payloadBytes.push_back(static_cast<uint8_t>(val.get<int>()));
+                    }
+                } else if (payloadValue.is_string()) {
+                    payloadBytes = base64Decode(payloadValue.get<std::string>());
                 }
-                eventData << payloadBytes;
-            } else {
-                eventData << QByteArray::fromBase64(payloadValue.toString().toLatin1());
             }
 
-            eventData << static_cast<qint64>(msgObj["timestamp"].toDouble());
-            plugin->emitEvent("messageReceived", eventData);
+            int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
+            impl->messageReceived(hash, topic, payloadBytes, msgTimestamp);
 
         } else if (eventType == "connection_status_change") {
-            QVariantList eventData;
-            eventData << jsonObj["connectionStatus"].toString();
-            eventData << timestamp;
-            plugin->emitEvent("connectionStateChanged", eventData);
-            
+            impl->connectionStateChanged(
+                jsonObj.value("connectionStatus", ""),
+                timestamp);
+
         } else {
-            qWarning() << "DeliveryModulePlugin::event_callback: Unknown event type:" << eventType;
+            fprintf(stderr, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
         }
     }
 }
 
-void DeliveryModulePlugin::initLogos(LogosAPI* logosAPIInstance) {
-    if (logosAPI) {
-        delete logosAPI;
-    }
-    logosAPI = logosAPIInstance;
-}
-
-LogosResult DeliveryModulePlugin::createNode(const QString &cfg)
+StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 {
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
 
     if (deliveryCtx != nullptr) {
-        qWarning() << "DeliveryModulePlugin: createNode rejected - context already initialized";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
+        return {false, {}, "Context not initialized"};
     }
 
-    qDebug() << "DeliveryModulePlugin::createNode called with cfg:" << cfg;
-    
-    // Convert QString to UTF-8 byte array
-    QByteArray cfgUtf8 = cfg.toUtf8();
-    
-    // Create callback context for synchronous createNode result.
-    // The context is kept in a pending map so late callbacks can be safely ignored.
+    fprintf(stderr, "DeliveryModuleImpl::createNode called with cfg: %s\n", cfg.c_str());
+
     struct CallbackContext {
         std::binary_semaphore sem{0};
         int callerRet{RET_ERR};
-        QString message;
+        std::string message;
     };
 
     static std::mutex pendingMutex;
@@ -179,10 +162,9 @@ LogosResult DeliveryModulePlugin::createNode(const QString &cfg)
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts[callbackKey] = callbackCtx;
     }
-    
-    // Callback is expected in both success and error cases.
+
     auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        qDebug() << "DeliveryModulePlugin::createNode callback called with ret:" << callerRet;
+        fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", callerRet);
 
         std::shared_ptr<CallbackContext> callbackCtx;
         {
@@ -201,212 +183,197 @@ LogosResult DeliveryModulePlugin::createNode(const QString &cfg)
 
         callbackCtx->callerRet = callerRet;
         if (msg && len > 0) {
-            callbackCtx->message = QString::fromUtf8(msg, len);
-            qDebug() << "DeliveryModulePlugin::createNode callback message:" << callbackCtx->message;
+            callbackCtx->message = std::string(msg, len);
+            fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", callbackCtx->message.c_str());
         }
 
-        // Release semaphore to unblock the createNode method
         callbackCtx->sem.release();
     };
-    
-    // Call logosdelivery_create_node with the configuration
-    // Important: Keep deliveryCtx assignment from the call,
-    // creating of the context is immediate and not depends on the callback.
-    deliveryCtx = logosdelivery_create_node(cfgUtf8.constData(), callback, callbackKey);
 
-    qDebug() << "DeliveryModulePlugin: Waiting for createNode callback...";
+    deliveryCtx = logosdelivery_create_node(cfg.c_str(), callback, callbackKey);
 
-    // Wait for callback result regardless of immediate pointer value.
-    // Callback ensures that the underlying node object is properly created.
+    fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
+
     if (!callbackCtx->sem.try_acquire_for(CALLBACK_TIMEOUT)) {
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
 
         deliveryCtx = nullptr;
 
-        qWarning() << "DeliveryModulePlugin: Timeout waiting for createNode callback";
-        return {false, QVariant(), QStringLiteral("Timeout waiting for createNode callback")};
+        fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
+        return {false, {}, "Timeout waiting for createNode callback"};
     }
 
-    // Any issue happened during node creation means the context is destroyed and must not be user.
     if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
-        if (!callbackCtx->message.isEmpty()) {
-            qWarning() << "DeliveryModulePlugin: createNode callback error:" << callbackCtx->message;
+        if (!callbackCtx->message.empty()) {
+            fprintf(stderr, "DeliveryModuleImpl: createNode callback error: %s\n", callbackCtx->message.c_str());
         }
 
         deliveryCtx = nullptr;
 
-        qWarning() << "DeliveryModulePlugin: Failed to create Delivery context";
-        return {false, QVariant(), QStringLiteral("Failed to create Delivery context")};
+        fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
+        return {false, {}, "Failed to create Delivery context"};
     }
-    
-    // Success case - deliveryCtx is valid and callback returned RET_OK.
-    qDebug() << "DeliveryModulePlugin: Delivery context created successfully";
-    
-    // Set up event callback
+
+    fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
+
     logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
     return {true, {}};
 }
 
-LogosResult DeliveryModulePlugin::start()
+StdLogosResult DeliveryModuleImpl::start()
 {
-    qDebug() << "DeliveryModulePlugin::start called";
-    
+    fprintf(stderr, "DeliveryModuleImpl::start called\n");
+
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot start Delivery - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot start Delivery - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
-    
+
     auto outcome = callApiRetVoid(
         "start",
         CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_start_node, deliveryCtx));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Start failed:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Start failed: %s\n", outcome.error.c_str());
     }
 
-    qDebug() << "DeliveryModulePlugin: Delivery start completed with success";
+    fprintf(stderr, "DeliveryModuleImpl: Delivery start completed with success\n");
     return outcome;
 }
 
-LogosResult DeliveryModulePlugin::stop()
+StdLogosResult DeliveryModuleImpl::stop()
 {
-    qDebug() << "DeliveryModulePlugin::stop called";
-    
+    fprintf(stderr, "DeliveryModuleImpl::stop called\n");
+
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot stop Delivery - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot stop Delivery - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
-    
+
     auto outcome = callApiRetVoid(
         "stop",
         CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_stop_node, deliveryCtx));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Stop failed:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Stop failed: %s\n", outcome.error.c_str());
     }
 
-    qDebug() << "DeliveryModulePlugin: Delivery stop completed with success";
+    fprintf(stderr, "DeliveryModuleImpl: Delivery stop completed with success\n");
     return outcome;
 }
-LogosResult DeliveryModulePlugin::send(const QString &contentTopic, const QByteArray &payload)
+
+StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)
 {
-    qDebug() << "DeliveryModulePlugin::send called with contentTopic:" << contentTopic;
+    fprintf(stderr, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot send message - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
 
-    // Construct JSON message according to logosdelivery_send API
-    // The payload should be base64-encoded as per the API spec
-    QJsonObject messageObj;
+    nlohmann::json messageObj;
     messageObj["contentTopic"] = contentTopic;
-    messageObj["payload"] = QString::fromUtf8(payload.toBase64());
+    messageObj["payload"] = base64Encode(payload);
     messageObj["ephemeral"] = false;
 
-    QJsonDocument doc(messageObj);
-    QByteArray messageJson = doc.toJson(QJsonDocument::Compact);
+    std::string messageJson = messageObj.dump();
 
     auto outcome = callApiRetValue(
         "send",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_send, deliveryCtx, messageJson.constData()));
+        bindApiCall(logosdelivery_send, deliveryCtx, messageJson.c_str()));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Send failed for topic:" << contentTopic << ", reason:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
+                contentTopic.c_str(), outcome.error.c_str());
     }
 
-    const QString responseMessage = outcome.getString();
-    qDebug() << "DeliveryModulePlugin: Send initiated for topic:" << contentTopic << ", with success, requestId: " << responseMessage;
+    if (outcome.success && outcome.value.is_string()) {
+        fprintf(stderr, "DeliveryModuleImpl: Send initiated for topic: %s, with success, requestId: %s\n",
+                contentTopic.c_str(), outcome.value.get<std::string>().c_str());
+    }
     return outcome;
 }
 
-LogosResult DeliveryModulePlugin::subscribe(const QString &contentTopic)
+StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
 {
-    qDebug() << "DeliveryModulePlugin::subscribe called with contentTopic:" << contentTopic;
-    
+    fprintf(stderr, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
+
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot subscribe - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
-    
-    // Convert QString to UTF-8 byte array
-    QByteArray topicUtf8 = contentTopic.toUtf8();
-    
+
     auto outcome = callApiRetVoid(
         "subscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_subscribe, deliveryCtx, topicUtf8.constData()));
+        bindApiCall(logosdelivery_subscribe, deliveryCtx, contentTopic.c_str()));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Subscribe failed for topic:" << contentTopic << ", reason:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
+                contentTopic.c_str(), outcome.error.c_str());
     }
 
-    qDebug() << "DeliveryModulePlugin: Subscribe completed for topic:" << contentTopic << " with success";
+    fprintf(stderr, "DeliveryModuleImpl: Subscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
 }
 
-LogosResult DeliveryModulePlugin::unsubscribe(const QString &contentTopic)
+StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
 {
-    qDebug() << "DeliveryModulePlugin::unsubscribe called with contentTopic:" << contentTopic;
-    
+    fprintf(stderr, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
+
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot unsubscribe - context not initialized.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
+        return {false, {}, "Context not initialized"};
     }
-    
-    // Convert QString to UTF-8 byte array
-    QByteArray topicUtf8 = contentTopic.toUtf8();
-    
+
     auto outcome = callApiRetVoid(
         "unsubscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_unsubscribe, deliveryCtx, topicUtf8.constData()));
+        bindApiCall(logosdelivery_unsubscribe, deliveryCtx, contentTopic.c_str()));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Unsubscribe failed for topic:" << contentTopic << ", reason:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
+                contentTopic.c_str(), outcome.error.c_str());
     }
 
-    qDebug() << "DeliveryModulePlugin: Unsubscribe completed for topic:" << contentTopic << " with success";
+    fprintf(stderr, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
 }
 
-QString DeliveryModulePlugin::version() const {
-    QString moduleVersion = "1.1.0";
+std::string DeliveryModuleImpl::version() const {
+    std::string moduleVersion = "1.1.0";
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot subscribe - context not initialized. Call createNode first.";
+        fprintf(stderr, "DeliveryModuleImpl: Cannot get version - context not initialized. Call createNode first.\n");
         return moduleVersion + " (liblogosdelivery version unknown, context not initialized)";
     }
 
-    auto attributeName = "Version";
     auto liblogosDeliveryVersion = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx, attributeName));
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx, "Version"));
 
     if (!liblogosDeliveryVersion.success) {
-        qWarning() << "DeliveryModulePlugin: Get node info failed getting version, reason:" <<
-            liblogosDeliveryVersion.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Get node info failed getting version, reason: %s\n",
+                liblogosDeliveryVersion.error.c_str());
         return moduleVersion + " (liblogosdelivery version unknown)";
     }
 
-    const QString version = liblogosDeliveryVersion.getString();
-    qDebug() << "DeliveryModulePlugin: Get node info completed for attribute:" <<
-        attributeName << ", with success: " << version;
+    std::string ver = liblogosDeliveryVersion.value.get<std::string>();
+    fprintf(stderr, "DeliveryModuleImpl: Get node info completed for attribute: Version, with success: %s\n", ver.c_str());
 
-    return moduleVersion + " (liblogosdelivery version: " + version + ")";
+    return moduleVersion + " (liblogosdelivery version: " + ver + ")";
 }
 
-LogosResult DeliveryModulePlugin::getAvailableNodeInfoIDs() {
-    
-    qDebug() << "DeliveryModulePlugin::getAvailableNodeInfoIDs called";
+StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
+    fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot get available node info IDs - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
         "get_available_node_info_ids",
@@ -414,37 +381,37 @@ LogosResult DeliveryModulePlugin::getAvailableNodeInfoIDs() {
         bindApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Get available node info IDs failed, reason:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
     }
     return outcome;
 }
 
-LogosResult DeliveryModulePlugin::getNodeInfo(const QString &nodeInfoId) {
-    qDebug() << "DeliveryModulePlugin::getNodeInfo called with nodeInfoId:" << nodeInfoId;
+StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
+    fprintf(stderr, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
 
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot get node info - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx, nodeInfoId.toUtf8().constData()));
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx, nodeInfoId.c_str()));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Get node info failed for ID:" << nodeInfoId <<
-            ", reason:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
+                nodeInfoId.c_str(), outcome.error.c_str());
     }
 
     return outcome;
 }
 
-LogosResult DeliveryModulePlugin::getAvailableConfigs() {
-    qDebug() << "DeliveryModulePlugin::getAvailableConfigs called";
+StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
+    fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
 
     if (!deliveryCtx) {
-        qWarning() << "DeliveryModulePlugin: Cannot get available configs - context not initialized. Call createNode first.";
-        return {false, QVariant(), QStringLiteral("Context not initialized")};
+        fprintf(stderr, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
         "get_available_configs",
@@ -452,7 +419,7 @@ LogosResult DeliveryModulePlugin::getAvailableConfigs() {
         bindApiCall(logosdelivery_get_available_configs, deliveryCtx));
 
     if (!outcome.success) {
-        qWarning() << "DeliveryModulePlugin: Get available configs failed, reason:" << outcome.getError();
+        fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
     }
 
     return outcome;

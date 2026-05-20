@@ -1,4 +1,4 @@
-// Integration tests for DeliveryModulePlugin - uses the REAL liblogosdelivery library.
+// Integration tests for DeliveryModuleImpl - uses the REAL liblogosdelivery library.
 // No mocking. These tests start an actual delivery node and exercise the API
 // as shown in examples/simple.cpp.
 //
@@ -9,15 +9,8 @@
 #include "delivery_module_plugin.h"
 
 #include <chrono>
-#include <condition_variable>
-#include <mutex>
 #include <string>
-
-// ---------------------------------------------------------------------------
-// EventWaiter - captures events emitted via the plugin signal.
-// Installed as a mock LogosAPI client via initLegacy() so that emitEvent()
-// reaches the waiter.
-// ---------------------------------------------------------------------------
+#include <vector>
 
 // Minimal config - no preset, no network peers, Edge mode with relay+sharding
 // so subscribe/send can be exercised without connecting to any external nodes.
@@ -33,29 +26,29 @@ static const char* kTestTopic = "/test/2/delivery-integration/proto";
 static const int DEFAULT_TIMEOUT_MS = 30000;
 
 // ---------------------------------------------------------------------------
-// Shared plugin instance - restarted before each test group.
+// Shared impl instance - restarted before each test group.
 // ---------------------------------------------------------------------------
 
-static DeliveryModulePlugin* g_plugin = nullptr;
+static DeliveryModuleImpl* g_impl = nullptr;
 
 static void ensureStarted() {
-    if (g_plugin) {
-        g_plugin->stop();
-        delete g_plugin;
-        g_plugin = nullptr;
+    if (g_impl) {
+        g_impl->stop();
+        delete g_impl;
+        g_impl = nullptr;
     }
 
-    g_plugin = new DeliveryModulePlugin();
+    g_impl = new DeliveryModuleImpl();
 
-    if (!g_plugin->createNode(kMinimalConfig).success) {
-        delete g_plugin;
-        g_plugin = nullptr;
+    if (!g_impl->createNode(kMinimalConfig).success) {
+        delete g_impl;
+        g_impl = nullptr;
         throw LogosTestFailure("Integration: failed to createNode.");
     }
 
-    if (!g_plugin->start().success) {
-        delete g_plugin;
-        g_plugin = nullptr;
+    if (!g_impl->start().success) {
+        delete g_impl;
+        g_impl = nullptr;
         throw LogosTestFailure("Integration: failed to start node.");
     }
 }
@@ -65,22 +58,22 @@ static void ensureStarted() {
 // ---------------------------------------------------------------------------
 
 LOGOS_TEST(integration_createNode) {
-    DeliveryModulePlugin plugin;
-    LOGOS_ASSERT_TRUE(plugin.createNode(kMinimalConfig).success);
-    plugin.stop();
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kMinimalConfig).success);
+    impl.stop();
 }
 
 LOGOS_TEST(integration_createNode_with_logos_dev_preset) {
-    DeliveryModulePlugin plugin;
-    LOGOS_ASSERT_TRUE(plugin.createNode(R"({"logLevel":"DEBUG","mode":"Core","preset":"logos.dev"})").success);
-    plugin.stop();
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"DEBUG","mode":"Core","preset":"logos.dev"})").success);
+    impl.stop();
 }
 
 LOGOS_TEST(integration_start_stop) {
-    DeliveryModulePlugin plugin;
-    LOGOS_ASSERT_TRUE(plugin.createNode(kMinimalConfig).success);
-    LOGOS_ASSERT_TRUE(plugin.start().success);
-    LOGOS_ASSERT_TRUE(plugin.stop().success);
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kMinimalConfig).success);
+    LOGOS_ASSERT_TRUE(impl.start().success);
+    LOGOS_ASSERT_TRUE(impl.stop().success);
 }
 
 // ---------------------------------------------------------------------------
@@ -90,41 +83,54 @@ LOGOS_TEST(integration_start_stop) {
 LOGOS_TEST(integration_getAvailableConfigs_returns_non_empty) {
     ensureStarted();
 
-    LogosResult result = g_plugin->getAvailableConfigs();
+    StdLogosResult result = g_impl->getAvailableConfigs();
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT_FALSE(result.getString().isEmpty());
+    LOGOS_ASSERT_FALSE(result.value.get<std::string>().empty());
 }
 
 LOGOS_TEST(integration_getAvailableNodeInfoIDs_returns_non_empty) {
     ensureStarted();
 
-    LogosResult result = g_plugin->getAvailableNodeInfoIDs();
+    StdLogosResult result = g_impl->getAvailableNodeInfoIDs();
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT_FALSE(result.getString().isEmpty());
+    LOGOS_ASSERT_FALSE(result.value.get<std::string>().empty());
 }
 
 LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
     ensureStarted();
 
-    LogosResult idsResult = g_plugin->getAvailableNodeInfoIDs();
+    StdLogosResult idsResult = g_impl->getAvailableNodeInfoIDs();
     LOGOS_ASSERT_TRUE(idsResult.success);
 
-    QString nodeInfoIDs = idsResult.getString();
-    LOGOS_ASSERT_FALSE(nodeInfoIDs.isEmpty());
+    std::string nodeInfoIDs = idsResult.value.get<std::string>();
+    LOGOS_ASSERT_FALSE(nodeInfoIDs.empty());
 
     // IDs are returned as "@[ID1,ID2,...]" - strip the "@[" prefix and "]" suffix.
-    if (nodeInfoIDs.startsWith("@[") && nodeInfoIDs.endsWith("]")) {
-        nodeInfoIDs = nodeInfoIDs.mid(2, nodeInfoIDs.length() - 3);
+    if (nodeInfoIDs.size() > 3 &&
+        nodeInfoIDs[0] == '@' && nodeInfoIDs[1] == '[' &&
+        nodeInfoIDs.back() == ']') {
+        nodeInfoIDs = nodeInfoIDs.substr(2, nodeInfoIDs.size() - 3);
     }
 
-    QStringList ids = nodeInfoIDs.split(",", Qt::SkipEmptyParts);
+    // Split on comma
+    std::vector<std::string> ids;
+    std::string current;
+    for (char c : nodeInfoIDs) {
+        if (c == ',') {
+            if (!current.empty()) ids.push_back(current);
+            current.clear();
+        } else if (c != ' ') {
+            current.push_back(c);
+        }
+    }
+    if (!current.empty()) ids.push_back(current);
+
     LOGOS_ASSERT_GT(static_cast<int>(ids.size()), 0);
 
-    for (const QString& id : ids) {
-        QString trimmedId = id.trimmed();
-        LogosResult infoResult = g_plugin->getNodeInfo(trimmedId);
+    for (const std::string& id : ids) {
+        StdLogosResult infoResult = g_impl->getNodeInfo(id);
         LOGOS_ASSERT_TRUE(infoResult.success);
-        LOGOS_ASSERT_FALSE(infoResult.getString().isEmpty());
+        LOGOS_ASSERT_FALSE(infoResult.value.get<std::string>().empty());
     }
 }
 
@@ -134,14 +140,14 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
 
 LOGOS_TEST(integration_subscribe_succeeds) {
     ensureStarted();
-    LOGOS_ASSERT_TRUE(g_plugin->subscribe(kTestTopic).success);
+    LOGOS_ASSERT_TRUE(g_impl->subscribe(kTestTopic).success);
 }
 
 LOGOS_TEST(integration_subscribe_unsubscribe) {
     ensureStarted();
 
-    LOGOS_ASSERT_TRUE(g_plugin->subscribe(kTestTopic).success);
-    LOGOS_ASSERT_TRUE(g_plugin->unsubscribe(kTestTopic).success);
+    LOGOS_ASSERT_TRUE(g_impl->subscribe(kTestTopic).success);
+    LOGOS_ASSERT_TRUE(g_impl->unsubscribe(kTestTopic).success);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +157,12 @@ LOGOS_TEST(integration_subscribe_unsubscribe) {
 LOGOS_TEST(integration_send_returns_success_with_request_id) {
     ensureStarted();
 
-    LOGOS_ASSERT_TRUE(g_plugin->subscribe(kTestTopic).success);
+    LOGOS_ASSERT_TRUE(g_impl->subscribe(kTestTopic).success);
 
-    LogosResult result = g_plugin->send(kTestTopic, "hello from integration test");
+    std::string msg = "hello from integration test";
+    std::vector<uint8_t> payload(msg.begin(), msg.end());
+    StdLogosResult result = g_impl->send(kTestTopic, payload);
 
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT_FALSE(result.getString().isEmpty());
+    LOGOS_ASSERT_FALSE(result.value.get<std::string>().empty());
 }
