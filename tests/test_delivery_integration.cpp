@@ -130,7 +130,9 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
     for (const std::string& id : ids) {
         StdLogosResult infoResult = g_impl->getNodeInfo(id);
         LOGOS_ASSERT_TRUE(infoResult.success);
-        LOGOS_ASSERT_FALSE(infoResult.value.get<std::string>().empty());
+        // An advertised node-info item may legitimately be empty when its
+        // feature is unconfigured (e.g. MixPubKey when the node has no mix
+        // key), so only require the lookup to succeed, not to be non-empty.
     }
 }
 
