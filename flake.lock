@@ -518,17 +518,17 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1778859578,
-        "narHash": "sha256-5Md+vsFhK44QN6+YJYQc67A6VNti/EpFtOof0BZ/yKE=",
+        "lastModified": 1779396772,
+        "narHash": "sha256-QavCC43G2Tk/A9wfzGKvatpfQ9YF1JJIx1dXFTqXL/Y=",
         "ref": "refs/heads/master",
-        "rev": "34c197c5cdad1d5787f8f51b66d7e83014e5480b",
-        "revCount": 2324,
+        "rev": "47b8a5fd42aa6d0cdd96bd7e7c751ca3139cec64",
+        "revCount": 2331,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
-        "rev": "34c197c5cdad1d5787f8f51b66d7e83014e5480b",
+        "rev": "47b8a5fd42aa6d0cdd96bd7e7c751ca3139cec64",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
@@ -7918,11 +7918,7 @@
       "inputs": {
         "logos-delivery": "logos-delivery",
         "logos-module-builder": "logos-module-builder",
-        "nix-bundle-lgx": "nix-bundle-lgx_10",
-        "zerokit": [
-          "logos-delivery",
-          "zerokit"
-        ]
+        "nix-bundle-lgx": "nix-bundle-lgx_10"
       }
     },
     "rust-overlay": {
@@ -7977,17 +7973,15 @@
         "rust-overlay": "rust-overlay_2"
       },
       "locked": {
-        "lastModified": 1771279884,
-        "narHash": "sha256-tzkQPwSl4vPTUo1ixHh6NCENjsBDroMKTjifg2q8QX8=",
         "owner": "vacp2p",
         "repo": "zerokit",
-        "rev": "53b18098e6d5d046e3eb1ac338a8f4f651432477",
+        "rev": "5e64cb8822bee65eed6cf459f95ae72b80c6ba63",
         "type": "github"
       },
       "original": {
         "owner": "vacp2p",
         "repo": "zerokit",
-        "rev": "53b18098e6d5d046e3eb1ac338a8f4f651432477",
+        "rev": "5e64cb8822bee65eed6cf459f95ae72b80c6ba63",
         "type": "github"
       }
     }

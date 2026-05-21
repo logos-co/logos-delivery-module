@@ -4,9 +4,7 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&rev=34c197c5cdad1d5787f8f51b66d7e83014e5480b";
-    # Pin to the same zerokit logos-delivery uses so librln.dylib versions match
-    zerokit.follows = "logos-delivery/zerokit";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&rev=47b8a5fd42aa6d0cdd96bd7e7c751ca3139cec64";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
@@ -21,8 +19,11 @@
         };
         # Bundle librln.dylib alongside liblogosdelivery.dylib so the transitive
         # dep resolves at runtime (and during logos-cpp-generator dlopen).
+        # Sourced from logos-delivery (not zerokit directly) so we bundle the
+        # exact, cargoHash-corrected librln that liblogosdelivery links — zerokit
+        # v2.0.2's own rln package has a stale committed cargoHash.
         rln = {
-          input = inputs.zerokit;
+          input = inputs.logos-delivery;
           packages.default = "rln";
         };
       };
