@@ -42,20 +42,6 @@
               install_name_tool -change "$OLD_RLN" "@rpath/librln.dylib" lib/liblogosdelivery.dylib
             fi
           fi
-
-          # The integration test starts a real node, and liblogosdelivery loads
-          # libpq at runtime via dlopen with a bare name ("libpq.so.5"). The copy
-          # loaded during the test is the Nix store one (resolved via the store
-          # RPATH on the test binary), whose RUNPATH does not include libpq, so
-          # the dlopen fails. Add libpq's libdir to the loader search path for the
-          # test run. The main module build instead bundles libpq into $out/lib via
-          # postInstall; the tests run in place during buildPhase, so extending the
-          # search path is enough here.
-          LIBPQ_LIBDIR=$(pkg-config --variable=libdir libpq 2>/dev/null || true)
-          if [ -n "$LIBPQ_LIBDIR" ] && [ -d "$LIBPQ_LIBDIR" ]; then
-            export LD_LIBRARY_PATH="$LIBPQ_LIBDIR''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            export DYLD_LIBRARY_PATH="$LIBPQ_LIBDIR''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-          fi
         '';
       };
       # Bundle runtime libraries alongside the plugin.
