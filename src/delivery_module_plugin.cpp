@@ -141,7 +141,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     if (deliveryCtx != nullptr) {
         fprintf(stderr, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
-        return {false, {}, "Context not initialized"};
+        return {false, {}, "Context already initialized"};
     }
 
     fprintf(stderr, "DeliveryModuleImpl::createNode called with cfg: %s\n", cfg.c_str());
