@@ -3,6 +3,7 @@
 #include <ctime>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <semaphore>
 #include <unordered_map>
 
@@ -135,6 +136,42 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
     }
 }
 
+// Default every listening port (tcpPort, discv5UdpPort, restPort,
+// metricsServerPort, websocketPort) to 0 so the OS assigns an ephemeral port
+// when the caller did not pin a specific value. Caller-supplied ports are
+// preserved so fleet configs that pin ports keep working. logos-delivery now
+// accepts port 0 (status-im/nim-confutils#146), which makes this work.
+// See logos-delivery-module#18.
+static std::optional<std::string> applyPortDefaults(const std::string& cfg)
+{
+    nlohmann::json cfgObj;
+    try {
+        cfgObj = nlohmann::json::parse(cfg);
+    } catch (const nlohmann::json::parse_error&) {
+        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
+        return std::nullopt;
+    }
+
+    if (!cfgObj.is_object()) {
+        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
+        return std::nullopt;
+    }
+
+    for (const char* portKey : {
+             "tcpPort",
+             "discv5UdpPort",
+             "restPort",
+             "metricsServerPort",
+             "websocketPort",
+         }) {
+        if (!cfgObj.contains(portKey)) {
+            cfgObj[portKey] = 0;
+        }
+    }
+
+    return cfgObj.dump();
+}
+
 StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 {
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
@@ -144,7 +181,14 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return {false, {}, "Context already initialized"};
     }
 
-    fprintf(stderr, "DeliveryModuleImpl::createNode called with cfg: %s\n", cfg.c_str());
+    // Don't log cfg: it can carry sensitive config.
+    fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
+
+    auto cfgWithDefaults = applyPortDefaults(cfg);
+    if (!cfgWithDefaults) {
+        return {false, {}, "Invalid JSON config"};
+    }
+    const std::string& cfgWithPorts = *cfgWithDefaults;
 
     struct CallbackContext {
         std::binary_semaphore sem{0};
@@ -190,7 +234,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         callbackCtx->sem.release();
     };
 
-    deliveryCtx = logosdelivery_create_node(cfg.c_str(), callback, callbackKey);
+    deliveryCtx = logosdelivery_create_node(cfgWithPorts.c_str(), callback, callbackKey);
 
     fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
 
