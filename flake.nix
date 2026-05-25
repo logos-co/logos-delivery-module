@@ -2,7 +2,7 @@
   description = "Logos Delivery Module";
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/chore/bump-cpp-sdk-event-thread-fix";
+    logos-module-builder.url = "github:logos-co/logos-module-builder";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
   };
