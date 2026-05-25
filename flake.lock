@@ -184,11 +184,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1779205755,
-        "narHash": "sha256-iyVLixHdgdCbqdqwUdX4XfN9sg7dCH3yfs4F9tGcDLc=",
+        "lastModified": 1779716125,
+        "narHash": "sha256-PfpmvkXyDnQRW0dcnIthGKE17rm5bwm8KLbEqJcm9kM=",
         "owner": "logos-co",
         "repo": "logos-cpp-sdk",
-        "rev": "8bdbd13848aedb28f1e0ca7475163c7774c63636",
+        "rev": "d77c3dd616384addfcc8c5607860466850fdfcf2",
         "type": "github"
       },
       "original": {
@@ -752,15 +752,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1779391868,
-        "narHash": "sha256-oEl4RwRfBOeKLUn3fZOY5FCpzp0tHMn44bhLzcoob18=",
+        "lastModified": 1779722193,
+        "narHash": "sha256-cEZlSpAi/C3nmyFtuJkgqYRAGtgrvYyO/0h7PNsG0b4=",
         "owner": "logos-co",
         "repo": "logos-module-builder",
-        "rev": "539651325f46eea635576034775a0c209ce4d884",
+        "rev": "b3ef119de159d8479e812a6f5866780dbe03acc0",
         "type": "github"
       },
       "original": {
         "owner": "logos-co",
+        "ref": "chore/bump-cpp-sdk-event-thread-fix",
         "repo": "logos-module-builder",
         "type": "github"
       }
