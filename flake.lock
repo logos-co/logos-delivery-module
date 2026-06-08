@@ -518,11 +518,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1779456774,
-        "narHash": "sha256-s8I3ZRBnD4ho9aXOmlXd2KSwEhNGJOgzeBfcgs/3Wco=",
+        "lastModified": 1780924346,
+        "narHash": "sha256-FCrhlLLwygkZqyO1vYs6Yw88FKGrNU9b8J610UrFRPM=",
         "ref": "refs/heads/master",
-        "rev": "c738c7b65ed0a3b7ce45c201c1d83038aabc0231",
-        "revCount": 2334,
+        "rev": "faa674131124f93fc55573c247c8b60d84e2d71b",
+        "revCount": 2354,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
@@ -5830,17 +5830,17 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1770464364,
-        "narHash": "sha256-z5NJPSBwsLf/OfD8WTmh79tlSU8XgIbwmk6qB1/TFzY=",
+        "lastModified": 1780511130,
+        "narHash": "sha256-2v9lT4ya59Lh1FqPeLnz1MoX9y/wz2huqfe9RtQZITk=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "23d72dabcb3b12469f57b37170fcbc1789bd7457",
+        "rev": "535f3e6942cb1cead3929c604320d3db54b542b9",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "23d72dabcb3b12469f57b37170fcbc1789bd7457",
+        "rev": "535f3e6942cb1cead3929c604320d3db54b542b9",
         "type": "github"
       }
     },
@@ -7950,11 +7950,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1771211437,
-        "narHash": "sha256-lcNK438i4DGtyA+bPXXyVLHVmJjYpVKmpux9WASa3ro=",
+        "lastModified": 1771297684,
+        "narHash": "sha256-wieWskQxZLPlNXX06JEB0bMoS/ZYQ89xBzF0RL9lyLs=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "c62195b3d6e1bb11e0c2fb2a494117d3b55d410f",
+        "rev": "755d3669699a7c62aef35af187d75dc2728cfd85",
         "type": "github"
       },
       "original": {
@@ -7972,6 +7972,8 @@
         "rust-overlay": "rust-overlay_2"
       },
       "locked": {
+        "lastModified": 1779168423,
+        "narHash": "sha256-OmCnpM+ZcI79EVozdKADj9h4sFsLwfCs5w7OK8Ir6fc=",
         "owner": "vacp2p",
         "repo": "zerokit",
         "rev": "5e64cb8822bee65eed6cf459f95ae72b80c6ba63",
