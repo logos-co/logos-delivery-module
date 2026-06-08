@@ -21,7 +21,10 @@
  * - call @ref start before message operations
  * - use @ref subscribe / @ref send / @ref unsubscribe as needed
  * - call @ref stop before shutdown
- * Notice all of these calls are synchronous.
+ *
+ * @ref createNode is synchronous. @ref start and @ref stop return once the
+ * request is dispatched; completion is reported via the `nodeStarted` /
+ * `nodeStopped` events.
  *
  * Asynchronous events are emitted via typed `logos_events:` declarations.
  * The codegen generates method bodies that route through
@@ -110,13 +113,13 @@ public:
 
     /**
      * @brief Starts the delivery node.
-     * @return `true` on success; `false` when no context exists or start fails.
+     * @return `true` once dispatched; completion is reported via `nodeStarted`.
      */
     StdLogosResult start();
 
     /**
      * @brief Stops the delivery node.
-     * @return `true` on success; `false` when no context exists or stop fails.
+     * @return `true` once dispatched; completion is reported via `nodeStopped`.
      */
     StdLogosResult stop();
 
@@ -176,6 +179,9 @@ logos_events:
     void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
     void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
 
+    void nodeStarted(bool success, const std::string& message, int64_t timestamp);
+    void nodeStopped(bool success, const std::string& message, int64_t timestamp);
+
 private:
     void* deliveryCtx;
 
@@ -191,4 +197,9 @@ private:
      * @param userData Opaque pointer expected to be `DeliveryModuleImpl*`.
      */
     static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
+
+    // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
+    // userData is the DeliveryModuleImpl*.
+    static void start_callback(int callerRet, const char* msg, size_t len, void* userData);
+    static void stop_callback(int callerRet, const char* msg, size_t len, void* userData);
 };

@@ -40,6 +40,24 @@ int64_t currentTimestampNs() {
 }
 } // namespace
 
+void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t len, void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) return;
+    impl->nodeStarted(callerRet == RET_OK,
+                      (msg && len > 0) ? std::string(msg, len) : std::string(),
+                      currentTimestampNs());
+}
+
+void DeliveryModuleImpl::stop_callback(int callerRet, const char* msg, size_t len, void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) return;
+    impl->nodeStopped(callerRet == RET_OK,
+                      (msg && len > 0) ? std::string(msg, len) : std::string(),
+                      currentTimestampNs());
+}
+
 DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
@@ -270,21 +288,15 @@ StdLogosResult DeliveryModuleImpl::start()
     fprintf(stderr, "DeliveryModuleImpl::start called\n");
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot start Delivery - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetVoid(
-        "start",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_start_node, deliveryCtx));
-
-    if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Start failed: %s\n", outcome.error.c_str());
+    // Node start can block for a long time (relay reconnect backoff), so return
+    // once dispatched. Completion arrives via nodeStarted.
+    if (logosdelivery_start_node(deliveryCtx, start_callback, this) != RET_OK) {
+        return {false, {}, "failed to initiate start"};
     }
-
-    fprintf(stderr, "DeliveryModuleImpl: Delivery start completed with success\n");
-    return outcome;
+    return {true, {}};
 }
 
 StdLogosResult DeliveryModuleImpl::stop()
@@ -292,21 +304,13 @@ StdLogosResult DeliveryModuleImpl::stop()
     fprintf(stderr, "DeliveryModuleImpl::stop called\n");
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot stop Delivery - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetVoid(
-        "stop",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_stop_node, deliveryCtx));
-
-    if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Stop failed: %s\n", outcome.error.c_str());
+    if (logosdelivery_stop_node(deliveryCtx, stop_callback, this) != RET_OK) {
+        return {false, {}, "failed to initiate stop"};
     }
-
-    fprintf(stderr, "DeliveryModuleImpl: Delivery stop completed with success\n");
-    return outcome;
+    return {true, {}};
 }
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)

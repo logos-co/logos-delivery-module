@@ -1,0 +1,277 @@
+name: "Running This Delivery Module Against logoscore"
+output: delivery-module-runtime.md
+release: ""
+
+intro: |
+  `logos-delivery-module` is a Logos `core` module that wraps
+  [liblogosdelivery](https://github.com/logos-messaging/logos-delivery) to provide
+  high-level message-delivery capabilities. This doc-test exercises **this**
+  delivery-module commit end-to-end through the headless `logoscore` runtime:
+
+  1. Build the `logoscore` CLI and the `lgpm` local package manager from their
+     published flakes. `logoscore` is the headless frontend for `logos-liblogos`,
+     so building it brings in the whole module-runtime stack (`logos_host`,
+     `liblogos_core`, the IPC layer).
+  2. Build **this** delivery module as an installable `.lgx` package straight from
+     its own flake's `#lgx` output, **pinned to the commit under test** — so the
+     module you run is built from exactly what is checked out here, not the latest
+     published release.
+  3. Install the `.lgx` into a `./modules` directory with `lgpm`.
+  4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
+     it with `module-info`, call `createNode` with a Waku node config, then call
+     `start` — verifying the module actually runs and boots a delivery node.
+
+  Because the module is built from the commit under test and then loaded and called
+  through a real `logoscore` daemon, a green run is real evidence that this change
+  keeps the delivery module loadable and callable.
+
+what_you_build: "This `delivery_module`, packaged as `.lgx`, installed with `lgpm`, and called through a `logoscore` daemon."
+
+what_you_learn:
+  - How to build the `logoscore` runtime and the `lgpm` package manager from their flakes
+  - How a module's flake exposes a ready-to-install `.lgx` via its `#lgx` output
+  - How to install an `.lgx` into a modules directory with `lgpm`
+  - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
+  - How to create and start a delivery node with `createNode` and `start`
+  - How to shut the daemon down and confirm it has exited
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then enable flakes:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+
+    Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
+  - "**A Linux or macOS machine.**"
+
+sections:
+  - title: "Build logoscore"
+    step: true
+    text: |
+      Build the `logoscore` CLI from its published flake. The result is symlinked to
+      `./logos/`. `logoscore` is the headless frontend for `logos-liblogos`, so this
+      one build brings in the whole module-runtime stack the daemon needs.
+    steps:
+      - title: "Build the CLI"
+        run: "nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos"
+        code_block: |
+          nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
+        check_file: "logos/bin/logoscore"
+        post_text: |
+          The build produces `logos/bin/logoscore` plus bundled runtime libraries
+          and a `logos/modules/` directory containing the built-in
+          `capability_module` (required for the auth handshake when loading
+          modules).
+
+  - title: "Build the lgpm package manager"
+    step: true
+    text: |
+      `lgpm` installs `.lgx` packages into a modules directory and scans what is
+      installed. Build it from the `logos-package-manager` flake and link it as
+      `./lgpm`.
+    steps:
+      - title: "Build lgpm"
+        run: "nix build 'github:logos-co/logos-package-manager#cli' -o lgpm"
+        check_file: "lgpm/bin/lgpm"
+        post_text: "The executable is at `./lgpm/bin/lgpm`."
+
+  - title: "Build and install this delivery module"
+    step: true
+    text: |
+      Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
+      output and install it into a local `./modules` directory with `lgpm`. Every
+      module built with
+      [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
+      exposes a ready-to-install `#lgx`.
+
+      > The `{release}` in the URL is what pins the build to a specific commit: the
+      > doc-test runner expands it to a concrete ref. Locally that is this
+      > checkout's `HEAD` (see `run.sh`); in CI it is the commit being tested. With
+      > no pin it falls back to the latest `master`.
+    steps:
+      - title: "Build the module's .lgx"
+        text: |
+          Build the `#lgx` output and link it as `./delivery-lgx`. (This compiles
+          the module and its SDK dependencies through Nix, so the first build is
+          slow.)
+        run: "nix build 'github:logos-co/logos-delivery-module{release}#lgx' -o delivery-lgx"
+        code_block: |
+          # From inside the clone this is simply: nix build '.#lgx'
+          nix build 'github:logos-co/logos-delivery-module{release}#lgx' -o delivery-lgx
+        post_text: "The `.lgx` package is now under `./delivery-lgx/`:"
+        extra_run:
+          run: "ls delivery-lgx/*.lgx"
+
+      - title: "Seed the modules directory with the bundled capability module"
+        text: |
+          `delivery_module` is loaded through the host's capability layer, so the
+          modules directory also needs the `capability_module` that ships with
+          `logoscore`. Copy it across first.
+        run: |
+          mkdir -p modules
+          cp -RL ./logos/modules/. ./modules/
+        check_file: "modules/capability_module/manifest.json"
+
+      - title: "Install the .lgx with lgpm"
+        text: |
+          Install the freshly-built package into `./modules`. `delivery_module` is
+          a `core` module, so it goes to `--modules-dir`. The package is unsigned
+          (a local dev build), so we pass `--allow-unsigned`.
+        run: "./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx"
+        expect_contains:
+          - "Installed to:"
+
+      - title: "Confirm the install"
+        text: "Scan the directory and confirm the module landed:"
+        run: "./lgpm/bin/lgpm --modules-dir ./modules list"
+        expect_contains:
+          - "delivery_module"
+        check_file: "modules/delivery_module/manifest.json"
+
+  - title: "Run the daemon and call the module"
+    step: true
+    text: |
+      Start `logoscore` in daemon mode pointed at `./modules`, then use the client
+      subcommands to load `delivery_module`, introspect it, create a node from a
+      Waku config, and start it. Daemon output is captured in `logs.txt`.
+    steps:
+      - title: "Write the node config"
+        text: |
+          Create `waku-config.json` — a `logos.dev` network configuration for the
+          delivery node: cluster 2 with 8 auto-shards, relay/filter/lightpush
+          enabled, mix routing, and discv5 discovery.
+
+          > Extended Kademlia discovery (`enableKadDiscovery` +
+          > `kadBootstrapNodes`) is intentionally omitted here. The node's
+          > `start` performs a **blocking** Kademlia DHT bootstrap that only
+          > returns once the DHT is joined; in a headless/CI run that bootstrap
+          > does not complete, so `start` never returns and the call times out.
+          > discv5 (plus the relay/rendezvous peers) is enough to join the
+          > network for this doc-test. See `tests/test_delivery_start_hang.cpp`.
+        file:
+          path: waku-config.json
+          language: json
+          content: |
+            {
+              "tcpPort": 30303,
+              "discv5UdpPort": 9000,
+              "nodekey": "b9800176f31e41304dff5d385944c349300204361fca56beec956b7181fbc5ae",
+              "clusterId": 2,
+              "numShardsInNetwork": 8,
+              "maxConnections": 300,
+              "relay": true,
+              "store": false,
+              "filter": true,
+              "lightpush": true,
+              "logLevel": "DEBUG",
+              "websocketSupport": true,
+              "websocketPort": 8000,
+              "websocketSecureSupport": false,
+              "discv5Discovery": true,
+              "mix": true,
+              "mixkey": "fc2d71d52cdd37cb49cca3f6a8e6877f40bc999ed67ab5808bb3b9f685cf0f94",
+              "nat": "extip:138.68.122.137",
+              "extMultiaddrs": ["/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303"]
+            }
+
+      - title: "Start the daemon"
+        text: |
+          Start logoscore in daemon mode in the background, capturing output to
+          `logs.txt`:
+        run: "sh -c './logos/bin/logoscore -D -m ./modules > logs.txt 2>&1 &'"
+        code_block: "logoscore -D -m ./modules > logs.txt &"
+        post_text: |
+          The `-D` flag starts the daemon. The client subcommands below connect to
+          this running process via the config written under `~/.logoscore/`.
+
+      - run: "sleep 3"
+
+      - title: "Inspect the startup log"
+        text: "Review the daemon's startup output:"
+        run: "cat logs.txt"
+
+      - title: "Check daemon status"
+        text: "Verify the daemon is running:"
+        run: "./logos/bin/logoscore status"
+        code_block: "logoscore status"
+
+      - title: "List discovered modules"
+        text: "`delivery_module` should be visible in the scan directory:"
+        run: "./logos/bin/logoscore list-modules"
+        code_block: "logoscore list-modules"
+        expect_contains:
+          - "delivery_module"
+
+      - title: "Load the module"
+        text: "Load `delivery_module` into the running daemon:"
+        run: "./logos/bin/logoscore load-module delivery_module"
+        code_block: "logoscore load-module delivery_module"
+        expect_contains:
+          - "delivery_module"
+
+      - title: "Confirm the module is loaded"
+        text: |
+          Re-run `status`; the module that was `not_loaded` before now reports
+          `loaded`:
+        run: "./logos/bin/logoscore status"
+        code_block: "logoscore status"
+        expect_contains:
+          - "delivery_module"
+          - '"status":"loaded"'
+
+      - title: "Introspect the module with module-info"
+        text: |
+          `module-info` lists the `Q_INVOKABLE` methods the module exposes — the
+          same methods you can `call`:
+        run: "./logos/bin/logoscore module-info delivery_module"
+        code_block: "logoscore module-info delivery_module"
+        expect_contains:
+          - "delivery_module"
+          - "createNode"
+          - "start"
+
+      - title: "Create the delivery node"
+        text: |
+          `createNode` takes a Waku node configuration JSON document and creates a
+          liblogosdelivery node context. The `@` prefix tells `logoscore` to load
+          the file contents as the argument:
+        run: "./logos/bin/logoscore call delivery_module createNode @waku-config.json"
+        code_block: "logoscore call delivery_module createNode @waku-config.json"
+        expect_contains:
+          - '"success":true'
+
+      - run: "sleep 5"
+
+      - title: "Start the delivery node"
+        text: |
+          `start` boots the node created by `createNode`. This is a synchronous call
+          that returns when the node has started:
+        run: "./logos/bin/logoscore call delivery_module start"
+        code_block: "logoscore call delivery_module start"
+        expect_contains:
+          - '"success":true'
+
+      - title: "Review daemon logs after node start"
+        text: "Check the daemon output for node startup activity:"
+        run: "cat logs.txt"
+
+      - title: "Stop the daemon"
+        text: "Shut the daemon down cleanly:"
+        run: "./logos/bin/logoscore stop"
+        code_block: "logoscore stop"
+        post_text: |
+          The daemon removes its state file and exits.
+
+      - run: "sleep 5"
+
+      - title: "Confirm the daemon has stopped"
+        text: |
+          With no daemon running, the client reports `not_running` and exits
+          non-zero, so we add `|| true` to let the doc-test assert on the output:
+        run: "./logos/bin/logoscore status || true"
+        code_block: "logoscore status"
+        expect_contains:
+          - '"status":"not_running"'

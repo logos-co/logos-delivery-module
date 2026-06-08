@@ -5,6 +5,7 @@
 
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
+#include "mocks/delivery_module_events_stub.h"
 
 // ---------------------------------------------------------------------------
 // Helper: create an impl that has a valid delivery context (createNode called).
@@ -98,6 +99,60 @@ LOGOS_TEST(stop_succeeds_after_createNode) {
 
     LOGOS_ASSERT_TRUE(impl->stop().success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_stop_node"));
+
+    delete impl;
+}
+
+// start()/stop() report completion via events
+
+LOGOS_TEST(start_emits_node_started_event) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_events::resetNodeLifecycleEvents();
+    auto* impl = createInitializedImpl(t);
+
+    // Dispatch succeeds; the mock fires the completion callback synchronously,
+    // so the nodeStarted event is observable right after start() returns.
+    LOGOS_ASSERT_TRUE(impl->start().success);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStarted.fired);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStarted.success);
+
+    delete impl;
+}
+
+LOGOS_TEST(stop_emits_node_stopped_event) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_events::resetNodeLifecycleEvents();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_TRUE(impl->stop().success);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStopped.fired);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStopped.success);
+
+    delete impl;
+}
+
+LOGOS_TEST(start_returns_false_when_dispatch_fails) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_events::resetNodeLifecycleEvents();
+    auto* impl = createInitializedImpl(t);
+
+    // A non-zero dispatch code means the library refused to start; start()
+    // reports failure immediately and NO completion event is emitted.
+    t.mockCFunction("logosdelivery_start_node").returns(1);
+    LOGOS_ASSERT_FALSE(impl->start().success);
+    LOGOS_ASSERT_FALSE(delivery_test_events::g_lastNodeStarted.fired);
+
+    delete impl;
+}
+
+LOGOS_TEST(stop_returns_false_when_dispatch_fails) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_events::resetNodeLifecycleEvents();
+    auto* impl = createInitializedImpl(t);
+
+    t.mockCFunction("logosdelivery_stop_node").returns(1);
+    LOGOS_ASSERT_FALSE(impl->stop().success);
+    LOGOS_ASSERT_FALSE(delivery_test_events::g_lastNodeStopped.fired);
 
     delete impl;
 }

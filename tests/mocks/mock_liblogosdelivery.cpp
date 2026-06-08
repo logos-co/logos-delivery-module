@@ -1,12 +1,18 @@
 // Mock implementation of liblogosdelivery C functions.
 // Replaces the real Nim library at link time during unit tests.
 //
-// All callback-taking functions invoke the callback synchronously so that the
-// semaphore inside callApiRetVoid / callApiRetValue is released before
-// try_acquire_for starts waiting - matching the storage module mock pattern.
+// Callback-taking functions invoke the callback synchronously so the result is
+// observable before the wrapping call returns - matching the storage module
+// mock pattern. For the blocking wrappers (send/subscribe/...) this releases the
+// api_call_handler semaphore before try_acquire_for waits; for the fire-and-
+// forget start()/stop() it means the nodeStarted/nodeStopped event is emitted
+// synchronously during the dispatch call.
 //
-// Return values and callback messages are controlled via LogosCMockStore:
-//   t.mockCFunction("logosdelivery_start_node").returns(1);  // make it fail
+// Return values and callback messages are controlled via LogosCMockStore.
+// For the int-returning dispatch functions, the return value is the *dispatch*
+// code (0 / RET_OK by default); set a non-zero value to simulate a dispatch
+// failure, in which case no completion callback is fired:
+//   t.mockCFunction("logosdelivery_start_node").returns(1);  // dispatch fails
 
 #include <logos_clib_mock.h>
 #include <cstring>
@@ -50,14 +56,22 @@ int logosdelivery_destroy(void* /*ctx*/, logosdelivery_callback /*cb*/, void* /*
 
 int logosdelivery_start_node(void* /*ctx*/, logosdelivery_callback cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_start_node");
-    invokeOk("logosdelivery_start_node", cb, userData);
-    return RET_OK;
+    // Return value is the dispatch code (default 0 = RET_OK). Only fire the
+    // completion callback when dispatch "succeeds", mirroring the real FFI.
+    int dispatch = LOGOS_CMOCK_RETURN(int, "logosdelivery_start_node");
+    if (dispatch == RET_OK) {
+        invokeOk("logosdelivery_start_node", cb, userData);
+    }
+    return dispatch;
 }
 
 int logosdelivery_stop_node(void* /*ctx*/, logosdelivery_callback cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_stop_node");
-    invokeOk("logosdelivery_stop_node", cb, userData);
-    return RET_OK;
+    int dispatch = LOGOS_CMOCK_RETURN(int, "logosdelivery_stop_node");
+    if (dispatch == RET_OK) {
+        invokeOk("logosdelivery_stop_node", cb, userData);
+    }
+    return dispatch;
 }
 
 int logosdelivery_send(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*msg*/) {
