@@ -24,7 +24,7 @@ The daemon is running; load the module and start the node:
 
 ```bash
 docker exec logos-node logoscore load-module delivery_module --json
-docker exec logos-node logoscore call delivery_module createNode @/conf/logos-dev.json --json
+docker exec logos-node logoscore call delivery_module createNode @/conf/logos-test.json --json
 docker exec logos-node logoscore call delivery_module start --json
 ```
 
@@ -34,7 +34,7 @@ Verify:
 docker exec logos-node logoscore status --json
 ```
 
-The node is now connected to the `logos.dev` network. See
+The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.
 
 ## Stop
@@ -45,7 +45,7 @@ docker compose down
 
 ## Configuration
 
-The node config is [`conf/logos-dev.json`](../conf/logos-dev.json), mounted
-into the container at `/conf`. It uses the `logos.dev` network preset. Edit it
+The node config is [`conf/logos-test.json`](../conf/logos-test.json), mounted
+into the container at `/conf`. It uses the `logos.test` network preset. Edit it
 and re-run the boot steps to change settings; available keys are documented in
 the [README](../README.md#node-configuration-createnode).
