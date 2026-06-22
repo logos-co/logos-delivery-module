@@ -112,7 +112,7 @@ values that differ from defaults need to be supplied.
 | Key                  | Type             | Default    | Description                              |
 |----------------------|------------------|------------|------------------------------------------|
 | `mode`               | string           | `"noMode"` | `"Core"`, `"Edge"`, or `"noMode"`        |
-| `preset`             | string           | `""`       | Network preset (`"twn"`, `"logos.dev"`)   |
+| `preset`             | string           | `""`       | Network preset (`"logos.test"`, `"logos.dev"`, `"twn"`) |
 | `clusterId`          | number (uint16)  | `0`        | Cluster identifier                       |
 | `entryNodes`         | array of string  | `[]`       | Bootstrap peers (enrtree / multiaddress) |
 | `relay`              | boolean          | `false`    | Enable relay protocol                    |
@@ -129,17 +129,19 @@ Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and other
 network-specific defaults automatically. Individual keys supplied alongside a
 preset override the preset values.
 
-- `"twn"` – The RLN-protected Waku Network (cluster 1).
+- `"logos.test"` – Logos Test fleet (the default for running a node; mix
+  enabled, p2pReliability on, auto-shards, built-in bootstrap nodes).
 - `"logos.dev"` – Logos Dev Network (cluster 2, mix enabled, p2pReliability on,
   8 auto-shards, built-in bootstrap nodes).
+- `"twn"` – The RLN-protected Waku Network (cluster 1).
 
-Minimal example using the `logos.dev` preset:
+Minimal example using the default `logos.test` preset:
 
 ```json
 {
   "logLevel": "INFO",
   "mode": "Core",
-  "preset": "logos.dev"
+  "preset": "logos.test"
 }
 ```
 
