@@ -183,6 +183,24 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests - metrics (openmetrics text source)
+// ---------------------------------------------------------------------------
+
+LOGOS_TEST(integration_collectOpenMetricsText_returns_real_exposition_text) {
+    ensureStarted();
+
+    std::string text = g_impl->collectOpenMetricsText();
+
+    // A started node has eagerly-registered metric families in the global
+    // registry, so the rendered document must be non-empty and look like
+    // Prometheus/OpenMetrics exposition text — exactly what the openmetrics
+    // module's collectOpenMetricsText() text source consumes and re-renders.
+    LOGOS_ASSERT_FALSE(text.empty());
+    LOGOS_ASSERT(text.find("# HELP") != std::string::npos);
+    LOGOS_ASSERT(text.find("# TYPE") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
 // Tests - pub/sub (as in simple.cpp)
 // ---------------------------------------------------------------------------
 

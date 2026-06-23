@@ -168,6 +168,26 @@ public:
      */
     StdLogosResult getAvailableConfigs();
 
+    /**
+     * @brief Returns the node's metrics as an OpenMetrics/Prometheus text
+     *        document, so the `openmetrics` module can scrape this module.
+     *
+     * liblogosdelivery already aggregates Prometheus metrics in its global
+     * registry and renders them as exposition text behind the `"Metrics"`
+     * node-info attribute. This method just hands that text back verbatim — no
+     * reshaping — which satisfies the openmetrics `metrics_source` interface's
+     * `collectOpenMetricsText()` convention. The openmetrics scraper parses the
+     * text, injects a `module="delivery_module"` label on every series, and
+     * merges it with other modules. Select this method per-module in the
+     * openmetrics `start` config with `{"name":"delivery_module","format":"text"}`.
+     *
+     * Returns an empty string before a node has been created, or when the
+     * underlying read fails, so a scrape never errors out on this module.
+     *
+     * @return OpenMetrics/Prometheus exposition text (possibly empty).
+     */
+    std::string collectOpenMetricsText();
+
     std::string name() const { return "delivery_module"; }
 
     std::string version() const;

@@ -307,6 +307,34 @@ LOGOS_TEST(getAvailableConfigs_returns_empty_on_ffi_failure) {
     LOGOS_ASSERT_FALSE(result.success);
 }
 
+// collectOpenMetricsText
+
+LOGOS_TEST(collectOpenMetricsText_returns_empty_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+
+    LOGOS_ASSERT_EQ(impl.collectOpenMetricsText(), std::string(""));
+    // No context -> we must not even attempt the FFI read.
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_get_node_info"));
+}
+
+LOGOS_TEST(collectOpenMetricsText_returns_metrics_text_verbatim) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    const char* promText =
+        "# HELP waku_node_messages_total number of messages\n"
+        "# TYPE waku_node_messages_total counter\n"
+        "waku_node_messages_total{shard=\"0\"} 42\n";
+    t.mockCFunction("logosdelivery_get_node_info").returns(promText);
+
+    // The module is a pure passthrough: the openmetrics scraper does the parsing.
+    LOGOS_ASSERT_EQ(impl->collectOpenMetricsText(), std::string(promText));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_node_info"));
+
+    delete impl;
+}
+
 // module name
 
 LOGOS_TEST(name_returns_delivery_module) {

@@ -472,3 +472,27 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
 
     return outcome;
 }
+
+std::string DeliveryModuleImpl::collectOpenMetricsText()
+{
+    if (!deliveryCtx) {
+        // No node yet — empty document; the openmetrics scraper renders nothing
+        // for this module rather than treating the scrape as a hard error.
+        return "";
+    }
+
+    auto outcome = callApiRetValue(
+        "get_node_info",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx, "Metrics"));
+
+    if (!outcome.success || !outcome.value.is_string()) {
+        fprintf(stderr, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",
+                outcome.error.c_str());
+        return "";
+    }
+
+    // Hand the exposition text back verbatim; the openmetrics module parses it,
+    // injects the module="delivery_module" label, and merges it with others.
+    return outcome.value.get<std::string>();
+}
