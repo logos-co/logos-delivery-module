@@ -5,7 +5,7 @@ or HTTP API — interaction is via the `logoscore` CLI. You can run it three way
 
 - [With Docker](#with-docker) — quickest; everything runs in a container.
 - [Prebuilt binaries](#without-docker-prebuilt-binaries) — download release
-  binaries, nothing to build (Linux only).
+  binaries, nothing to build (Linux and macOS).
 - [Build with Nix](#without-docker-build-with-nix) — build from source on any
   platform.
 
@@ -52,62 +52,76 @@ docker compose down
 
 ## Without Docker: prebuilt binaries
 
-Download the `logoscore` daemon, the `lgpm` package manager, and this module's
-prebuilt `.lgx` from their GitHub releases — nothing to build, no repository
-clone required. Each Logos module is published from
-[`logos-modules-release`](https://github.com/logos-co/logos-modules-release)
-under a per-module tag (e.g. `delivery_module-v0.1.3`).
+Run a node from released binaries — nothing to build, no repository clone. You
+need three CLIs from the Logos releases:
 
-> Published only for Linux (`x86_64` / `aarch64`). On macOS, use Docker or the
-> Nix build below — the `logoscore` daemon is released only for Linux.
->
-> The `logos.test` preset requires `delivery_module` **≥ 0.1.3**; earlier builds
-> only know `twn` and `logos.dev`.
+- **`logoscore`** — the node daemon ([logos-logoscore-cli](https://github.com/logos-co/logos-logoscore-cli))
+- **`lgpd`** — package downloader, fetches modules from the Logos catalog
+  ([logos-package-downloader](https://github.com/logos-co/logos-package-downloader))
+- **`lgpm`** — package manager, installs them locally
+  ([logos-package-manager](https://github.com/logos-co/logos-package-manager))
+
+All three are published for Linux (`x86_64` / `aarch64`) and macOS (Apple
+Silicon / `aarch64`).
+
+### Get the tools onto your `PATH`
+
+The release tags below are the current pre-releases — bump them to the newest
+from each repo's releases page if needed.
+
+**Linux** (each tarball holds one AppImage; AppImages need FUSE — in a
+container/headless host without it, `export APPIMAGE_EXTRACT_AND_RUN=1`):
 
 ```bash
 arch=x86_64        # or: aarch64
-
-# logoscore daemon (AppImage) — latest release
-curl -L -o logoscore \
-  "https://github.com/logos-co/logos-logoscore-cli/releases/latest/download/logoscore-${arch}-linux.AppImage"
-chmod +x logoscore
-
-# lgpm package manager (an AppImage inside the tarball)
-curl -L "https://github.com/logos-co/logos-package-manager/releases/download/pre-release-05b2cf8-7/lgpm-${arch}-linux.tar.gz" | tar xz
-chmod +x "lgpm-${arch}.AppImage"
-
-# This module, prebuilt (needs >= 0.1.3 for the logos.test preset)
-ver=0.1.3
-curl -L -o "delivery_module-${ver}.lgx" \
-  "https://github.com/logos-co/logos-modules-release/releases/download/delivery_module-v${ver}/delivery_module-${ver}.lgx"
-
-# Install the module into ./modules
-mkdir -p modules
-"./lgpm-${arch}.AppImage" --modules-dir ./modules --allow-unsigned install --file "delivery_module-${ver}.lgx"
+curl -fsSL "https://github.com/logos-co/logos-logoscore-cli/releases/download/pre-release-8002477-4/logoscore-${arch}-linux.tar.gz" | tar xz
+curl -fsSL "https://github.com/logos-co/logos-package-downloader/releases/download/pre-release-99d70db-7/lgpd-${arch}-linux.tar.gz" | tar xz
+curl -fsSL "https://github.com/logos-co/logos-package-manager/releases/download/pre-release-05b2cf8-7/lgpm-${arch}-linux.tar.gz" | tar xz
+mkdir -p bin
+for t in logoscore lgpd lgpm; do chmod +x "${t}-${arch}.AppImage"; ln -sf "$PWD/${t}-${arch}.AppImage" "bin/$t"; done
+export PATH="$PWD/bin:$PATH"
 ```
 
-Write the node config and boot the node (the daemon binds `capability_module`
-automatically, so the `./modules` dir only needs `delivery_module`):
+**macOS (Apple Silicon):**
 
 ```bash
+curl -fsSL "https://github.com/logos-co/logos-logoscore-cli/releases/download/pre-release-8002477-4/logoscore-aarch64-macos.tar.gz" | tar xz
+curl -fsSL "https://github.com/logos-co/logos-package-downloader/releases/download/pre-release-99d70db-7/lgpd-aarch64-macos.tar.gz" | tar xz
+curl -fsSL "https://github.com/logos-co/logos-package-manager/releases/download/pre-release-05b2cf8-7/lgpm-aarch64-macos.tar.gz" | tar xz
+export PATH="$PWD/logoscore-aarch64-macos/bin:$PWD/lgpd-aarch64-macos/bin:$PWD/lgpm-aarch64-macos/bin:$PATH"
+```
+
+### Download the module and boot the node
+
+```bash
+# Fetch delivery_module from the Logos catalog, then install it into ./modules
+lgpd download delivery_module --output ./packages
+mkdir -p modules
+lgpm install --dir ./packages --modules-dir ./modules
+
+# logos.test node config
 cat > logos-test.json <<'JSON'
 { "preset": "logos.test", "logLevel": "DEBUG" }
 JSON
 
-./logoscore -D -m ./modules > logs.txt &
-./logoscore load-module delivery_module
-./logoscore call delivery_module createNode @logos-test.json
-./logoscore call delivery_module start
+# Run the daemon (it binds capability_module automatically, so ./modules only
+# needs delivery_module), then boot the node
+logoscore -D -m ./modules > logs.txt &
+logoscore load-module delivery_module
+logoscore call delivery_module createNode @logos-test.json
+logoscore call delivery_module start
 ```
 
-Verify with `./logoscore status`; stop with `./logoscore stop`.
+Verify with `logoscore status`; stop with `logoscore stop`.
 
-> Both `lgpm` and the module are pinned to specific tags above (neither has a
-> rolling `latest`). Bump `ver` to the newest `delivery_module-*` tag from the
-> [logos-modules-release releases](https://github.com/logos-co/logos-modules-release/releases),
-> and `lgpm` to the newest from the
-> [package-manager releases](https://github.com/logos-co/logos-package-manager/releases),
-> as needed.
+> `lgpd download delivery_module` pulls the newest version from the Logos
+> catalog — `lgpd`'s built-in repository is
+> [`logos-modules-release`](https://github.com/logos-co/logos-modules-release).
+> The `logos.test` preset needs `delivery_module` **≥ 0.1.3**; earlier builds
+> only know `twn` and `logos.dev`. (You can also grab a specific `.lgx`
+> straight from the
+> [release page](https://github.com/logos-co/logos-modules-release/releases)
+> and skip `lgpd` — `lgpm install --file <path>` then takes it.)
 
 ## Without Docker: build with Nix
 
