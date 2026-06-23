@@ -54,11 +54,15 @@ docker compose down
 
 Download the `logoscore` daemon, the `lgpm` package manager, and this module's
 prebuilt `.lgx` from their GitHub releases — nothing to build, no repository
-clone required. The module package ([`logos-modules`](https://github.com/logos-co/logos-modules)
-releases) bundles every Logos module, including `delivery_module`.
+clone required. Each Logos module is published from
+[`logos-modules-release`](https://github.com/logos-co/logos-modules-release)
+under a per-module tag (e.g. `delivery_module-v0.1.3`).
 
 > Published only for Linux (`x86_64` / `aarch64`). On macOS, use Docker or the
 > Nix build below — the `logoscore` daemon is released only for Linux.
+>
+> The `logos.test` preset requires `delivery_module` **≥ 0.1.3**; earlier builds
+> only know `twn` and `logos.dev`.
 
 ```bash
 arch=x86_64        # or: aarch64
@@ -72,13 +76,14 @@ chmod +x logoscore
 curl -L "https://github.com/logos-co/logos-package-manager/releases/download/pre-release-05b2cf8-7/lgpm-${arch}-linux.tar.gz" | tar xz
 chmod +x "lgpm-${arch}.AppImage"
 
-# This module, prebuilt — latest logos-modules release
-curl -L -o delivery_module.lgx \
-  "https://github.com/logos-co/logos-modules/releases/latest/download/delivery_module.lgx"
+# This module, prebuilt (needs >= 0.1.3 for the logos.test preset)
+ver=0.1.3
+curl -L -o "delivery_module-${ver}.lgx" \
+  "https://github.com/logos-co/logos-modules-release/releases/download/delivery_module-v${ver}/delivery_module-${ver}.lgx"
 
 # Install the module into ./modules
 mkdir -p modules
-"./lgpm-${arch}.AppImage" --modules-dir ./modules --allow-unsigned install --file delivery_module.lgx
+"./lgpm-${arch}.AppImage" --modules-dir ./modules --allow-unsigned install --file "delivery_module-${ver}.lgx"
 ```
 
 Write the node config and boot the node (the daemon binds `capability_module`
@@ -97,10 +102,12 @@ JSON
 
 Verify with `./logoscore status`; stop with `./logoscore stop`.
 
-> `lgpm` has no stable release yet, so its URL is pinned to a specific
-> pre-release tag — bump it to the newest from the
-> [package-manager releases](https://github.com/logos-co/logos-package-manager/releases)
-> if needed.
+> Both `lgpm` and the module are pinned to specific tags above (neither has a
+> rolling `latest`). Bump `ver` to the newest `delivery_module-*` tag from the
+> [logos-modules-release releases](https://github.com/logos-co/logos-modules-release/releases),
+> and `lgpm` to the newest from the
+> [package-manager releases](https://github.com/logos-co/logos-package-manager/releases),
+> as needed.
 
 ## Without Docker: build with Nix
 
