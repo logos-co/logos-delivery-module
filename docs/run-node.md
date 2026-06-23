@@ -66,17 +66,22 @@ Silicon / `aarch64`).
 
 ### Get the tools onto your `PATH`
 
-The release tags below are the current pre-releases — bump them to the newest
-from each repo's releases page if needed.
+These helpers resolve and download each tool's **latest** release (the binaries
+currently ship as pre-releases, so we read the newest tag rather than pin one):
+
+```bash
+latest() { curl -fsSL "https://api.github.com/repos/logos-co/$1/releases" | grep -m1 '"tag_name":' | cut -d'"' -f4; }
+dl()     { curl -fsSL "https://github.com/logos-co/$1/releases/download/$(latest "$1")/$2"; }
+```
 
 **Linux** (each tarball holds one AppImage; AppImages need FUSE — in a
 container/headless host without it, `export APPIMAGE_EXTRACT_AND_RUN=1`):
 
 ```bash
 arch=x86_64        # or: aarch64
-curl -fsSL "https://github.com/logos-co/logos-logoscore-cli/releases/download/pre-release-8002477-4/logoscore-${arch}-linux.tar.gz" | tar xz
-curl -fsSL "https://github.com/logos-co/logos-package-downloader/releases/download/pre-release-99d70db-7/lgpd-${arch}-linux.tar.gz" | tar xz
-curl -fsSL "https://github.com/logos-co/logos-package-manager/releases/download/pre-release-05b2cf8-7/lgpm-${arch}-linux.tar.gz" | tar xz
+dl logos-logoscore-cli      "logoscore-${arch}-linux.tar.gz" | tar xz
+dl logos-package-downloader "lgpd-${arch}-linux.tar.gz"      | tar xz
+dl logos-package-manager    "lgpm-${arch}-linux.tar.gz"      | tar xz
 mkdir -p bin
 for t in logoscore lgpd lgpm; do chmod +x "${t}-${arch}.AppImage"; ln -sf "$PWD/${t}-${arch}.AppImage" "bin/$t"; done
 export PATH="$PWD/bin:$PATH"
@@ -85,9 +90,9 @@ export PATH="$PWD/bin:$PATH"
 **macOS (Apple Silicon):**
 
 ```bash
-curl -fsSL "https://github.com/logos-co/logos-logoscore-cli/releases/download/pre-release-8002477-4/logoscore-aarch64-macos.tar.gz" | tar xz
-curl -fsSL "https://github.com/logos-co/logos-package-downloader/releases/download/pre-release-99d70db-7/lgpd-aarch64-macos.tar.gz" | tar xz
-curl -fsSL "https://github.com/logos-co/logos-package-manager/releases/download/pre-release-05b2cf8-7/lgpm-aarch64-macos.tar.gz" | tar xz
+dl logos-logoscore-cli      "logoscore-aarch64-macos.tar.gz" | tar xz
+dl logos-package-downloader "lgpd-aarch64-macos.tar.gz"      | tar xz
+dl logos-package-manager    "lgpm-aarch64-macos.tar.gz"      | tar xz
 export PATH="$PWD/logoscore-aarch64-macos/bin:$PWD/lgpd-aarch64-macos/bin:$PWD/lgpm-aarch64-macos/bin:$PATH"
 ```
 
@@ -113,15 +118,6 @@ logoscore call delivery_module start
 ```
 
 Verify with `logoscore status`; stop with `logoscore stop`.
-
-> `lgpd download delivery_module` pulls the newest version from the Logos
-> catalog — `lgpd`'s built-in repository is
-> [`logos-modules-release`](https://github.com/logos-co/logos-modules-release).
-> The `logos.test` preset needs `delivery_module` **≥ 0.1.3**; earlier builds
-> only know `twn` and `logos.dev`. (You can also grab a specific `.lgx`
-> straight from the
-> [release page](https://github.com/logos-co/logos-modules-release/releases)
-> and skip `lgpd` — `lgpm install --file <path>` then takes it.)
 
 ## Without Docker: build with Nix
 
@@ -208,3 +204,29 @@ keys are documented in the
 
 The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.
+
+## Metrics
+
+The node already aggregates Prometheus metrics internally (the same set exposed
+on `metricsServerPort`, rendered behind the `"Metrics"` node-info attribute).
+`collectOpenMetricsText()` hands that exposition text back **verbatim** so the
+[`openmetrics`](https://github.com/logos-co/openmetrics-module) module can scrape
+this module without standing up a separate HTTP server — no in-module parsing or
+reshaping. The openmetrics scraper parses the text, injects a
+`module="delivery_module"` label on every series, and merges it with other
+modules.
+
+Point the `openmetrics` module at this one by name, selecting the text-source
+convention with `"format": "text"`:
+
+```bash
+logoscore --config-dir /tmp/om call openmetrics start \
+  '{"port":9090,"modules":[{"name":"delivery_module","format":"text"}]}'
+curl http://localhost:9090/metrics   # every series carries module="delivery_module"
+```
+
+Before a node is created (or if the read fails) `collectOpenMetricsText()`
+returns an empty document so a scrape never errors out on this module.
+
+For a one-off read without the `openmetrics` module, the raw exposition text is
+also available via `getNodeInfo Metrics` — see [`query-node.md`](./query-node.md).

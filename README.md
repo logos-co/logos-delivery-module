@@ -98,7 +98,7 @@ The delivery module provides the following API methods (all synchronous, all ret
 - `getAvailableNodeInfoIDs()` - List queryable node info identifiers
 - `getNodeInfo(nodeInfoId: QString)` - Retrieve node info by identifier
 - `getAvailableConfigs()` - Retrieve available configuration parameter descriptions
-- `collectOpenMetricsText()` - Node metrics as OpenMetrics/Prometheus text for the `openmetrics` module (see [Metrics](#metrics))
+- `collectOpenMetricsText()` - Node metrics as OpenMetrics/Prometheus text for the `openmetrics` module (see [docs/run-node.md → Metrics](docs/run-node.md#metrics))
 
 ### Node Configuration (`createNode`)
 
@@ -202,26 +202,11 @@ carries a `QVariantList data` with positional values:
 
 ### Metrics
 
-The node already aggregates Prometheus metrics internally (the same set exposed
-on `metricsServerPort`, rendered behind the `"Metrics"` node-info attribute).
-`collectOpenMetricsText()` hands that exposition text back **verbatim** so the
-[`openmetrics`](https://github.com/logos-co/openmetrics-module) module can scrape
-this module without standing up a separate HTTP server — no in-module parsing or
-reshaping. The openmetrics scraper parses the text, injects a
-`module="delivery_module"` label on every series, and merges it with other
-modules.
-
-Point the `openmetrics` module at this one by name, selecting the text-source
-convention with `"format": "text"`:
-
-```bash
-logoscore --config-dir /tmp/om call openmetrics start \
-  '{"port":9090,"modules":[{"name":"delivery_module","format":"text"}]}'
-curl http://localhost:9090/metrics   # every series carries module="delivery_module"
-```
-
-Before a node is created (or if the read fails) `collectOpenMetricsText()`
-returns an empty document so a scrape never errors out on this module.
+`collectOpenMetricsText()` returns the node's internal Prometheus metrics as
+OpenMetrics/Prometheus exposition text for the
+[`openmetrics`](https://github.com/logos-co/openmetrics-module) module to scrape.
+For how to wire up `openmetrics` and scrape a running node, see
+[Running a node → Metrics](docs/run-node.md#metrics).
 
 ## Architecture
 
