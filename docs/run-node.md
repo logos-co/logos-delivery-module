@@ -66,9 +66,9 @@ Silicon / `aarch64`).
 
 ### Install the tools
 
-This downloads the newest `logoscore`, `lgpd`, and `lgpm` for your OS/arch into
-`./bin` (the binaries currently ship as pre-releases, so the script resolves the
-latest release of each):
+This downloads `logoscore`, `lgpd`, and `lgpm` for your OS/arch into `./bin`
+(the script pins a known-good release of each — bump the `*_TAG` values in it to
+move to newer builds):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/logos-co/logos-delivery-module/master/scripts/install-node-tools.sh | sh

@@ -1,10 +1,15 @@
 #!/bin/sh
 # Download the Logos node CLIs — logoscore, lgpd, lgpm — into ./bin.
 #
-# Resolves each tool's newest release (they currently ship as pre-releases) and
-# unpacks the build for the host OS/arch. Works on Linux (x86_64/aarch64) and
-# macOS (Apple Silicon). After it finishes:  export PATH="$PWD/bin:$PATH"
+# Unpacks a pinned release of each tool for the host OS/arch. Works on Linux
+# (x86_64/aarch64) and macOS (Apple Silicon). To move to newer builds, bump the
+# *_TAG values below. After it finishes:  export PATH="$PWD/bin:$PATH"
 set -eu
+
+# Pinned tool releases (latest at time of writing).
+LOGOSCORE_TAG=pre-release-8002477-4
+LGPD_TAG=pre-release-99d70db-7
+LGPM_TAG=pre-release-05b2cf8-7
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 if [ "$os" = darwin ]; then os=macos; fi
@@ -19,17 +24,9 @@ esac
 bin="$PWD/bin"
 mkdir -p "$bin"
 
-# newest release tag for a logos-co repo (includes pre-releases)
-latest() {
-  curl -fsSL "https://api.github.com/repos/logos-co/$1/releases" \
-    | grep -m1 '"tag_name":' | cut -d'"' -f4
-}
-
-# fetch <repo> <tool>: download <tool>-<arch>-<os>.tar.gz and expose ./bin/<tool>
+# fetch <repo> <tool> <tag>: download <tool>-<arch>-<os>.tar.gz, expose ./bin/<tool>
 fetch() {
-  repo=$1; tool=$2
-  tag=$(latest "$repo")
-  [ -n "$tag" ] || { echo "no release found for $repo" >&2; exit 1; }
+  repo=$1; tool=$2; tag=$3
   echo "  $tool ($tag)"
   tmp=$(mktemp -d)
   curl -fsSL "https://github.com/logos-co/$repo/releases/download/$tag/$tool-$arch-$os.tar.gz" \
@@ -51,9 +48,9 @@ fetch() {
 }
 
 echo "Installing Logos node tools for $os/$arch into $bin ..."
-fetch logos-logoscore-cli      logoscore
-fetch logos-package-downloader lgpd
-fetch logos-package-manager    lgpm
+fetch logos-logoscore-cli      logoscore "$LOGOSCORE_TAG"
+fetch logos-package-downloader lgpd      "$LGPD_TAG"
+fetch logos-package-manager    lgpm      "$LGPM_TAG"
 echo
 echo "Done. Put them on your PATH:"
 echo "  export PATH=\"$bin:\$PATH\""
