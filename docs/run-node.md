@@ -64,44 +64,23 @@ need three CLIs from the Logos releases:
 All three are published for Linux (`x86_64` / `aarch64`) and macOS (Apple
 Silicon / `aarch64`).
 
-### Get the tools onto your `PATH`
+### Install the tools
 
-These helpers resolve and download each tool's **latest** release (the binaries
-currently ship as pre-releases, so we read the newest tag rather than pin one):
-
-```bash
-latest() { curl -fsSL "https://api.github.com/repos/logos-co/$1/releases" | grep -m1 '"tag_name":' | cut -d'"' -f4; }
-dl()     { curl -fsSL "https://github.com/logos-co/$1/releases/download/$(latest "$1")/$2"; }
-```
-
-**Linux** (each tarball holds one AppImage; AppImages need FUSE — in a
-container/headless host without it, `export APPIMAGE_EXTRACT_AND_RUN=1`):
+This downloads the newest `logoscore`, `lgpd`, and `lgpm` for your OS/arch into
+`./bin` (the binaries currently ship as pre-releases, so the script resolves the
+latest release of each):
 
 ```bash
-arch=x86_64        # or: aarch64
-dl logos-logoscore-cli      "logoscore-${arch}-linux.tar.gz" | tar xz
-dl logos-package-downloader "lgpd-${arch}-linux.tar.gz"      | tar xz
-dl logos-package-manager    "lgpm-${arch}-linux.tar.gz"      | tar xz
-mkdir -p bin
-for t in logoscore lgpd lgpm; do chmod +x "${t}-${arch}.AppImage"; ln -sf "$PWD/${t}-${arch}.AppImage" "bin/$t"; done
+curl -fsSL https://raw.githubusercontent.com/logos-co/logos-delivery-module/master/scripts/install-node-tools.sh | sh
 export PATH="$PWD/bin:$PATH"
-```
-
-**macOS (Apple Silicon):**
-
-```bash
-dl logos-logoscore-cli      "logoscore-aarch64-macos.tar.gz" | tar xz
-dl logos-package-downloader "lgpd-aarch64-macos.tar.gz"      | tar xz
-dl logos-package-manager    "lgpm-aarch64-macos.tar.gz"      | tar xz
-export PATH="$PWD/logoscore-aarch64-macos/bin:$PWD/lgpd-aarch64-macos/bin:$PWD/lgpm-aarch64-macos/bin:$PATH"
 ```
 
 ### Download the module and boot the node
 
 ```bash
 # Fetch delivery_module from the Logos catalog, then install it into ./modules
+mkdir -p packages modules
 lgpd download delivery_module --output ./packages
-mkdir -p modules
 lgpm install --dir ./packages --modules-dir ./modules
 
 # logos.test node config
