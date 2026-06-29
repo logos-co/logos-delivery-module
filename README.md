@@ -252,3 +252,5 @@ cmake -B build -S . -GNinja
 # Build
 ninja -C build
 ```
+
+<!-- attic cache hit-test PR (no-op, will be closed) -->
