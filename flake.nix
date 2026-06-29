@@ -1,6 +1,13 @@
 {
   description = "Logos Delivery Module";
 
+  # Pull pre-built artifacts (liblogosdelivery, librln, …) from the self-hosted
+  # Logos Attic cache. Read-only and public; see infra-ci#263.
+  nixConfig = {
+    extra-substituters = [ "https://cache.nix.logos.co/public" ];
+    extra-trusted-public-keys = [ "public:Z1wyVBEx8PHbXujYB52Mysv9Rd8rWIhyQ3bQyef9yy4=" ];
+  };
+
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
