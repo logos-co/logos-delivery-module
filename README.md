@@ -124,6 +124,15 @@ values that differ from defaults need to be supplied.
 | `logFormat`          | string           | `"TEXT"`   | `"TEXT"` or `"JSON"`                     |
 | `maxMessageSize`     | string           | `"150KiB"` | Maximum message payload size             |
 
+`logLevel` also sets the verbosity of the module's own diagnostics, which go to
+stderr and are forwarded by the host. The `DELIVERY_MODULE_LOG_LEVEL`
+environment variable (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`) overrides it
+for them without touching the node configuration; it is read once when the
+plugin is constructed, so it also covers the lines printed before `createNode`
+runs. Per-message and per-operation lines sit at `DEBUG`, and full event
+payloads at `TRACE`, so the default `INFO` keeps message traffic out of the
+logs.
+
 #### Presets
 
 Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and other
