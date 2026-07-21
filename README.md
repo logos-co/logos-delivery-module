@@ -124,6 +124,13 @@ values that differ from defaults need to be supplied.
 | `logFormat`          | string           | `"TEXT"`   | `"TEXT"` or `"JSON"`                     |
 | `maxMessageSize`     | string           | `"150KiB"` | Maximum message payload size             |
 
+`logLevel` reaches the node but does not change how much it logs. The bundled
+liblogosdelivery resolves each log statement's level when it is compiled, so the
+ceiling is a build-time property; this module pins it to `WARN` in `flake.nix` to
+keep the node's peer-discovery and subscription-upkeep chatter out of an
+embedding host's console. Lower it there and rebuild the library to get those
+diagnostics back.
+
 #### Presets
 
 Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and other
