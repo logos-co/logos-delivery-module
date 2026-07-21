@@ -1,10 +1,15 @@
 #include "delivery_module_plugin.h"
+#include <atomic>
+#include <cctype>
+#include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <semaphore>
+#include <string>
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
@@ -38,6 +43,104 @@ int64_t currentTimestampNs() {
     clock_gettime(CLOCK_REALTIME, &ts);
     return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
 }
+
+// Verbosity of the plugin's own stderr diagnostics, declared by decreasing
+// severity: a line prints when its level does not exceed the current one.
+enum class LogLevel { Error, Warn, Info, Debug, Trace };
+
+std::atomic<LogLevel> currentLogLevel{LogLevel::Info};
+
+// Set once DELIVERY_MODULE_LOG_LEVEL has supplied a level, which the createNode
+// `logLevel` key must then not overwrite.
+std::atomic<bool> logLevelPinnedByEnv{false};
+
+std::optional<LogLevel> parseLogLevel(const std::string& name) {
+    std::string upper;
+    upper.reserve(name.size());
+    for (unsigned char ch : name) {
+        upper.push_back(static_cast<char>(std::toupper(ch)));
+    }
+
+    if (upper == "ERROR") return LogLevel::Error;
+    if (upper == "WARN") return LogLevel::Warn;
+    if (upper == "INFO") return LogLevel::Info;
+    if (upper == "DEBUG") return LogLevel::Debug;
+    if (upper == "TRACE") return LogLevel::Trace;
+    return std::nullopt;
+}
+
+// The host classifies a forwarded stderr line by looking for these tokens
+// anywhere in it (logos-liblogos subprocess_container.cpp); an unprefixed line
+// is logged at info.
+const char* logLevelPrefix(LogLevel level) {
+    switch (level) {
+    case LogLevel::Error: return "ERROR: ";
+    case LogLevel::Warn:  return "Warning: ";
+    case LogLevel::Info:  return "";
+    case LogLevel::Debug: return "Debug: ";
+    case LogLevel::Trace: return "Trace: ";
+    }
+    return "";
+}
+
+// Composes the whole line before writing it: liblogosdelivery callbacks log
+// from their own threads, and a separate write for the prefix could end up on
+// stderr apart from the message it belongs to.
+[[gnu::format(printf, 2, 3)]]
+void logAt(LogLevel level, const char* fmt, ...) {
+    if (level > currentLogLevel.load(std::memory_order_relaxed)) return;
+
+    va_list args;
+    va_start(args, fmt);
+    va_list sizeArgs;
+    va_copy(sizeArgs, args);
+    const int size = std::vsnprintf(nullptr, 0, fmt, sizeArgs);
+    va_end(sizeArgs);
+
+    std::string message;
+    if (size > 0) {
+        message.resize(static_cast<size_t>(size));
+        std::vsnprintf(message.data(), static_cast<size_t>(size) + 1, fmt, args);
+    }
+    va_end(args);
+
+    fprintf(stderr, "%s%s", logLevelPrefix(level), message.c_str());
+}
+
+void initLogLevelFromEnv() {
+    std::optional<LogLevel> level;
+    if (const char* value = std::getenv("DELIVERY_MODULE_LOG_LEVEL")) {
+        level = parseLogLevel(value);
+    }
+
+    logLevelPinnedByEnv.store(level.has_value(), std::memory_order_relaxed);
+    if (level) {
+        currentLogLevel.store(*level, std::memory_order_relaxed);
+    }
+}
+
+// Takes the plugin's verbosity from the createNode `logLevel` key, shared with
+// the node's own logger. An absent or unrecognized value leaves the current
+// level in place; a malformed config is reported by applyPortDefaults.
+void applyConfigLogLevel(const std::string& cfg) {
+    if (logLevelPinnedByEnv.load(std::memory_order_relaxed)) return;
+
+    nlohmann::json cfgObj;
+    try {
+        cfgObj = nlohmann::json::parse(cfg);
+    } catch (const nlohmann::json::parse_error&) {
+        return;
+    }
+
+    if (!cfgObj.is_object()) return;
+
+    const auto logLevelIt = cfgObj.find("logLevel");
+    if (logLevelIt == cfgObj.end() || !logLevelIt->is_string()) return;
+
+    if (auto level = parseLogLevel(logLevelIt->get<std::string>())) {
+        currentLogLevel.store(*level, std::memory_order_relaxed);
+    }
+}
 } // namespace
 
 void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t len, void* userData)
@@ -60,8 +163,10 @@ void DeliveryModuleImpl::stop_callback(int callerRet, const char* msg, size_t le
 
 DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 {
-    fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
-    fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
+    initLogLevelFromEnv();
+
+    logAt(LogLevel::Info, "DeliveryModuleImpl: Initializing...\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl: Initialized successfully\n");
 }
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
@@ -74,28 +179,28 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
 
 void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
-    fprintf(stderr, "DeliveryModuleImpl::event_callback called with ret: %d\n", callerRet);
+    logAt(LogLevel::Debug, "DeliveryModuleImpl::event_callback called with ret: %d\n", callerRet);
 
     DeliveryModuleImpl* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
-        fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid userData\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl::event_callback: Invalid userData\n");
         return;
     }
 
     if (msg && len > 0) {
         std::string message(msg, len);
-        fprintf(stderr, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
+        logAt(LogLevel::Trace, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
 
         nlohmann::json jsonObj;
         try {
             jsonObj = nlohmann::json::parse(message);
         } catch (const nlohmann::json::parse_error&) {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
+            logAt(LogLevel::Error, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
             return;
         }
 
         if (!jsonObj.is_object()) {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
+            logAt(LogLevel::Error, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
             return;
         }
 
@@ -149,7 +254,7 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
                 timestamp);
 
         } else {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
+            logAt(LogLevel::Error, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
         }
     }
 }
@@ -166,12 +271,12 @@ static std::optional<std::string> applyPortDefaults(const std::string& cfg)
     try {
         cfgObj = nlohmann::json::parse(cfg);
     } catch (const nlohmann::json::parse_error&) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
         return std::nullopt;
     }
 
     if (!cfgObj.is_object()) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
         return std::nullopt;
     }
 
@@ -195,12 +300,14 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
 
     if (deliveryCtx != nullptr) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
         return {false, {}, "Context already initialized"};
     }
 
+    applyConfigLogLevel(cfg);
+
     // Don't log cfg: it can carry sensitive config.
-    fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl::createNode called\n");
 
     auto cfgWithDefaults = applyPortDefaults(cfg);
     if (!cfgWithDefaults) {
@@ -226,7 +333,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
 
     auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", callerRet);
+        logAt(LogLevel::Info, "DeliveryModuleImpl::createNode callback called with ret: %d\n", callerRet);
 
         std::shared_ptr<CallbackContext> callbackCtx;
         {
@@ -246,7 +353,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         callbackCtx->callerRet = callerRet;
         if (msg && len > 0) {
             callbackCtx->message = std::string(msg, len);
-            fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", callbackCtx->message.c_str());
+            logAt(LogLevel::Debug, "DeliveryModuleImpl::createNode callback message: %s\n", callbackCtx->message.c_str());
         }
 
         callbackCtx->sem.release();
@@ -254,7 +361,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     deliveryCtx = logosdelivery_create_node(cfgWithPorts.c_str(), callback, callbackKey);
 
-    fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl: Waiting for createNode callback...\n");
 
     if (!callbackCtx->sem.try_acquire_for(CALLBACK_TIMEOUT)) {
         std::lock_guard<std::mutex> lock(pendingMutex);
@@ -262,22 +369,22 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
         deliveryCtx = nullptr;
 
-        fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
         return {false, {}, "Timeout waiting for createNode callback"};
     }
 
     if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
         if (!callbackCtx->message.empty()) {
-            fprintf(stderr, "DeliveryModuleImpl: createNode callback error: %s\n", callbackCtx->message.c_str());
+            logAt(LogLevel::Error, "DeliveryModuleImpl: createNode callback error: %s\n", callbackCtx->message.c_str());
         }
 
         deliveryCtx = nullptr;
 
-        fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Failed to create Delivery context\n");
         return {false, {}, "Failed to create Delivery context"};
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl: Delivery context created successfully\n");
 
     logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
     return {true, {}};
@@ -285,7 +392,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
 StdLogosResult DeliveryModuleImpl::start()
 {
-    fprintf(stderr, "DeliveryModuleImpl::start called\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl::start called\n");
 
     if (!deliveryCtx) {
         return {false, {}, "Context not initialized"};
@@ -301,7 +408,7 @@ StdLogosResult DeliveryModuleImpl::start()
 
 StdLogosResult DeliveryModuleImpl::stop()
 {
-    fprintf(stderr, "DeliveryModuleImpl::stop called\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl::stop called\n");
 
     if (!deliveryCtx) {
         return {false, {}, "Context not initialized"};
@@ -315,10 +422,10 @@ StdLogosResult DeliveryModuleImpl::stop()
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)
 {
-    fprintf(stderr, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
+    logAt(LogLevel::Debug, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
@@ -335,23 +442,23 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
         bindApiCall(logosdelivery_send, deliveryCtx, messageJson.c_str()));
 
     if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
-                contentTopic.c_str(), outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
+              contentTopic.c_str(), outcome.error.c_str());
     }
 
     if (outcome.success && outcome.value.is_string()) {
-        fprintf(stderr, "DeliveryModuleImpl: Send initiated for topic: %s, with success, requestId: %s\n",
-                contentTopic.c_str(), outcome.value.get<std::string>().c_str());
+        logAt(LogLevel::Debug, "DeliveryModuleImpl: Send initiated for topic: %s, with success, requestId: %s\n",
+              contentTopic.c_str(), outcome.value.get<std::string>().c_str());
     }
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
 {
-    fprintf(stderr, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
+    logAt(LogLevel::Debug, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
@@ -361,20 +468,20 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
         bindApiCall(logosdelivery_subscribe, deliveryCtx, contentTopic.c_str()));
 
     if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
-                contentTopic.c_str(), outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
+              contentTopic.c_str(), outcome.error.c_str());
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: Subscribe completed for topic: %s with success\n", contentTopic.c_str());
+    logAt(LogLevel::Debug, "DeliveryModuleImpl: Subscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
 {
-    fprintf(stderr, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
+    logAt(LogLevel::Debug, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
 
@@ -384,18 +491,18 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
         bindApiCall(logosdelivery_unsubscribe, deliveryCtx, contentTopic.c_str()));
 
     if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
-                contentTopic.c_str(), outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
+              contentTopic.c_str(), outcome.error.c_str());
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
+    logAt(LogLevel::Debug, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
 }
 
 std::string DeliveryModuleImpl::version() const {
     std::string moduleVersion = "1.1.0";
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot get version - context not initialized. Call createNode first.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot get version - context not initialized. Call createNode first.\n");
         return moduleVersion + " (liblogosdelivery version unknown, context not initialized)";
     }
 
@@ -405,22 +512,22 @@ std::string DeliveryModuleImpl::version() const {
         bindApiCall(logosdelivery_get_node_info, deliveryCtx, "Version"));
 
     if (!liblogosDeliveryVersion.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Get node info failed getting version, reason: %s\n",
-                liblogosDeliveryVersion.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Get node info failed getting version, reason: %s\n",
+              liblogosDeliveryVersion.error.c_str());
         return moduleVersion + " (liblogosdelivery version unknown)";
     }
 
     std::string ver = liblogosDeliveryVersion.value.get<std::string>();
-    fprintf(stderr, "DeliveryModuleImpl: Get node info completed for attribute: Version, with success: %s\n", ver.c_str());
+    logAt(LogLevel::Info, "DeliveryModuleImpl: Get node info completed for attribute: Version, with success: %s\n", ver.c_str());
 
     return moduleVersion + " (liblogosdelivery version: " + ver + ")";
 }
 
 StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
-    fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
@@ -429,16 +536,16 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
         bindApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
 
     if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
     }
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
-    fprintf(stderr, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
+    logAt(LogLevel::Info, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
@@ -447,18 +554,18 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
         bindApiCall(logosdelivery_get_node_info, deliveryCtx, nodeInfoId.c_str()));
 
     if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
-                nodeInfoId.c_str(), outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
+              nodeInfoId.c_str(), outcome.error.c_str());
     }
 
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
-    fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
+    logAt(LogLevel::Info, "DeliveryModuleImpl::getAvailableConfigs called\n");
 
     if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
@@ -467,7 +574,7 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
         bindApiCall(logosdelivery_get_available_configs, deliveryCtx));
 
     if (!outcome.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
     }
 
     return outcome;
@@ -487,8 +594,8 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
         bindApiCall(logosdelivery_get_node_info, deliveryCtx, "Metrics"));
 
     if (!outcome.success || !outcome.value.is_string()) {
-        fprintf(stderr, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",
-                outcome.error.c_str());
+        logAt(LogLevel::Error, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",
+              outcome.error.c_str());
         return "";
     }
 

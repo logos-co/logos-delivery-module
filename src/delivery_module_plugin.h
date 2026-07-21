@@ -73,6 +73,12 @@ public:
      * | `logFormat`          | string           | `"TEXT"`   | `"TEXT"` or `"JSON"`                        |
      * | `maxMessageSize`     | string           | `"150KiB"` | Maximum message payload size                |
      *
+     * `logLevel` also sets the verbosity of this plugin's own diagnostics. The
+     * `DELIVERY_MODULE_LOG_LEVEL` environment variable (`TRACE`, `DEBUG`,
+     * `INFO`, `WARN`, `ERROR`), read once when the plugin is constructed,
+     * overrides it for them and also covers the lines printed before a
+     * configuration arrives here.
+     *
      * ## Presets
      * Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and
      * other network-specific defaults automatically. Individual keys supplied

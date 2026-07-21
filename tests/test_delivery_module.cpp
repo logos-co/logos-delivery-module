@@ -3,6 +3,11 @@
 // Mocks invoke callbacks synchronously so the semaphore inside api_call_handler.h
 // is released before try_acquire_for starts waiting.
 
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <unistd.h>
+
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
 #include "mocks/delivery_module_events_stub.h"
@@ -341,4 +346,69 @@ LOGOS_TEST(name_returns_delivery_module) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_EQ(impl.name(), std::string("delivery_module"));
+}
+
+// log level
+
+// Returns what the plugin wrote to stderr while `body` ran.
+template <typename Body>
+static std::string captureStderr(Body&& body) {
+    FILE* capture = tmpfile();
+    if (!capture) return {};
+
+    fflush(stderr);
+    const int savedStderr = dup(fileno(stderr));
+    dup2(fileno(capture), fileno(stderr));
+
+    body();
+
+    fflush(stderr);
+    dup2(savedStderr, fileno(stderr));
+    close(savedStderr);
+
+    std::string captured;
+    rewind(capture);
+    char buffer[512];
+    size_t bytesRead = 0;
+    while ((bytesRead = fread(buffer, 1, sizeof(buffer), capture)) > 0) {
+        captured.append(buffer, bytesRead);
+    }
+    fclose(capture);
+    return captured;
+}
+
+LOGOS_TEST(config_log_level_gates_plugin_diagnostics) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    // The level is process-wide, so construct with a clean environment to keep
+    // this independent of the env-override test.
+    unsetenv("DELIVERY_MODULE_LOG_LEVEL");
+    DeliveryModuleImpl impl;
+
+    const std::string output = captureStderr([&] {
+        impl.createNode(R"({"logLevel":"ERROR"})");
+        impl.subscribe("/test/1/delivery/proto");
+        impl.createNode(R"({"logLevel":"ERROR"})");
+    });
+
+    LOGOS_ASSERT(output.find("createNode called") == std::string::npos);
+    LOGOS_ASSERT(output.find("subscribe called") == std::string::npos);
+    LOGOS_ASSERT(output.find("ERROR: DeliveryModuleImpl: createNode rejected") != std::string::npos);
+}
+
+LOGOS_TEST(env_log_level_overrides_config_log_level) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    setenv("DELIVERY_MODULE_LOG_LEVEL", "DEBUG", 1);
+    DeliveryModuleImpl impl;
+
+    const std::string output = captureStderr([&] {
+        impl.createNode(R"({"logLevel":"ERROR"})");
+        impl.subscribe("/test/1/delivery/proto");
+    });
+    unsetenv("DELIVERY_MODULE_LOG_LEVEL");
+
+    LOGOS_ASSERT(output.find("Debug: DeliveryModuleImpl::subscribe called") != std::string::npos);
 }
