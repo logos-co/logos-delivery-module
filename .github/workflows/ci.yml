@@ -10,14 +10,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  ATTIC_CACHE: ${{ github.ref == 'refs/heads/master' && 'public' || 'ci' }}
-
 jobs:
   build-and-test:
-    # ATTIC_TOKEN_PUBLIC only exists in the public-cache environment; master
-    # builds run there so they can push to the public cache. Everything else
-    # uses the repo-wide ATTIC_TOKEN_CI and the ci cache.
+    # master builds push what they build to the public Attic cache;
+    # ATTIC_TOKEN_PUBLIC only exists in the public-cache environment.
+    # Pulling needs no setup — the cache is a public substituter declared
+    # in flake.nix (accept-flake-config below turns it on in CI).
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     strategy:
       fail-fast: false
@@ -35,16 +33,16 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@main
         with:
           extra-conf: |
-            extra-substituters = https://cache.nix.logos.co/public
-            extra-trusted-public-keys = public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=
+            accept-flake-config = true
             fallback = true
 
-      - name: Setup Attic cache
+      - name: Push builds to Attic public cache
+        if: github.ref == 'refs/heads/master'
         uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
-          cache: ${{ env.ATTIC_CACHE }}
-          token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
+          cache: public
+          token: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
 
       - name: Build module
         run: nix build -L
