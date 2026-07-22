@@ -36,9 +36,16 @@ concurrency:
   group: doctests-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ATTIC_CACHE: ${{ github.ref == 'refs/heads/master' && 'public' || 'ci' }}
+
 jobs:
   doctests:
     name: delivery-module doc-tests (${{ matrix.os }})
+    # ATTIC_TOKEN_PUBLIC only exists in the public-cache environment; master
+    # builds run there so they can push to the public cache. Everything else
+    # uses the repo-wide ATTIC_TOKEN_CI and the ci cache.
+    environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -53,14 +60,18 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            extra-substituters = https://cache.nix.logos.co/public
+            extra-trusted-public-keys = public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU=
+            fallback = true
 
       - name: Setup Attic cache
-        uses: ryanccn/attic-action@v0
+        uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
-          cache: public
-          token: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
-          skip-push: ${{ github.event_name == 'pull_request' }}
+          cache: ${{ env.ATTIC_CACHE }}
+          token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
 
       - name: Verify module builds from this commit
         run: nix build .#lgx -L
