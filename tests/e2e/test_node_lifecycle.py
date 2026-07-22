@@ -11,7 +11,7 @@ from libs.constants import CONTENT_TOPIC
 from libs.helpers import LogosDelivery, make_delivery_config
 
 
-def test_module_loads_and_lifecycle(solo_daemon):
+def test_create_start_and_stop_node(solo_daemon):
     delivery = LogosDelivery(solo_daemon.client())
     delivery.load()
     delivery.create_node(make_delivery_config())

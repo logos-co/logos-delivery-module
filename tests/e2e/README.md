@@ -31,7 +31,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 
 | Test | Daemons | Asserts |
 |---|---|---|
-| `test_module_loads_and_lifecycle` | 1 | `load_module → createNode → start → stop` all succeed over RPC |
+| `test_create_start_and_stop_node` | 1 | `load_module → createNode → start → stop` all succeed over RPC |
 | `test_createNode_twice_rejected` | 1 | second `createNode` returns `success=false` |
 | `test_query_and_subscribe_methods` | 1 | queries (`getAvailableConfigs`/`getAvailableNodeInfoIDs`/`getNodeInfo`/`version`) + `subscribe`/`unsubscribe` round-trip |
 | `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for its `requestId` |
