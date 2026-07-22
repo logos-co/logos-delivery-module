@@ -3,9 +3,7 @@ directly via staticnodes (node A's container-routable multiaddr).
 
 Gate = the sender observes `messagePropagated` for its send — the signal proven
 by logos-delivery-interop-tests (relay-only, no store ⇒ no messageSent). The
-receiver-side `messageReceived` assertion is xfail until a green run confirms
-delivery's receive path and the event-payload shape; no reference exercises it.
-See README → "Event payload shape".
+receiver-side `messageReceived` path is exercised too. See README → "Event payload shape".
 """
 
 from __future__ import annotations
@@ -32,10 +30,6 @@ RECEIVED_TIMEOUT_S = 20.0
 pytestmark = pytest.mark.two_node
 
 
-@pytest.mark.xfail(
-    reason="blocked by https://github.com/logos-co/logos-delivery-module/issues/59",
-    strict=False,
-)
 def test_two_nodes_propagation(node_a, node_b):
     """Gate: node A publishes; A observes messagePropagated for its requestId.
 
@@ -56,10 +50,6 @@ def test_two_nodes_propagation(node_a, node_b):
         assert rid == request_id, f"messagePropagated requestId {rid!r} != sent {request_id!r}"
 
 
-@pytest.mark.xfail(
-    reason="blocked by https://github.com/logos-co/logos-delivery-module/issues/59",
-    strict=False,
-)
 def test_bidirectional_propagation(node_a, node_b):
     """Both directions propagate: A→B and B→A."""
     node_a.subscribe(CONTENT_TOPIC)
@@ -76,12 +66,6 @@ def test_bidirectional_propagation(node_a, node_b):
             assert rid == request_id, f"{sender.label}: propagated requestId {rid!r} != sent {request_id!r}"
 
 
-@pytest.mark.xfail(
-    reason="fix #58 (build) and #59 (send/subscribe) first, then check the receive path: "
-    "https://github.com/logos-co/logos-delivery-module/issues/58, "
-    "https://github.com/logos-co/logos-delivery-module/issues/59",
-    strict=False,
-)
 def test_two_nodes_message_received(node_a, node_b):
     """Node A subscribes; B publishes; A observes messageReceived for the topic."""
     node_a.subscribe(CONTENT_TOPIC)

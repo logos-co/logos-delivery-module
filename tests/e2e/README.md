@@ -36,7 +36,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_query_and_subscribe_methods` | 1 | queries (`getAvailableConfigs`/`getAvailableNodeInfoIDs`/`getNodeInfo`/`version`) + `subscribe`/`unsubscribe` round-trip |
 | `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for its `requestId` |
 | `test_bidirectional_propagation` | 2 | A→B and B→A both propagate |
-| `test_two_nodes_message_received` | 2 | **xfail** — receiver sees `messageReceived` (see below) |
+| `test_two_nodes_message_received` | 2 | receiver sees `messageReceived` (see below) |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -52,16 +52,12 @@ result events. Only message delivery is async, via the typed events
 The logoscore CLI serializes a typed event as `{"event": <name>, "data": {"arg0":
 <1st arg>, "arg1": <2nd arg>, ...}}` — each codegen event arg lands at `argN` by
 position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTopic`
-= `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that. Two things
-remain **unverified**, because no reference exercises delivery's receive path:
+= `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
 
-- whether `messageReceived` fires at all in this setup;
-- how the `vector<uint8_t>` `payload` arg is serialized.
-
-So the propagation gate matches `messagePropagated` and its `requestId` (`arg0`),
-while `test_two_nodes_message_received` is `xfail` and logs the raw event repr. On
-the first green run, read `messageReceived payload: …` from the logs, confirm the
-`payload` decoding in `libs/helpers.py`, and promote the test to a hard assertion.
+`messageReceived` fires and its `contentTopic` (`arg1`) is asserted. The
+`vector<uint8_t>` `payload` arg's serialization is **not yet asserted** — if you
+extend the receive checks to the payload, read `messageReceived payload: …` from
+the logs and confirm the decoding in `libs/helpers.py` first.
 
 ## Prerequisites
 

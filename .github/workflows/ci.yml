@@ -100,17 +100,6 @@ jobs:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           LOGOSCORE_PY_FORWARD_OUTPUT: "1"
 
-      - name: Capture start-wedge gdb backtrace (#58 diagnostic)
-        if: always()
-        continue-on-error: true
-        run: |
-          command -v gdb >/dev/null || { sudo apt-get update || true; sudo apt-get install -y gdb; }
-          mkdir -p ${{ runner.temp }}/e2e-logs/wedge
-          cd tests/e2e
-          python diagnostics/wedge_gdb.py
-        env:
-          WEDGE_OUT_DIR: ${{ runner.temp }}/e2e-logs/wedge
-
       - name: Collect docker container logs on failure
         if: failure()
         run: |
@@ -120,11 +109,10 @@ jobs:
             docker logs "$c" > "${{ runner.temp }}/e2e-logs/${name}.log" 2>&1 || true
           done
 
-      - name: Upload daemon logs and wedge diagnostics
-        if: always()
+      - name: Upload daemon logs on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-logs
-          path: ${{ runner.temp }}/e2e-logs/
-          if-no-files-found: ignore
+          path: ${{ runner.temp }}/e2e-logs/*.log
           retention-days: 7
