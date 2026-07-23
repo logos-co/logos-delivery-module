@@ -36,6 +36,9 @@
  * - `message_propagated` -> `messagePropagated`
  * - `message_received` -> `messageReceived`
  * - `connection_status_change` -> `connectionStateChanged`
+ * - `channel_message_received` -> `channelMessageReceived`
+ * - `channel_message_sent` -> `channelMessageSent`
+ * - `channel_message_error` -> `channelMessageError`
  *
  * As a general concept consider using proper content_topic format for your purpose.
  * --> https://lip.logos.co/messaging/informational/23/topics.html#content-topics
@@ -154,6 +157,58 @@ public:
      */
     StdLogosResult unsubscribe(const std::string& contentTopic);
 
+    /**
+     * @brief Creates (or re-opens) a reliable channel.
+     *
+     * Persisted channel state survives @ref channelClose, so re-creating a
+     * channel with the same id restores it.
+     *
+     * @param channelId Application-chosen channel identifier.
+     * @param contentTopic Content topic the channel communicates on.
+     * @param senderId This participant's SDS (Scalable Data Sync) sender identifier.
+     * @return Success with the channel id, or error details.
+     */
+    StdLogosResult channelCreate(const std::string& channelId,
+                                 const std::string& contentTopic,
+                                 const std::string& senderId);
+
+    /**
+     * @brief Checks whether a reliable channel is currently open.
+     *
+     * An unknown channel id is not an error.
+     *
+     * @param channelId Channel identifier.
+     * @return Success with `"true"` or `"false"` (verbatim FFI string), or error details.
+     */
+    StdLogosResult channelExists(const std::string& channelId);
+
+    /**
+     * @brief Sends a message on a reliable channel.
+     *
+     * Builds the JSON envelope expected by `logosdelivery_channel_send`:
+     * `{ "payload": base64, "ephemeral": false }`.
+     *
+     * Returns a requestId on success. Async results come via typed events:
+     * - `channelMessageSent` once every segment of the send is confirmed
+     * - `channelMessageError` if the send finalises with a failed segment
+     *
+     * @param channelId Channel identifier.
+     * @param payload Raw message bytes; base64-encoded before crossing the FFI boundary.
+     * @return Success with request id, or error details.
+     */
+    StdLogosResult channelSend(const std::string& channelId, const std::vector<uint8_t>& payload);
+
+    /**
+     * @brief Closes a reliable channel: stops its SDS loops.
+     *
+     * Persisted state survives, so @ref channelCreate with the same id
+     * restores the channel.
+     *
+     * @param channelId Channel identifier.
+     * @return `true` when closed successfully, otherwise `false`.
+     */
+    StdLogosResult channelClose(const std::string& channelId);
+
     StdLogosResult getAvailableNodeInfoIDs();
 
     /**
@@ -198,6 +253,10 @@ logos_events:
     void messagePropagated(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
     void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
     void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
+
+    void channelMessageReceived(const std::string& channelId, const std::string& senderId, const std::vector<uint8_t>& payload, int64_t timestamp);
+    void channelMessageSent(const std::string& channelId, const std::string& requestId, int64_t timestamp);
+    void channelMessageError(const std::string& channelId, const std::string& requestId, const std::string& error, int64_t timestamp);
 
     void nodeStarted(bool success, const std::string& message, int64_t timestamp);
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);

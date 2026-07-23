@@ -150,6 +150,30 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
                 jsonObj.value("connectionStatus", ""),
                 timestamp);
 
+        } else if (eventType == "channel_message_received") {
+            std::vector<uint8_t> payloadBytes;
+            if (jsonObj.contains("payload") && jsonObj["payload"].is_string()) {
+                payloadBytes = base64Decode(jsonObj["payload"].get<std::string>());
+            }
+            impl->channelMessageReceived(
+                jsonObj.value("channelId", ""),
+                jsonObj.value("senderId", ""),
+                payloadBytes,
+                timestamp);
+
+        } else if (eventType == "channel_message_sent") {
+            impl->channelMessageSent(
+                jsonObj.value("channelId", ""),
+                jsonObj.value("requestId", ""),
+                timestamp);
+
+        } else if (eventType == "channel_message_error") {
+            impl->channelMessageError(
+                jsonObj.value("channelId", ""),
+                jsonObj.value("requestId", ""),
+                jsonObj.value("error", ""),
+                timestamp);
+
         } else {
             fprintf(stderr, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
         }
@@ -422,6 +446,106 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     }
 
     fprintf(stderr, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
+    return outcome;
+}
+
+StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
+                                                 const std::string& contentTopic,
+                                                 const std::string& senderId)
+{
+    fprintf(stderr, "DeliveryModuleImpl::channelCreate called with channelId: %s, contentTopic: %s\n",
+            channelId.c_str(), contentTopic.c_str());
+
+    if (!deliveryCtx) {
+        fprintf(stderr, "DeliveryModuleImpl: Cannot create channel - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
+    }
+
+    auto outcome = callApiRetValue(
+        "channel_create",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_channel_create, deliveryCtx,
+                    channelId.c_str(), contentTopic.c_str(), senderId.c_str()));
+
+    if (!outcome.success) {
+        fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
+                channelId.c_str(), outcome.error.c_str());
+    }
+    return outcome;
+}
+
+StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
+{
+    fprintf(stderr, "DeliveryModuleImpl::channelExists called with channelId: %s\n", channelId.c_str());
+
+    if (!deliveryCtx) {
+        fprintf(stderr, "DeliveryModuleImpl: Cannot query channel - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
+    }
+
+    auto outcome = callApiRetValue(
+        "channel_exists",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_channel_exists, deliveryCtx, channelId.c_str()));
+
+    if (!outcome.success) {
+        fprintf(stderr, "DeliveryModuleImpl: Channel exists failed for id: %s, reason: %s\n",
+                channelId.c_str(), outcome.error.c_str());
+    }
+    return outcome;
+}
+
+StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, const std::vector<uint8_t>& payload)
+{
+    fprintf(stderr, "DeliveryModuleImpl::channelSend called with channelId: %s\n", channelId.c_str());
+
+    if (!deliveryCtx) {
+        fprintf(stderr, "DeliveryModuleImpl: Cannot send channel message - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
+    }
+
+    nlohmann::json messageObj;
+    messageObj["payload"] = base64Encode(payload);
+    messageObj["ephemeral"] = false;
+
+    std::string messageJson = messageObj.dump();
+
+    auto outcome = callApiRetValue(
+        "channel_send",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_channel_send, deliveryCtx,
+                    channelId.c_str(), messageJson.c_str()));
+
+    if (!outcome.success) {
+        fprintf(stderr, "DeliveryModuleImpl: Channel send failed for id: %s, reason: %s\n",
+                channelId.c_str(), outcome.error.c_str());
+    }
+
+    if (outcome.success && outcome.value.is_string()) {
+        fprintf(stderr, "DeliveryModuleImpl: Channel send initiated for id: %s, with success, requestId: %s\n",
+                channelId.c_str(), outcome.value.get<std::string>().c_str());
+    }
+    return outcome;
+}
+
+StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
+{
+    fprintf(stderr, "DeliveryModuleImpl::channelClose called with channelId: %s\n", channelId.c_str());
+
+    if (!deliveryCtx) {
+        fprintf(stderr, "DeliveryModuleImpl: Cannot close channel - context not initialized.\n");
+        return {false, {}, "Context not initialized"};
+    }
+
+    auto outcome = callApiRetVoid(
+        "channel_close",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_channel_close, deliveryCtx, channelId.c_str()));
+
+    if (!outcome.success) {
+        fprintf(stderr, "DeliveryModuleImpl: Channel close failed for id: %s, reason: %s\n",
+                channelId.c_str(), outcome.error.c_str());
+    }
     return outcome;
 }
 
