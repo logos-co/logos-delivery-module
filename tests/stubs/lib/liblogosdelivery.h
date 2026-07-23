@@ -2,6 +2,11 @@
 // logos-delivery (master 8ad99f1) so that delivery_module_plugin.cpp compiles
 // during unit tests without the real library. Keep in sync with the real,
 // Nim-build-generated header when bumping the logos-delivery flake input.
+//
+// Note on the channel-events comment below: "onChannelMessageReceived/Sent/
+// Error" are upstream's internal listener labels; the JSON "eventType" values
+// actually delivered to the event callback are "channel_message_received",
+// "channel_message_sent" and "channel_message_error" (see node_api.nim).
 
 #pragma once
 #ifndef __liblogosdelivery__

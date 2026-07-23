@@ -45,13 +45,22 @@ int64_t currentTimestampNs() {
 // emitting path in logos-delivery the payload arrives either as a JSON array
 // of numbers (generic Nim seq[byte] serialization, e.g. message_received) or
 // as a base64 string (hand-built events, e.g. channel_message_received).
-// Any other shape decodes to empty.
+// Any other shape — including an array with a non-byte element — decodes to
+// empty. Must not throw: it runs inside the FFI event callback, where an
+// escaping C++ exception would unwind into Nim frames and terminate.
 std::vector<uint8_t> decodePayloadField(const nlohmann::json& payloadValue) {
     std::vector<uint8_t> payloadBytes;
     if (payloadValue.is_array()) {
         payloadBytes.reserve(payloadValue.size());
         for (const auto& val : payloadValue) {
-            payloadBytes.push_back(static_cast<uint8_t>(val.get<int>()));
+            if (!val.is_number_integer()) {
+                return {};
+            }
+            auto byte = val.get<int64_t>();
+            if (byte < 0 || byte > 255) {
+                return {};
+            }
+            payloadBytes.push_back(static_cast<uint8_t>(byte));
         }
     } else if (payloadValue.is_string()) {
         payloadBytes = base64Decode(payloadValue.get<std::string>());
@@ -106,86 +115,88 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
         std::string message(msg, len);
         fprintf(stderr, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
 
-        nlohmann::json jsonObj;
+        // This function is a C callback invoked from the Nim runtime: a C++
+        // exception escaping here would unwind into Nim frames and terminate
+        // the process. Catch the whole nlohmann exception hierarchy (parse
+        // errors and type mismatches from .value()/.get()) and drop the event.
         try {
-            jsonObj = nlohmann::json::parse(message);
-        } catch (const nlohmann::json::parse_error&) {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
-            return;
-        }
+            nlohmann::json jsonObj = nlohmann::json::parse(message);
 
-        if (!jsonObj.is_object()) {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
-            return;
-        }
-
-        std::string eventType = jsonObj.value("eventType", "");
-        int64_t timestamp = currentTimestampNs();
-
-        if (eventType == "message_sent") {
-            impl->messageSent(
-                jsonObj.value("requestId", ""),
-                jsonObj.value("messageHash", ""),
-                timestamp);
-
-        } else if (eventType == "message_error") {
-            impl->messageError(
-                jsonObj.value("requestId", ""),
-                jsonObj.value("messageHash", ""),
-                jsonObj.value("error", ""),
-                timestamp);
-
-        } else if (eventType == "message_propagated") {
-            impl->messagePropagated(
-                jsonObj.value("requestId", ""),
-                jsonObj.value("messageHash", ""),
-                timestamp);
-
-        } else if (eventType == "message_received") {
-            auto msgObj = jsonObj.value("message", nlohmann::json::object());
-
-            std::string hash = jsonObj.value("messageHash", "");
-            std::string topic = msgObj.value("contentTopic", "");
-
-            std::vector<uint8_t> payloadBytes;
-            if (msgObj.contains("payload")) {
-                payloadBytes = decodePayloadField(msgObj["payload"]);
+            if (!jsonObj.is_object()) {
+                fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
+                return;
             }
 
-            int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
-            impl->messageReceived(hash, topic, payloadBytes, msgTimestamp);
+            std::string eventType = jsonObj.value("eventType", "");
+            int64_t timestamp = currentTimestampNs();
 
-        } else if (eventType == "connection_status_change") {
-            impl->connectionStateChanged(
-                jsonObj.value("connectionStatus", ""),
-                timestamp);
+            if (eventType == "message_sent") {
+                impl->messageSent(
+                    jsonObj.value("requestId", ""),
+                    jsonObj.value("messageHash", ""),
+                    timestamp);
 
-        } else if (eventType == "channel_message_received") {
-            std::vector<uint8_t> payloadBytes;
-            if (jsonObj.contains("payload")) {
-                payloadBytes = decodePayloadField(jsonObj["payload"]);
+            } else if (eventType == "message_error") {
+                impl->messageError(
+                    jsonObj.value("requestId", ""),
+                    jsonObj.value("messageHash", ""),
+                    jsonObj.value("error", ""),
+                    timestamp);
+
+            } else if (eventType == "message_propagated") {
+                impl->messagePropagated(
+                    jsonObj.value("requestId", ""),
+                    jsonObj.value("messageHash", ""),
+                    timestamp);
+
+            } else if (eventType == "message_received") {
+                auto msgObj = jsonObj.value("message", nlohmann::json::object());
+
+                std::string hash = jsonObj.value("messageHash", "");
+                std::string topic = msgObj.value("contentTopic", "");
+
+                std::vector<uint8_t> payloadBytes;
+                if (msgObj.contains("payload")) {
+                    payloadBytes = decodePayloadField(msgObj["payload"]);
+                }
+
+                int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
+                impl->messageReceived(hash, topic, payloadBytes, msgTimestamp);
+
+            } else if (eventType == "connection_status_change") {
+                impl->connectionStateChanged(
+                    jsonObj.value("connectionStatus", ""),
+                    timestamp);
+
+            } else if (eventType == "channel_message_received") {
+                std::vector<uint8_t> payloadBytes;
+                if (jsonObj.contains("payload")) {
+                    payloadBytes = decodePayloadField(jsonObj["payload"]);
+                }
+                impl->channelMessageReceived(
+                    jsonObj.value("channelId", ""),
+                    jsonObj.value("senderId", ""),
+                    payloadBytes,
+                    timestamp);
+
+            } else if (eventType == "channel_message_sent") {
+                impl->channelMessageSent(
+                    jsonObj.value("channelId", ""),
+                    jsonObj.value("requestId", ""),
+                    timestamp);
+
+            } else if (eventType == "channel_message_error") {
+                impl->channelMessageError(
+                    jsonObj.value("channelId", ""),
+                    jsonObj.value("requestId", ""),
+                    jsonObj.value("error", ""),
+                    timestamp);
+
+            } else {
+                fprintf(stderr, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
             }
-            impl->channelMessageReceived(
-                jsonObj.value("channelId", ""),
-                jsonObj.value("senderId", ""),
-                payloadBytes,
-                timestamp);
-
-        } else if (eventType == "channel_message_sent") {
-            impl->channelMessageSent(
-                jsonObj.value("channelId", ""),
-                jsonObj.value("requestId", ""),
-                timestamp);
-
-        } else if (eventType == "channel_message_error") {
-            impl->channelMessageError(
-                jsonObj.value("channelId", ""),
-                jsonObj.value("requestId", ""),
-                jsonObj.value("error", ""),
-                timestamp);
-
-        } else {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
+        } catch (const nlohmann::json::exception& e) {
+            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid event JSON: %s\n", e.what());
         }
     }
 }
