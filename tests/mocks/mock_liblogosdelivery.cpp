@@ -92,6 +92,32 @@ int logosdelivery_unsubscribe(void* /*ctx*/, logosdelivery_callback cb, void* us
     return RET_OK;
 }
 
+int logosdelivery_channel_create(void* /*ctx*/, logosdelivery_callback cb, void* userData,
+                                 const char* /*channelId*/, const char* /*contentTopic*/, const char* /*senderId*/) {
+    LOGOS_CMOCK_RECORD("logosdelivery_channel_create");
+    invokeOk("logosdelivery_channel_create", cb, userData);
+    return RET_OK;
+}
+
+int logosdelivery_channel_exists(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*channelId*/) {
+    LOGOS_CMOCK_RECORD("logosdelivery_channel_exists");
+    invokeOk("logosdelivery_channel_exists", cb, userData);
+    return RET_OK;
+}
+
+int logosdelivery_channel_send(void* /*ctx*/, logosdelivery_callback cb, void* userData,
+                               const char* /*channelId*/, const char* /*msg*/) {
+    LOGOS_CMOCK_RECORD("logosdelivery_channel_send");
+    invokeOk("logosdelivery_channel_send", cb, userData);
+    return RET_OK;
+}
+
+int logosdelivery_channel_close(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*channelId*/) {
+    LOGOS_CMOCK_RECORD("logosdelivery_channel_close");
+    invokeOk("logosdelivery_channel_close", cb, userData);
+    return RET_OK;
+}
+
 int logosdelivery_get_node_info(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*attributeName*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_get_node_info");
     invokeOk("logosdelivery_get_node_info", cb, userData);

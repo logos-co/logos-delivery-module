@@ -22,6 +22,9 @@ void DeliveryModuleImpl::messageError(const std::string&, const std::string&, co
 void DeliveryModuleImpl::messagePropagated(const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, int64_t) {}
 void DeliveryModuleImpl::connectionStateChanged(const std::string&, int64_t) {}
+void DeliveryModuleImpl::channelMessageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, int64_t) {}
+void DeliveryModuleImpl::channelMessageSent(const std::string&, const std::string&, int64_t) {}
+void DeliveryModuleImpl::channelMessageError(const std::string&, const std::string&, const std::string&, int64_t) {}
 
 void DeliveryModuleImpl::nodeStarted(bool success, const std::string& message, int64_t timestamp) {
     delivery_test_events::g_lastNodeStarted = {success, message, timestamp, true};

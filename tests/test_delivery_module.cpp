@@ -246,6 +246,100 @@ LOGOS_TEST(unsubscribe_succeeds_with_context) {
     delete impl;
 }
 
+// channelCreate
+
+LOGOS_TEST(channelCreate_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.channelCreate("chan-1", "/test/1/delivery/proto", "sender-1").success);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_channel_create"));
+}
+
+LOGOS_TEST(channelCreate_returns_channel_id) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    t.mockCFunction("logosdelivery_channel_create").returns("chan-1");
+    StdLogosResult result = impl->channelCreate("chan-1", "/test/1/delivery/proto", "sender-1");
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("chan-1"));
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_channel_create"), 1);
+
+    delete impl;
+}
+
+// channelExists
+
+LOGOS_TEST(channelExists_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.channelExists("chan-1").success);
+}
+
+LOGOS_TEST(channelExists_passes_through_true_and_false) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    // The FFI returns "true"/"false" verbatim; an unknown id is not an error.
+    t.mockCFunction("logosdelivery_channel_exists").returns("true");
+    StdLogosResult existing = impl->channelExists("chan-1");
+    LOGOS_ASSERT_TRUE(existing.success);
+    LOGOS_ASSERT_EQ(existing.value.get<std::string>(), std::string("true"));
+
+    t.mockCFunction("logosdelivery_channel_exists").returns("false");
+    StdLogosResult missing = impl->channelExists("no-such-chan");
+    LOGOS_ASSERT_TRUE(missing.success);
+    LOGOS_ASSERT_EQ(missing.value.get<std::string>(), std::string("false"));
+
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_channel_exists"), 2);
+
+    delete impl;
+}
+
+// channelSend
+
+LOGOS_TEST(channelSend_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+
+    std::vector<uint8_t> payload{'h','e','l','l','o'};
+    LOGOS_ASSERT_FALSE(impl.channelSend("chan-1", payload).success);
+}
+
+LOGOS_TEST(channelSend_succeeds_and_returns_request_id) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    t.mockCFunction("logosdelivery_channel_send").returns("req-id-chan-42");
+    std::vector<uint8_t> payload{'h','e','l','l','o',' ','c','h','a','n'};
+    StdLogosResult result = impl->channelSend("chan-1", payload);
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("req-id-chan-42"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_channel_send"));
+
+    delete impl;
+}
+
+// channelClose
+
+LOGOS_TEST(channelClose_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.channelClose("chan-1").success);
+}
+
+LOGOS_TEST(channelClose_succeeds_with_context) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_TRUE(impl->channelClose("chan-1").success);
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_channel_close"));
+
+    delete impl;
+}
+
 // getAvailableNodeInfoIDs
 
 LOGOS_TEST(getAvailableNodeInfoIDs_returns_mocked_string) {
