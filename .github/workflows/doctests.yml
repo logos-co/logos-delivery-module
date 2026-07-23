@@ -36,13 +36,12 @@ concurrency:
   group: doctests-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ATTIC_CACHE: ${{ github.ref == 'refs/heads/master' && 'public' || 'ci' }}
+
 jobs:
   doctests:
     name: delivery-module doc-tests (${{ matrix.os }})
-    # master builds push what they build to the public Attic cache;
-    # ATTIC_TOKEN_PUBLIC only exists in the public-cache environment.
-    # Pulling needs no setup — the cache is a public substituter declared
-    # in flake.nix (accept-flake-config below turns it on in CI).
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     strategy:
       fail-fast: false
@@ -56,20 +55,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Both caches are public to read, so the substituters go in the Nix
+      # install where they need no credentials, keeping fork PRs and any other
+      # run without secrets on the fast path.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
           extra-conf: |
-            accept-flake-config = true
+            extra-substituters = https://cache.nix.logos.co/public https://cache.nix.logos.co/ci
+            extra-trusted-public-keys = public:l4HrXgL4nw246+LBh2SOJyhz64BoGegOYLheT/iIAPU= ci:aVJqjS4NWX5WfqHO0AEhIScjGu/JyK5FoydPrnEbMvc=
             fallback = true
 
-      - name: Push builds to Attic public cache
-        if: github.ref == 'refs/heads/master'
+      # Publishing only; reading is covered by the substituters above.
+      # ATTIC_TOKEN_PUBLIC lives in the public-cache environment, so only the
+      # master jobs that opt into it reach the public cache; every other ref
+      # pushes to ci with the repo-wide token. Fork PRs get no secrets, and an
+      # empty endpoint fails `attic use`.
+      - name: Setup Attic cache
+        if: github.event.pull_request.head.repo.fork != true
         uses: ryanccn/attic-action@v0.4.1
         with:
           endpoint: ${{ secrets.ATTIC_ENDPOINT }}
-          cache: public
-          token: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
+          cache: ${{ env.ATTIC_CACHE }}
+          token: ${{ github.ref == 'refs/heads/master' && secrets.ATTIC_TOKEN_PUBLIC || secrets.ATTIC_TOKEN_CI }}
 
       - name: Verify module builds from this commit
         run: nix build .#lgx -L
