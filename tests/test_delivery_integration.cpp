@@ -217,6 +217,65 @@ LOGOS_TEST(integration_subscribe_unsubscribe) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests - reliable channels
+// ---------------------------------------------------------------------------
+
+static const char* kTestChannelId = "integration-test-channel";
+static const char* kTestChannelTopic = "/test/2/delivery-integration-chan/proto";
+static const char* kTestSenderId = "integration-test-sender";
+
+LOGOS_TEST(integration_channel_lifecycle) {
+    ensureStarted();
+
+    // Unknown id: not an error, reports "false".
+    StdLogosResult missing = g_impl->channelExists("no-such-channel");
+    LOGOS_ASSERT_TRUE(missing.success);
+    LOGOS_ASSERT_EQ(missing.value.get<std::string>(), std::string("false"));
+
+    // Create returns the channel id; the channel then exists.
+    StdLogosResult created = g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId);
+    LOGOS_ASSERT_TRUE(created.success);
+    LOGOS_ASSERT_EQ(created.value.get<std::string>(), std::string(kTestChannelId));
+
+    StdLogosResult existing = g_impl->channelExists(kTestChannelId);
+    LOGOS_ASSERT_TRUE(existing.success);
+    LOGOS_ASSERT_EQ(existing.value.get<std::string>(), std::string("true"));
+
+    // Close releases the channel; it no longer exists (persisted SDS state
+    // survives, but a closed channel does not count as existing).
+    LOGOS_ASSERT_TRUE(g_impl->channelClose(kTestChannelId).success);
+
+    StdLogosResult closed = g_impl->channelExists(kTestChannelId);
+    LOGOS_ASSERT_TRUE(closed.success);
+    LOGOS_ASSERT_EQ(closed.value.get<std::string>(), std::string("false"));
+
+    // Closing an unknown channel is an error (unlike channelExists).
+    LOGOS_ASSERT_FALSE(g_impl->channelClose("no-such-channel").success);
+}
+
+LOGOS_TEST(integration_channel_send_returns_request_id) {
+    ensureStarted();
+
+    LOGOS_ASSERT_TRUE(g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId).success);
+
+    std::string msg = "hello from channel integration test";
+    std::vector<uint8_t> payload(msg.begin(), msg.end());
+    StdLogosResult result = g_impl->channelSend(kTestChannelId, payload);
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_FALSE(result.value.get<std::string>().empty());
+
+    LOGOS_ASSERT_TRUE(g_impl->channelClose(kTestChannelId).success);
+}
+
+LOGOS_TEST(integration_channel_send_fails_on_unknown_channel) {
+    ensureStarted();
+
+    std::vector<uint8_t> payload{'x'};
+    LOGOS_ASSERT_FALSE(g_impl->channelSend("no-such-channel", payload).success);
+}
+
+// ---------------------------------------------------------------------------
 // Tests - send (as in simple.cpp interactive loop)
 // ---------------------------------------------------------------------------
 
