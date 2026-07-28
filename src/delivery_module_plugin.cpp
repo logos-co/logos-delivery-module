@@ -41,31 +41,32 @@ int64_t currentTimestampNs() {
     return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
 }
 
-// Decode an event "payload" JSON field into raw bytes. Depending on the
-// emitting path in logos-delivery the payload arrives either as a JSON array
-// of numbers (generic Nim seq[byte] serialization, e.g. message_received) or
-// as a base64 string (hand-built events, e.g. channel_message_received).
-// Any other shape — including an array with a non-byte element — decodes to
-// empty. Must not throw: it runs inside the FFI event callback, where an
-// escaping C++ exception would unwind into Nim frames and terminate.
-std::vector<uint8_t> decodePayloadField(const nlohmann::json& payloadValue) {
+// message_received: JSON array of byte values.
+std::vector<uint8_t> decodeByteArrayPayload(const nlohmann::json& payloadValue) {
+    if (!payloadValue.is_array()) {
+        return {};
+    }
     std::vector<uint8_t> payloadBytes;
-    if (payloadValue.is_array()) {
-        payloadBytes.reserve(payloadValue.size());
-        for (const auto& val : payloadValue) {
-            if (!val.is_number_integer()) {
-                return {};
-            }
-            auto byte = val.get<int64_t>();
-            if (byte < 0 || byte > 255) {
-                return {};
-            }
-            payloadBytes.push_back(static_cast<uint8_t>(byte));
+    payloadBytes.reserve(payloadValue.size());
+    for (const auto& val : payloadValue) {
+        if (!val.is_number_integer()) {
+            return {};
         }
-    } else if (payloadValue.is_string()) {
-        payloadBytes = base64Decode(payloadValue.get<std::string>());
+        auto byte = val.get<int64_t>();
+        if (byte < 0 || byte > 255) {
+            return {};
+        }
+        payloadBytes.push_back(static_cast<uint8_t>(byte));
     }
     return payloadBytes;
+}
+
+// channel_message_received: base64 string.
+std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
+    if (!payloadValue.is_string()) {
+        return {};
+    }
+    return base64Decode(payloadValue.get<std::string>());
 }
 } // namespace
 
@@ -157,7 +158,7 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
 
                 std::vector<uint8_t> payloadBytes;
                 if (msgObj.contains("payload")) {
-                    payloadBytes = decodePayloadField(msgObj["payload"]);
+                    payloadBytes = decodeByteArrayPayload(msgObj["payload"]);
                 }
 
                 int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
@@ -171,7 +172,7 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
             } else if (eventType == "channel_message_received") {
                 std::vector<uint8_t> payloadBytes;
                 if (jsonObj.contains("payload")) {
-                    payloadBytes = decodePayloadField(jsonObj["payload"]);
+                    payloadBytes = decodeBase64Payload(jsonObj["payload"]);
                 }
                 impl->channelMessageReceived(
                     jsonObj.value("channelId", ""),
