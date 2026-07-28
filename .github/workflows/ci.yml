@@ -66,14 +66,14 @@ jobs:
         run: |
           git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
           cd /tmp/logoscore-py
-          git checkout 71e003813a8633e9efadaf6ab66a6b0615dcc0f5
+          git checkout a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
           bash tests/docker_smoke/build_smoke_image.sh
           echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
 
       - name: Build logoscore CLI binary (host PATH)
         # Must match the daemon commit baked into the smoke image above.
         run: |
-          nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/a9e184557aa1a29cee23837fa4af5c0a50fd1673#cli"
+          nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/665ac28bc77f45e3c610f40fef975a12609de531#cli"
           echo "/tmp/logoscore-cli/bin" >> $GITHUB_PATH
 
       - uses: actions/setup-python@v5
