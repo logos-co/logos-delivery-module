@@ -45,7 +45,6 @@ jobs:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
-    needs: build-and-test
     continue-on-error: true
     steps:
       - name: Checkout
