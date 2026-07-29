@@ -61,9 +61,32 @@ jobs:
       - name: Verify module builds from this commit
         run: nix build .#lgx -L
 
+      # Resolve the commit under test. For pull requests this is the PR's head
+      # commit (not the synthetic merge commit); for pushes it's the pushed
+      # commit.
+      #
+      # Fork PRs are the exception: their head commit lives in the fork, not in
+      # logos-co/logos-delivery-module, so nix could not fetch
+      # `github:logos-co/logos-delivery-module/<sha>`. We blank the SHA for
+      # forks (--release-for repo= → pins that repo to latest), so the doc-test
+      # still runs for fork PRs, just against master.
+      - name: Resolve commit under test
+        id: commit
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && \
+             [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            echo "Fork PR detected — doc-test will run against latest master."
+          else
+            echo "sha=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       # The runner is the shared `doctest` CLI, invoked directly via its flake
       # (github:logos-co/logos-doctest). The flake bundles Python + PyYAML
-      # (+ rich), so no pip install step is needed.
+      # (+ rich), so no pip install step is needed. --release-for pins the
+      # {release} placeholder to the commit under test, so the `#lgx` the spec
+      # installs is the one this commit produces.
       - name: Run delivery-module runtime doc-test
         run: |
           # --continue-on-fail so the run walks every step and the published
@@ -73,6 +96,7 @@ jobs:
             doctests/delivery-module-runtime.test.yaml \
             --verbose \
             --continue-on-fail \
+            --release-for logos-delivery-module=${{ steps.commit.outputs.sha }} \
             --report "${{ runner.temp }}/delivery-doctest-report.html"
 
       - name: Stage report for upload
