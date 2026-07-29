@@ -95,7 +95,7 @@ The delivery module provides the following API methods (all synchronous, all ret
 - `send(contentTopic: QString, payload: QString)` - Send a message (returns a request id)
 - `subscribe(contentTopic: QString)` - Subscribe to receive messages on a topic
 - `unsubscribe(contentTopic: QString)` - Unsubscribe from a topic
-- `storeQuery(jsonQuery: QString, peerAddr: QString, timeoutMs: int)` - Run a Store (historical message) query against a store service peer. Backed by the unstable liblogosdelivery kernel API; the JSON contract may change without a deprecation cycle (see the `storeQuery` doc comment in [src/delivery_module_plugin.h](src/delivery_module_plugin.h) for the query/response format)
+- `storeQuery(jsonQuery: QString, peerAddr: QString, timeoutMs: int)` - Run a Store (historical message) query against a store service peer. ⚠️ Use at your own risk: backed by the liblogosdelivery kernel API, subject to change at any point (see the `storeQuery` doc comment in [src/delivery_module_plugin.h](src/delivery_module_plugin.h) for the query/response format)
 - `getAvailableNodeInfoIDs()` - List queryable node info identifiers
 - `getNodeInfo(nodeInfoId: QString)` - Retrieve node info by identifier
 - `getAvailableConfigs()` - Retrieve available configuration parameter descriptions

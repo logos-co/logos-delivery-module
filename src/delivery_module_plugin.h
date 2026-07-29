@@ -161,10 +161,9 @@ public:
      * @brief Runs a Store (historical message) query against a specific store
      *        service peer.
      *
-     * Forwards to `waku_store_query` from the kernel tier
-     * (`liblogosdelivery_kernel.h`). The kernel API is explicitly unstable and
-     * may change without a deprecation cycle; this method's JSON contract
-     * follows it.
+     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`waku_store_query`,
+     * `liblogosdelivery_kernel.h`), which is subject to change at any point
+     * without a deprecation cycle. This method's JSON contract follows it.
      *
      * The query JSON maps to logos-delivery's `StoreQueryRequest`
      * (`library/kernel_api/protocols/store_api.nim`):
