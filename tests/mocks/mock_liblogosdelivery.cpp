@@ -118,6 +118,13 @@ int logosdelivery_channel_close(void* /*ctx*/, logosdelivery_callback cb, void* 
     return RET_OK;
 }
 
+int waku_store_query(void* /*ctx*/, logosdelivery_callback cb, void* userData,
+                     const char* /*jsonQuery*/, const char* /*peerAddr*/, int /*timeoutMs*/) {
+    LOGOS_CMOCK_RECORD("waku_store_query");
+    invokeOk("waku_store_query", cb, userData);
+    return RET_OK;
+}
+
 int logosdelivery_get_node_info(void* /*ctx*/, logosdelivery_callback cb, void* userData, const char* /*attributeName*/) {
     LOGOS_CMOCK_RECORD("logosdelivery_get_node_info");
     invokeOk("logosdelivery_get_node_info", cb, userData);

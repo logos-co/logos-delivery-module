@@ -1,4 +1,5 @@
 #include "delivery_module_plugin.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <ctime>
@@ -15,6 +16,10 @@
 #include "api_call_handler.h"
 extern "C" {
 #include <liblogosdelivery.h>
+// Kernel tier: unstable, may change without a deprecation cycle. Only
+// waku_store_query is consumed from it; everything else goes through the
+// stable surface above.
+#include <liblogosdelivery_kernel.h>
 }
 
 namespace {
@@ -468,6 +473,36 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     }
 
     fprintf(stderr, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
+    return outcome;
+}
+
+StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
+                                              const std::string& peerAddr,
+                                              int64_t timeoutMs)
+{
+    fprintf(stderr, "DeliveryModuleImpl::storeQuery called with peerAddr: %s\n", peerAddr.c_str());
+
+    if (!deliveryCtx) {
+        fprintf(stderr, "DeliveryModuleImpl: Cannot run store query - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
+    }
+
+    // timeoutMs bounds the query on the FFI side; wait longer than that for the
+    // completion callback so the query's own timeout error reaches the caller
+    // instead of a callback timeout.
+    auto callbackTimeout = std::max(
+        CALLBACK_TIMEOUT, std::chrono::seconds(timeoutMs / 1000 + 5));
+
+    auto outcome = callApiRetValue(
+        "store_query",
+        callbackTimeout,
+        bindApiCall(waku_store_query, deliveryCtx,
+                    jsonQuery.c_str(), peerAddr.c_str(), static_cast<int>(timeoutMs)));
+
+    if (!outcome.success) {
+        fprintf(stderr, "DeliveryModuleImpl: Store query failed for peer: %s, reason: %s\n",
+                peerAddr.c_str(), outcome.error.c_str());
+    }
     return outcome;
 }
 

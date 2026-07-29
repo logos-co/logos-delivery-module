@@ -246,6 +246,37 @@ LOGOS_TEST(unsubscribe_succeeds_with_context) {
     delete impl;
 }
 
+// storeQuery
+
+LOGOS_TEST(storeQuery_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+    StdLogosResult result = impl.storeQuery(
+        R"({"requestId":"req-1","includeData":true,"paginationForward":true})",
+        "/ip4/127.0.0.1/tcp/60000/p2p/16Uiu2peer", 5000);
+    LOGOS_ASSERT_FALSE(result.success);
+    LOGOS_ASSERT_FALSE(result.error.empty());
+}
+
+LOGOS_TEST(storeQuery_returns_response_json) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    const char* responseJson =
+        R"({"requestId":"req-1","statusCode":200,"statusDesc":"OK","messages":[]})";
+    t.mockCFunction("waku_store_query").returns(responseJson);
+
+    StdLogosResult result = impl->storeQuery(
+        R"({"requestId":"req-1","includeData":true,"paginationForward":true})",
+        "/ip4/127.0.0.1/tcp/60000/p2p/16Uiu2peer", 5000);
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string(responseJson));
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("waku_store_query"), 1);
+
+    delete impl;
+}
+
 // channelCreate
 
 LOGOS_TEST(channelCreate_fails_without_createNode) {

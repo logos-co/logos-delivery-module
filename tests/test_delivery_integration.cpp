@@ -217,6 +217,24 @@ LOGOS_TEST(integration_subscribe_unsubscribe) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests - store query
+// ---------------------------------------------------------------------------
+
+LOGOS_TEST(integration_storeQuery_reports_error_for_invalid_peer) {
+    ensureStarted();
+
+    // No store service peer is running in this environment; the point is that
+    // the real waku_store_query FFI round-trip completes and surfaces a proper
+    // error result (peer parse / query failure) instead of hanging or crashing.
+    StdLogosResult result = g_impl->storeQuery(
+        R"({"requestId":"integration-store-1","includeData":true,"paginationForward":true})",
+        "not-a-multiaddress", 3000);
+
+    LOGOS_ASSERT_FALSE(result.success);
+    LOGOS_ASSERT_FALSE(result.error.empty());
+}
+
+// ---------------------------------------------------------------------------
 // Tests - reliable channels
 // ---------------------------------------------------------------------------
 

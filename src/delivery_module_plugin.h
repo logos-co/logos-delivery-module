@@ -158,6 +158,45 @@ public:
     StdLogosResult unsubscribe(const std::string& contentTopic);
 
     /**
+     * @brief Runs a Store (historical message) query against a specific store
+     *        service peer.
+     *
+     * Forwards to `waku_store_query` from the kernel tier
+     * (`liblogosdelivery_kernel.h`). The kernel API is explicitly unstable and
+     * may change without a deprecation cycle; this method's JSON contract
+     * follows it.
+     *
+     * The query JSON maps to logos-delivery's `StoreQueryRequest`
+     * (`library/kernel_api/protocols/store_api.nim`):
+     * | Key                 | Type            | Required | Description                                        |
+     * |---------------------|-----------------|----------|----------------------------------------------------|
+     * | `requestId`         | string          | yes      | Caller-chosen id, echoed in the response           |
+     * | `includeData`       | boolean         | yes      | `true` returns full messages, `false` hashes only  |
+     * | `paginationForward` | boolean         | yes      | Paging direction                                   |
+     * | `pubsubTopic`       | string          | no       | Pubsub topic filter                                |
+     * | `contentTopics`     | array of string | no       | Content topic filters                              |
+     * | `timeStart`         | number/string   | no       | Range start, nanoseconds since Unix epoch          |
+     * | `timeEnd`           | number/string   | no       | Range end, nanoseconds since Unix epoch            |
+     * | `messageHashes`     | array of string | no       | Hex message hashes for lookup-by-hash queries      |
+     * | `paginationCursor`  | string          | no       | Hex cursor from a previous response                |
+     * | `paginationLimit`   | number          | no       | Max messages per page                              |
+     *
+     * On success the result value is the response JSON (`StoreQueryResponseHex`):
+     * `{ "requestId", "statusCode", "statusDesc", "messages": [ { "messageHash",
+     * "message", "pubsubTopic" } ], "paginationCursor" }` with hashes 0x-hex
+     * encoded.
+     *
+     * @param jsonQuery UTF-8 JSON query document, see above.
+     * @param peerAddr Multiaddress of the store service peer to query
+     *        (e.g. `/ip4/127.0.0.1/tcp/60000/p2p/16Uiu2...`).
+     * @param timeoutMs Query timeout in milliseconds.
+     * @return Success with the response JSON, or error details.
+     */
+    StdLogosResult storeQuery(const std::string& jsonQuery,
+                              const std::string& peerAddr,
+                              int64_t timeoutMs);
+
+    /**
      * @brief Creates (or re-opens) a reliable channel.
      *
      * Persisted channel state survives @ref channelClose, so re-creating a
