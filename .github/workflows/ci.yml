@@ -61,6 +61,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # type=gha needs ACTIONS_RUNTIME_TOKEN/ACTIONS_CACHE_URL, which
+      # GitHub only injects into actions — this exposes them to run
+      # steps, so buildx invoked from build_smoke_image.sh can reach
+      # the cache API. Without it the gha cache is silently a no-op.
+      - name: Expose Actions runtime for buildx gha cache
+        uses: crazy-max/ghaction-github-runtime@v3
+
       - name: Build delivery-module (install-portable layout)
         run: |
           nix build -L .#install-portable
