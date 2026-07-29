@@ -56,12 +56,20 @@ jobs:
           attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
           attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
 
+      # The gha cache backend needs the docker-container driver;
+      # the default docker driver can't export type=gha.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build delivery-module (install-portable layout)
         run: |
           nix build -L .#install-portable
           echo "LOGOS_MODULES_DIR=$PWD/result/modules" >> $GITHUB_ENV
 
       - name: Checkout logoscore-py and build smoke image
+        env:
+          BUILDX_CACHE_FROM: type=gha
+          BUILDX_CACHE_TO: type=gha,mode=max
         run: |
           git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
           cd /tmp/logoscore-py
