@@ -15,13 +15,31 @@
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
+    let
+      # The node's own logger drowns an embedding host: peer discovery,
+      # subscription upkeep and mesh heartbeats all log at INFO or DEBUG,
+      # several lines a second, whatever `logLevel` the caller passes to
+      # createNode. That key cannot silence them, because chronicles resolves
+      # each statement's level at compile time unless the library is built with
+      # `chronicles_runtime_filtering`, which it is not, leaving nothing to read
+      # the level the node stores at startup. Cap it at build time instead.
+      # Lowering this restores the node's diagnostics and costs a source build
+      # of the library, which the binary cache has only for this value.
+      quietedDelivery.packages = builtins.mapAttrs
+        (_system: systemPackages: {
+          liblogosdelivery = systemPackages.liblogosdelivery.override {
+            chroniclesLogLevel = "WARN";
+          };
+        })
+        inputs.logos-delivery.packages;
+    in
     logos-module-builder.lib.mkLogosModule {
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
       externalLibInputs = {
         logosdelivery = {
-          input = inputs.logos-delivery;
+          input = quietedDelivery;
           packages.default = "liblogosdelivery";
         };
         # Bundle librln.dylib alongside liblogosdelivery.dylib so the transitive
