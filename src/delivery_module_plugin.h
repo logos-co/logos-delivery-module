@@ -50,63 +50,51 @@ public:
     ~DeliveryModuleImpl();
 
     /**
-     * @brief Creates a liblogosdelivery node from a WakuNodeConf JSON document.
+     * @brief Creates a liblogosdelivery node from a JSON configuration.
      *
-     * The JSON is parsed by logos-delivery (liblogosdelivery folder) side and maps to
-     * `WakuNodeConf` from `tools/confutils/cli_args.nim`
-     * (https://github.com/logos-messaging/logos-delivery).
+     * The JSON passes through to logos-delivery verbatim; `parseLogosDeliveryConf`
+     * (https://github.com/logos-messaging/logos-delivery) owns the grammar.
+     * `entryLayer` selects how much of the stack is mounted:
+     * - `"kernel"` — transport node only
+     * - `"messaging"` — kernel + messaging client
+     * - `"channels"` — kernel + messaging + reliable channels (default)
      *
-     * The configuration is a **flat** JSON object whose keys correspond to
-     * `WakuNodeConf` Nim field names (camelCase). Unknown keys are silently
-     * ignored. Every field has a built-in default, so only the values that
-     * differ from defaults need to be supplied.
+     * Three typical shapes:
      *
-     * ## Commonly used keys
-     * | Key                  | Type             | Default    | Description                                 |
-     * |----------------------|------------------|------------|---------------------------------------------|
-     * | `mode`               | string           | `"noMode"` | `"Core"`, `"Edge"`, or `"noMode"`           |
-     * | `preset`             | string           | `""`       | Network preset (`"twn"`, `"logos.dev"`, …)  |
-     * | `clusterId`          | number (uint16)  | `0`        | Cluster identifier                          |
-     * | `entryNodes`         | array of string  | `[]`       | Bootstrap peers (enrtree / multiaddress)    |
-     * | `relay`              | boolean          | `false`    | Enable relay protocol                       |
-     * | `rlnRelay`           | boolean          | `false`    | Enable RLN rate-limit nullifier             |
-     * | `tcpPort`            | number (uint16)  | `60000`    | P2P TCP listen port                         |
-     * | `numShardsInNetwork` | number (uint16)  | `1`        | Auto-sharding shard count                   |
-     * | `logLevel`           | string           | `"INFO"`   | `"TRACE"`, `"DEBUG"`, `"INFO"`, `"WARN"`, … |
-     * | `logFormat`          | string           | `"TEXT"`   | `"TEXT"` or `"JSON"`                        |
-     * | `maxMessageSize`     | string           | `"150KiB"` | Maximum message payload size                |
+     * **App developer** — full stack (default `entryLayer`). `preset` picks the
+     * network (`"logos.test"`, `"logos.dev"`, `"twn"`), `mode` picks the protocol
+     * flags (`"Core"` = relay node, `"Edge"` = light node). Optional
+     * `messagingOverrides` / `channelsOverrides` objects override per-layer
+     * defaults:
+     * @code{.json}
+     * { "mode": "Core", "preset": "logos.test" }
+     * @endcode
      *
-     * ## Presets
-     * Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and
-     * other network-specific defaults automatically. Individual keys supplied
-     * alongside a preset override the preset values.
-     * - `"twn"` – The RLN-protected Waku Network (cluster 1).
-     * - `"logos.dev"` – Logos Dev Network (cluster 2, mix enabled,
-     *   p2pReliability on, 8 auto-shards, built-in bootstrap nodes).
-     *
-     * Minimal `logos.dev` example:
+     * **Node operator** — kernel-only service node on a public network. `mode`
+     * is not applied on this layer, so protocol flags are set explicitly in
+     * `kernelConf`:
      * @code{.json}
      * {
-     *   "logLevel": "INFO",
-     *   "mode": "Core",
-     *   "preset": "logos.dev"
+     *   "entryLayer": "kernel",
+     *   "kernelConf": { "preset": "logos.test", "relay": true }
      * }
      * @endcode
      *
-     * Full override example:
+     * **Network hoster** — kernel-only node on a self-hosted network;
+     * `kernelConf` is a raw `WakuNodeConf` used as-is:
      * @code{.json}
      * {
-     *   "mode": "Core",
-     *   "clusterId": 42,
-     *   "entryNodes": ["enrtree://TREE@nodes.example.com"],
-     *   "relay": true,
-     *   "tcpPort": 60000,
-     *   "numShardsInNetwork": 8,
-     *   "maxMessageSize": "150KiB",
-     *   "logLevel": "INFO",
-     *   "logFormat": "TEXT"
+     *   "entryLayer": "kernel",
+     *   "kernelConf": { "clusterId": 42, "relay": true, "entryNodes": ["/dns4/…"] }
      * }
      * @endcode
+     *
+     * On kernel-only nodes `send` / `subscribe` / `channel*` fail with "node has
+     * no messaging client" / "no reliable channel manager"; `getNodeInfo`,
+     * `storeQuery` and metrics keep working.
+     *
+     * The pre-layered flat shape (bare `WakuNodeConf` keys at top level) still
+     * parses and boots the full stack.
      *
      * @param cfg UTF-8 JSON payload string.
      * @return `true` if context creation succeeds and callback returns `RET_OK`,

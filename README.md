@@ -103,49 +103,49 @@ The delivery module provides the following API methods (all synchronous, all ret
 
 ### Node Configuration (`createNode`)
 
-`createNode` accepts a **flat** JSON object whose keys correspond to `WakuNodeConf`
-field names (camelCase) from
-[logos-delivery](https://github.com/logos-messaging/logos-delivery).
-Unknown keys are silently ignored. Every field has a built-in default, so only
-values that differ from defaults need to be supplied.
+The JSON config is passed verbatim to
+[logos-delivery](https://github.com/logos-messaging/logos-delivery), which owns
+the grammar (`parseLogosDeliveryConf`). `entryLayer` selects how much of the
+stack is mounted: `"kernel"` (transport node only), `"messaging"` (+ messaging
+client), `"channels"` (+ reliable channels, the default).
 
-#### Commonly used keys
+Three typical shapes:
 
-| Key                  | Type             | Default    | Description                              |
-|----------------------|------------------|------------|------------------------------------------|
-| `mode`               | string           | `"noMode"` | `"Core"`, `"Edge"`, or `"noMode"`        |
-| `preset`             | string           | `""`       | Network preset (`"logos.test"`, `"logos.dev"`, `"twn"`) |
-| `clusterId`          | number (uint16)  | `0`        | Cluster identifier                       |
-| `entryNodes`         | array of string  | `[]`       | Bootstrap peers (enrtree / multiaddress) |
-| `relay`              | boolean          | `false`    | Enable relay protocol                    |
-| `rlnRelay`           | boolean          | `false`    | Enable RLN rate-limit nullifier          |
-| `tcpPort`            | number (uint16)  | `60000`    | P2P TCP listen port                      |
-| `numShardsInNetwork` | number (uint16)  | `1`        | Auto-sharding shard count                |
-| `logLevel`           | string           | `"INFO"`   | `"TRACE"`, `"DEBUG"`, `"INFO"`, `"WARN"` |
-| `logFormat`          | string           | `"TEXT"`   | `"TEXT"` or `"JSON"`                     |
-| `maxMessageSize`     | string           | `"150KiB"` | Maximum message payload size             |
+**App developer** — full stack (default `entryLayer`). `preset` picks the
+network (`"logos.test"`, `"logos.dev"`, `"twn"`), `mode` picks the protocol
+flags (`"Core"` = relay node, `"Edge"` = light node). Optional
+`messagingOverrides` / `channelsOverrides` objects override per-layer defaults:
 
-#### Presets
+```json
+{ "mode": "Core", "preset": "logos.test" }
+```
 
-Using a `preset` populates cluster ID, entry nodes, sharding, RLN, and other
-network-specific defaults automatically. Individual keys supplied alongside a
-preset override the preset values.
-
-- `"logos.test"` – Logos Test fleet (the default for running a node; mix
-  enabled, p2pReliability on, auto-shards, built-in bootstrap nodes).
-- `"logos.dev"` – Logos Dev Network (cluster 2, mix enabled, p2pReliability on,
-  8 auto-shards, built-in bootstrap nodes).
-- `"twn"` – The RLN-protected Waku Network (cluster 1).
-
-Minimal example using the default `logos.test` preset:
+**Node operator** — kernel-only service node on a public network. `mode` is not
+applied on this layer, so protocol flags are set explicitly in `kernelConf`:
 
 ```json
 {
-  "logLevel": "INFO",
-  "mode": "Core",
-  "preset": "logos.test"
+  "entryLayer": "kernel",
+  "kernelConf": { "preset": "logos.test", "relay": true }
 }
 ```
+
+**Network hoster** — kernel-only node on a self-hosted network; `kernelConf` is
+a raw `WakuNodeConf` used as-is:
+
+```json
+{
+  "entryLayer": "kernel",
+  "kernelConf": { "clusterId": 42, "relay": true, "entryNodes": ["/dns4/…"] }
+}
+```
+
+On kernel-only nodes `send` / `subscribe` / `channel*` fail with "node has no
+messaging client" / "no reliable channel manager"; `getNodeInfo`, `storeQuery`
+and metrics keep working.
+
+The pre-layered flat shape (bare `WakuNodeConf` keys at top level) still parses
+and boots the full stack.
 
 ### Content Topics
 
