@@ -207,37 +207,35 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
     }
 }
 
-// True when cfgObj already carries one of `names`. The upstream JSON conf
-// parser keys fields case-insensitively and matches either the Nim field name
-// or its CLI `name:` pragma, so a caller may legitimately spell a key several
-// ways; matching the same way keeps us from overriding their value.
-static bool containsAnyKey(const nlohmann::json& cfgObj,
-                           std::initializer_list<const char*> names)
+// Finds a key of cfgObj matching one of `names`, returning it as spelled in
+// the config. The upstream JSON conf parser keys fields case-insensitively and
+// matches either the Nim field name or its CLI `name:` pragma, so a caller may
+// legitimately spell a key several ways; matching the same way keeps us from
+// overriding their value.
+static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
+                                          std::initializer_list<const char*> names)
 {
     for (const auto& entry : cfgObj.items()) {
         std::string key = entry.key();
         for (auto& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         for (const char* name : names) {
-            if (key == name) return true;
+            if (key == name) return entry.key();
         }
     }
-    return false;
+    return std::nullopt;
 }
 
-// Default every listening port (tcpPort, discv5UdpPort, restPort,
-// metricsServerPort, websocketPort) to 0 so the OS assigns an ephemeral port
-// when the caller did not pin a specific value. Caller-supplied ports are
-// preserved so fleet configs that pin ports keep working. logos-delivery now
-// accepts port 0 (status-im/nim-confutils#146), which makes this work.
-// See logos-delivery-module#18.
-//
-// Also default the node's storage directory to the per-instance path the host
+// Default the node's storage directory to the per-instance path the host
 // provisions for this module. logos-delivery otherwise falls back to "./data"
 // (persistency.nim DefaultStoragePath), which is relative to the process
 // working directory and therefore identical for every instance launched from
 // it — side-by-side instances would share one SQLite file. The path is empty
 // when the module runs outside a host that provisions persistence (unit tests
 // constructing the impl directly), in which case upstream's default stands.
+//
+// The path goes inside `kernelConf` when the config carries one: the layered
+// kernel shape rejects unknown top-level keys. Otherwise it goes at top level,
+// where the flat shape parses it as a WakuNodeConf field.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath)
 {
@@ -254,21 +252,15 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
-    for (const char* portKey : {
-             "tcpPort",
-             "discv5UdpPort",
-             "restPort",
-             "metricsServerPort",
-             "websocketPort",
-         }) {
-        if (!cfgObj.contains(portKey)) {
-            cfgObj[portKey] = 0;
+    if (!persistencePath.empty()) {
+        nlohmann::json* target = &cfgObj;
+        if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
+            kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
+            target = &cfgObj[*kernelConfKey];
         }
-    }
-
-    if (!persistencePath.empty()
-        && !containsAnyKey(cfgObj, {"localstoragepath", "local-storage-path"})) {
-        cfgObj["localStoragePath"] = persistencePath + "/data";
+        if (!findKey(*target, {"localstoragepath", "local-storage-path"})) {
+            (*target)["localStoragePath"] = persistencePath + "/data";
+        }
     }
 
     return cfgObj.dump();
