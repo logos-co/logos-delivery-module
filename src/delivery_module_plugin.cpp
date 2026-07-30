@@ -207,14 +207,19 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
     }
 }
 
+static std::string toLowerCopy(std::string s)
+{
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
 // Case-insensitive key lookup, matching keys the same way as the upstream
 // conf parser. Returns the key as spelled in the config.
 static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
                                           std::initializer_list<const char*> names)
 {
     for (const auto& entry : cfgObj.items()) {
-        std::string key = entry.key();
-        for (auto& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const std::string key = toLowerCopy(entry.key());
         for (const char* name : names) {
             if (key == name) return entry.key();
         }
@@ -222,10 +227,26 @@ static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
     return std::nullopt;
 }
 
+// True when the config is the legacy flat shape: any top-level key besides the
+// ones the layered parser consumes marks a bare WakuNodeConf field.
+static bool isFlatShape(const nlohmann::json& cfgObj)
+{
+    for (const auto& entry : cfgObj.items()) {
+        const std::string key = toLowerCopy(entry.key());
+        if (key != "entrylayer" && key != "mode" && key != "preset"
+            && key != "kernelconf" && key != "messagingoverrides"
+            && key != "channelsoverrides") {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Defaults the node's storage directory to the host's per-instance path, so
 // side-by-side instances don't share upstream's cwd-relative "./data". The
 // path goes where each config shape accepts it: kernelConf when present,
-// messagingOverrides for the structured shape, top level for the flat shape.
+// messagingOverrides (created if needed) for the layered shapes, top level
+// for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath)
 {
@@ -244,20 +265,25 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
 
     if (!persistencePath.empty()) {
         nlohmann::json* target = &cfgObj;
+        const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
+        const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
+            && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
         if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
             kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
             target = &cfgObj[*kernelConfKey];
-        } else if (findKey(cfgObj, {"messagingoverrides", "channelsoverrides"})) {
+        } else if (kernelEntry) {
+            // Kernel entry without a kernelConf object: leave the config
+            // untouched for the parser to reject.
+            target = nullptr;
+        } else if (!isFlatShape(cfgObj)) {
             auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
             if (!overridesKey) {
                 cfgObj["messagingOverrides"] = nlohmann::json::object();
                 overridesKey = "messagingOverrides";
             }
-            if (cfgObj[*overridesKey].is_object()) {
-                target = &cfgObj[*overridesKey];
-            }
+            target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
         }
-        if (!findKey(*target, {"localstoragepath", "local-storage-path"})) {
+        if (target && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
             (*target)["localStoragePath"] = persistencePath + "/data";
         }
     }
