@@ -4,6 +4,7 @@ build
 vendor/*
 lib/*
 result
+result-*
 
 # Doc-test output: generated artifacts are disposable, but keep the rendered
 # .md and the UI screenshots that the docs embed. (report.html is published by
