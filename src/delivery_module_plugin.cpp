@@ -207,11 +207,8 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
     }
 }
 
-// Finds a key of cfgObj matching one of `names`, returning it as spelled in
-// the config. The upstream JSON conf parser keys fields case-insensitively and
-// matches either the Nim field name or its CLI `name:` pragma, so a caller may
-// legitimately spell a key several ways; matching the same way keeps us from
-// overriding their value.
+// Case-insensitive key lookup, matching keys the same way as the upstream
+// conf parser. Returns the key as spelled in the config.
 static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
                                           std::initializer_list<const char*> names)
 {
@@ -225,19 +222,10 @@ static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
     return std::nullopt;
 }
 
-// Default the node's storage directory to the per-instance path the host
-// provisions for this module. logos-delivery otherwise falls back to "./data"
-// (persistency.nim DefaultStoragePath), which is relative to the process
-// working directory and therefore identical for every instance launched from
-// it — side-by-side instances would share one SQLite file. The path is empty
-// when the module runs outside a host that provisions persistence (unit tests
-// constructing the impl directly), in which case upstream's default stands.
-//
-// The layered shapes reject unknown top-level keys, so the path goes where
-// each shape accepts it: inside `kernelConf` when the config carries one,
-// inside `messagingOverrides` (a MessagingClientConf field) when the config is
-// the structured full-stack shape, and at top level otherwise, where the flat
-// shape parses it as a WakuNodeConf field.
+// Defaults the node's storage directory to the host's per-instance path, so
+// side-by-side instances don't share upstream's cwd-relative "./data". The
+// path goes where each config shape accepts it: kernelConf when present,
+// messagingOverrides for the structured shape, top level for the flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath)
 {
