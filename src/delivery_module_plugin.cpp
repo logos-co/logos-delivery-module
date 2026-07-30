@@ -233,9 +233,11 @@ static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
 // when the module runs outside a host that provisions persistence (unit tests
 // constructing the impl directly), in which case upstream's default stands.
 //
-// The path goes inside `kernelConf` when the config carries one: the layered
-// kernel shape rejects unknown top-level keys. Otherwise it goes at top level,
-// where the flat shape parses it as a WakuNodeConf field.
+// The layered shapes reject unknown top-level keys, so the path goes where
+// each shape accepts it: inside `kernelConf` when the config carries one,
+// inside `messagingOverrides` (a MessagingClientConf field) when the config is
+// the structured full-stack shape, and at top level otherwise, where the flat
+// shape parses it as a WakuNodeConf field.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath)
 {
@@ -257,6 +259,15 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
             kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
             target = &cfgObj[*kernelConfKey];
+        } else if (findKey(cfgObj, {"messagingoverrides", "channelsoverrides"})) {
+            auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
+            if (!overridesKey) {
+                cfgObj["messagingOverrides"] = nlohmann::json::object();
+                overridesKey = "messagingOverrides";
+            }
+            if (cfgObj[*overridesKey].is_object()) {
+                target = &cfgObj[*overridesKey];
+            }
         }
         if (!findKey(*target, {"localstoragepath", "local-storage-path"})) {
             (*target)["localStoragePath"] = persistencePath + "/data";
