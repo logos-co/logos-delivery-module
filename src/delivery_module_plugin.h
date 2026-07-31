@@ -271,8 +271,6 @@ public:
 
     std::string name() const { return "delivery_module"; }
 
-    std::string version() const;
-
 logos_events:
     void messageSent(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
     void messageError(const std::string& requestId, const std::string& messageHash, const std::string& error, int64_t timestamp);

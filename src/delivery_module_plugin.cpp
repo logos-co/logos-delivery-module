@@ -623,30 +623,6 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
     return outcome;
 }
 
-std::string DeliveryModuleImpl::version() const {
-    std::string moduleVersion = "1.1.0";
-    if (!deliveryCtx) {
-        fprintf(stderr, "DeliveryModuleImpl: Cannot get version - context not initialized. Call createNode first.\n");
-        return moduleVersion + " (liblogosdelivery version unknown, context not initialized)";
-    }
-
-    auto liblogosDeliveryVersion = callApiRetValue(
-        "get_node_info",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx, "Version"));
-
-    if (!liblogosDeliveryVersion.success) {
-        fprintf(stderr, "DeliveryModuleImpl: Get node info failed getting version, reason: %s\n",
-                liblogosDeliveryVersion.error.c_str());
-        return moduleVersion + " (liblogosdelivery version unknown)";
-    }
-
-    std::string ver = liblogosDeliveryVersion.value.get<std::string>();
-    fprintf(stderr, "DeliveryModuleImpl: Get node info completed for attribute: Version, with success: %s\n", ver.c_str());
-
-    return moduleVersion + " (liblogosdelivery version: " + ver + ")";
-}
-
 StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 

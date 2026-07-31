@@ -45,6 +45,3 @@ def test_query_and_subscribe_methods(solo_daemon):
 
     delivery.subscribe(CONTENT_TOPIC)
     delivery.unsubscribe(CONTENT_TOPIC)
-
-    version = delivery.version()
-    assert isinstance(version, str) and version, f"unexpected version: {version!r}"
