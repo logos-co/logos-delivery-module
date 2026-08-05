@@ -86,7 +86,6 @@ lgpm install --dir ./packages --modules-dir ./modules
 # logos.test node config (layered createNode shape — see Configuration below)
 cat > logos-test.json <<'JSON'
 {
-  "mode": "Core",
   "preset": "logos.test",
   "messagingOverrides": {
     "logLevel": "DEBUG",
@@ -178,9 +177,10 @@ logoscore stop
 ## Configuration
 
 The node config uses the layered `createNode` shape: `preset` picks the
-network, `mode` picks the protocol flags (`"Core"` = relay node), and
-per-layer settings go in `messagingOverrides` — here the log level and the
-p2p listening ports (pinned to match the Docker port mappings). The repo
+network, and per-layer settings go in `messagingOverrides` — here the log
+level and the p2p listening ports (pinned to match the Docker port mappings).
+`mode` defaults to `"Core"` (relay node); set `"Edge"` for a light node. The
+repo
 ships it as [`conf/logos-test.json`](../conf/logos-test.json): with Docker it
 is mounted into the container at `/conf` (`@/conf/logos-test.json`); with the
 Nix build, pass the path directly (`@conf/logos-test.json`). The

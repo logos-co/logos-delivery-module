@@ -1,5 +1,4 @@
 {
-    "mode": "Core",
     "preset": "logos.dev",
     "messagingOverrides": {
         "logLevel": "DEBUG",
