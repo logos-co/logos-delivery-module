@@ -176,32 +176,23 @@ logoscore stop
 
 ## Configuration
 
-The node config uses the layered `createNode` shape: `preset` picks the
-network, and per-layer settings go in `messagingOverrides` — here the log
-level and the p2p listening ports (pinned to match the Docker port mappings).
-`mode` defaults to `"Core"` (relay node); set `"Edge"` for a light node. The
-repo
-ships it as [`conf/logos-test.json`](../conf/logos-test.json): with Docker it
-is mounted into the container at `/conf` (`@/conf/logos-test.json`); with the
-Nix build, pass the path directly (`@conf/logos-test.json`). The
-prebuilt-binaries path above writes the same config inline as
-`logos-test.json` so no clone is needed. Edit it and re-run the boot steps to
-change settings.
+The config uses the layered `createNode` shape: `preset` picks the network,
+`mode` defaults to `"Core"` (`"Edge"` for a light node), per-layer settings
+go in `messagingOverrides`. The repo ships it as
+[`conf/logos-test.json`](../conf/logos-test.json): Docker mounts it into the
+container at `/conf` (`@/conf/logos-test.json`); with the Nix build, pass the
+path directly (`@conf/logos-test.json`). The prebuilt-binaries path above
+writes the same config inline. Edit it and re-run the boot steps to change
+settings.
 
-Two things to know when editing:
+Keep extra keys inside `messagingOverrides` / `channelsOverrides` /
+`kernelConf` — a bare top-level key (even `logLevel`) switches parsing to the
+legacy flat shape. Unpinned listening ports are OS-assigned; the config pins
+the p2p ports to match the Docker port mappings.
 
-- Keep extra keys inside `messagingOverrides` / `channelsOverrides` /
-  `kernelConf`. Any other bare top-level key (even `logLevel`) makes the
-  config parse as the legacy flat shape — it still boots the full stack, but
-  with the legacy fixed defaults (e.g. TCP port 60000).
-- Listening ports not pinned in the config are OS-assigned. Drop the port
-  overrides to run several nodes side by side on one host (in Docker, keep
-  them — the compose port mappings rely on the pinned values).
-
-To target the dev network instead, use
-[`conf/logos-dev.json`](../conf/logos-dev.json) (preset `logos.dev`). The full
-config grammar — including kernel-only service nodes via
-`"entryLayer": "kernel"` — is documented in the
+For the dev network, use [`conf/logos-dev.json`](../conf/logos-dev.json)
+(preset `logos.dev`). The full config grammar, including kernel-only nodes
+(`"entryLayer": "kernel"`), is documented in the
 [README](../README.md#node-configuration-createnode).
 
 The node is now connected to the `logos.test` network. See
