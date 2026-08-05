@@ -83,9 +83,17 @@ mkdir -p packages modules
 lgpd download delivery_module --output ./packages
 lgpm install --dir ./packages --modules-dir ./modules
 
-# logos.test node config
+# logos.test node config (layered createNode shape — see Configuration below)
 cat > logos-test.json <<'JSON'
-{ "preset": "logos.test", "logLevel": "DEBUG" }
+{
+  "mode": "Core",
+  "preset": "logos.test",
+  "messagingOverrides": {
+    "logLevel": "DEBUG",
+    "tcp-port": 30303,
+    "discv5-udp-port": 9000
+  }
+}
 JSON
 
 # Run the daemon (it binds capability_module automatically, so ./modules only
@@ -169,16 +177,31 @@ logoscore stop
 
 ## Configuration
 
-The node config is just the `logos.test` network preset. The repo ships it as
-[`conf/logos-test.json`](../conf/logos-test.json): with Docker it is mounted
-into the container at `/conf` (`@/conf/logos-test.json`); with the Nix build,
-pass the path directly (`@conf/logos-test.json`). The prebuilt-binaries path
-above writes the same config inline as `logos-test.json` so no clone is needed.
-Edit it and re-run the boot steps to change settings.
+The node config uses the layered `createNode` shape: `preset` picks the
+network, `mode` picks the protocol flags (`"Core"` = relay node), and
+per-layer settings go in `messagingOverrides` — here the log level and the
+p2p listening ports (pinned to match the Docker port mappings). The repo
+ships it as [`conf/logos-test.json`](../conf/logos-test.json): with Docker it
+is mounted into the container at `/conf` (`@/conf/logos-test.json`); with the
+Nix build, pass the path directly (`@conf/logos-test.json`). The
+prebuilt-binaries path above writes the same config inline as
+`logos-test.json` so no clone is needed. Edit it and re-run the boot steps to
+change settings.
+
+Two things to know when editing:
+
+- Keep extra keys inside `messagingOverrides` / `channelsOverrides` /
+  `kernelConf`. Any other bare top-level key (even `logLevel`) makes the
+  config parse as the legacy flat shape — it still boots the full stack, but
+  with the legacy fixed defaults (e.g. TCP port 60000).
+- Listening ports not pinned in the config are OS-assigned. Drop the port
+  overrides to run several nodes side by side on one host (in Docker, keep
+  them — the compose port mappings rely on the pinned values).
 
 To target the dev network instead, use
-[`conf/logos-dev.json`](../conf/logos-dev.json) (preset `logos.dev`). Available
-keys are documented in the
+[`conf/logos-dev.json`](../conf/logos-dev.json) (preset `logos.dev`). The full
+config grammar — including kernel-only service nodes via
+`"entryLayer": "kernel"` — is documented in the
 [README](../README.md#node-configuration-createnode).
 
 The node is now connected to the `logos.test` network. See
