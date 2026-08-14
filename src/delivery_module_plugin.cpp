@@ -1,4 +1,5 @@
 #include "delivery_module_plugin.h"
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <memory>
@@ -34,9 +35,13 @@ std::vector<uint8_t> base64Decode(const std::string& encoded) {
 }
 
 int64_t currentTimestampNs() {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
+    // std::chrono rather than clock_gettime(CLOCK_REALTIME): the POSIX call is
+    // not available on mingw (neither the function nor CLOCK_REALTIME is
+    // declared), which broke the Windows cross-build. system_clock is the
+    // portable spelling of the same wall-clock reading.
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
 }
 } // namespace
 
