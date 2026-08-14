@@ -13,6 +13,10 @@
 #include <semaphore>
 #include <unordered_map>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
 
@@ -34,6 +38,52 @@ extern "C" {
 
 namespace {
 namespace b64 = boost::beast::detail::base64;
+
+#ifdef _WIN32
+// liblogosdelivery dlopens optional deps (libpq.dll) by bare name, which Windows
+// never resolves against this plugin's directory; add it to the search order.
+void addOwnDirectoryToDllSearchPath()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&addOwnDirectoryToDllSearchPath),
+                &self)) {
+            fprintf(stderr, "DeliveryModuleImpl: GetModuleHandleExW failed (%lu); "
+                            "bare-name dependencies may not resolve\n", GetLastError());
+            return;
+        }
+
+        std::wstring path(MAX_PATH, L'\0');
+        for (;;) {
+            const DWORD n = GetModuleFileNameW(self, path.data(), static_cast<DWORD>(path.size()));
+            if (n == 0) {
+                fprintf(stderr, "DeliveryModuleImpl: GetModuleFileNameW failed (%lu)\n", GetLastError());
+                return;
+            }
+            if (n < path.size()) {
+                path.resize(n);
+                break;
+            }
+            path.resize(path.size() * 2);  // truncated, retry with room
+        }
+
+        const size_t slash = path.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        path.resize(slash);
+
+        if (!SetDllDirectoryW(path.c_str())) {
+            fprintf(stderr, "DeliveryModuleImpl: SetDllDirectoryW failed (%lu)\n", GetLastError());
+        }
+    });
+}
+#else
+void addOwnDirectoryToDllSearchPath() {}
+#endif
 
 std::string base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
@@ -541,6 +591,9 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
+
+    // Before the node dlopens anything by bare name (libpq.dll).
+    addOwnDirectoryToDllSearchPath();
 
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(),
                                                rlnPreset.enabled && !rlnPreset.enableValidation);
