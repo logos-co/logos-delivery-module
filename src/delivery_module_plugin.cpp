@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <initializer_list>
 #include <memory>
@@ -80,7 +82,10 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
 }
 } // namespace
 
-void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t len, void* userData)
+// Signature is dictated by LogosDeliveryScalarRawFn, whose payload parameter is
+// `char*` (non-const) -- start/stop keep the pointer+length convention while the
+// argument-taking entry points moved to the split reply/err_msg one.
+void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
@@ -89,7 +94,7 @@ void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t l
                       currentTimestampNs());
 }
 
-void DeliveryModuleImpl::stop_callback(int callerRet, const char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
@@ -107,7 +112,7 @@ DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
     if (deliveryCtx) {
-        logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
+        logosdelivery_destroy(deliveryCtx);
         deliveryCtx = nullptr;
     }
 }
@@ -318,6 +323,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         std::binary_semaphore sem{0};
         int callerRet{RET_ERR};
         std::string message;
+        void* ctx{nullptr};
     };
 
     static std::mutex pendingMutex;
@@ -331,8 +337,18 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts[callbackKey] = callbackCtx;
     }
 
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+    // create_node no longer RETURNS the context. It arrives here as `ctx_addr`,
+    // a decimal string holding the pointer value, and only on success -- see the
+    // generated logosdelivery_create_trampoline, which parses it the same way.
+    auto callback = +[](int callerRet, const char* ctxAddr, const char* errMsg, void* userData) {
         fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", callerRet);
+
+        // A progress notification, not a completion. Releasing the semaphore on
+        // it would hand createNode a context that does not exist yet; a terminal
+        // RET_OK/RET_ERR always follows.
+        if (callerRet == NIMFFI_RET_STALE_WARN) {
+            return;
+        }
 
         std::shared_ptr<CallbackContext> callbackCtx;
         {
@@ -350,15 +366,26 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
 
         callbackCtx->callerRet = callerRet;
-        if (msg && len > 0) {
-            callbackCtx->message = std::string(msg, len);
+        if (callerRet == RET_OK) {
+            char* endp = nullptr;
+            unsigned long long addr = ctxAddr ? std::strtoull(ctxAddr, &endp, 10) : 0ULL;
+            if (ctxAddr && *ctxAddr && endp && *endp == '\0') {
+                callbackCtx->ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(addr));
+            } else {
+                callbackCtx->callerRet = RET_ERR;
+                callbackCtx->message = "create returned a non-numeric context address";
+            }
+        } else if (errMsg && *errMsg) {
+            callbackCtx->message = errMsg;
             fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", callbackCtx->message.c_str());
         }
 
         callbackCtx->sem.release();
     };
 
-    deliveryCtx = logosdelivery_create_node(cfgWithPorts.c_str(), callback, callbackKey);
+    LogosdeliveryCreateNodeCtorReq createReq{};
+    createReq.configJson = cfgWithPorts.c_str();
+    (void)logosdelivery_create_node(&createReq, callback, callbackKey);
 
     fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
 
@@ -371,6 +398,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
         return {false, {}, "Timeout waiting for createNode callback"};
     }
+
+    deliveryCtx = callbackCtx->ctx;
 
     if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
         if (!callbackCtx->message.empty()) {
@@ -385,7 +414,27 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
-    logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
+    // The single global event callback is gone; events are delivered through a
+    // per-event-name listener registry instead. Register the same dispatcher for
+    // every name this module handles -- the payload still carries its own
+    // "eventType" field (emitEvent sends `newJsonEvent("message_received", …)`),
+    // so event_callback's existing parsing is unchanged.
+    for (const char* eventName : {
+             "onMessageSent",
+             "onMessageError",
+             "onMessagePropagated",
+             "onMessageReceived",
+             "onConnectionStatusChange",
+             "onChannelMessageReceived",
+             "onChannelMessageSent",
+             "onChannelMessageError",
+         }) {
+        if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
+            // A zero id means the registration did not take, which would leave
+            // this event silently undelivered for the life of the node.
+            fprintf(stderr, "DeliveryModuleImpl: failed to register listener for %s\n", eventName);
+        }
+    }
     return {true, {}};
 }
 
