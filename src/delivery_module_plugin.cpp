@@ -13,6 +13,10 @@
 #include <semaphore>
 #include <unordered_map>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
 
@@ -27,6 +31,77 @@ extern "C" {
 
 namespace {
 namespace b64 = boost::beast::detail::base64;
+
+#ifdef _WIN32
+// liblogosdelivery dlopens optional dependencies by BARE NAME -- libpq.dll for
+// the Postgres archive driver is the one that bites today:
+//
+//     DeliveryModuleImpl::createNode called
+//     could not load: libpq.dll          <- 4ms later
+//     ...createNode then never completes, and the caller sees a 20s timeout
+//
+// The Windows loader resolves a bare name against the EXECUTABLE's directory,
+// the system directories and PATH -- never against the directory of the DLL
+// doing the loading. Our libpq.dll ships INSIDE the package, next to this
+// plugin, so none of those find it.
+//
+// Copying it beside the host executable would work and is wrong: a module is
+// self-contained, and its dependencies must not have to be scattered into a
+// directory the module does not own (nor collide there with another module's
+// copy). Instead, add our own directory to the search order.
+//
+// SetDllDirectoryW rather than the alternatives:
+//   - AddDllDirectory needs SetDefaultDllDirectories(...USER_DIRS), which drops
+//     PATH from the search order process-wide -- a much larger blast radius for
+//     no gain here.
+//   - Preloading libpq.dll by full path (so a later bare-name load matches the
+//     already-loaded module) fixes exactly one library; this fixes every
+//     bare-name dependency the node may reach for.
+// It is process-global, but each module runs in its own logos_host process, so
+// the effect is scoped to this module. It also drops the CWD from the search
+// order, which is a small hardening win.
+void addOwnDirectoryToDllSearchPath()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&addOwnDirectoryToDllSearchPath),
+                &self)) {
+            fprintf(stderr, "DeliveryModuleImpl: GetModuleHandleExW failed (%lu); "
+                            "bare-name dependencies may not resolve\n", GetLastError());
+            return;
+        }
+
+        std::wstring path(MAX_PATH, L'\0');
+        for (;;) {
+            const DWORD n = GetModuleFileNameW(self, path.data(), static_cast<DWORD>(path.size()));
+            if (n == 0) {
+                fprintf(stderr, "DeliveryModuleImpl: GetModuleFileNameW failed (%lu)\n", GetLastError());
+                return;
+            }
+            if (n < path.size()) {
+                path.resize(n);
+                break;
+            }
+            path.resize(path.size() * 2);  // truncated, retry with room
+        }
+
+        const size_t slash = path.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        path.resize(slash);
+
+        if (!SetDllDirectoryW(path.c_str())) {
+            fprintf(stderr, "DeliveryModuleImpl: SetDllDirectoryW failed (%lu)\n", GetLastError());
+        }
+    });
+}
+#else
+void addOwnDirectoryToDllSearchPath() {}
+#endif
 
 std::string base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
@@ -312,6 +387,11 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
+
+    // Before the node dlopens anything: liblogosdelivery reaches for optional
+    // dependencies (libpq.dll) by bare name, which the loader will not find in
+    // our own package directory without this.
+    addOwnDirectoryToDllSearchPath();
 
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
     if (!cfgWithDefaults) {
