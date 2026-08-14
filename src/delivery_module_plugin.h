@@ -303,6 +303,6 @@ private:
 
     // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
     // userData is the DeliveryModuleImpl*.
-    static void start_callback(int callerRet, const char* msg, size_t len, void* userData);
-    static void stop_callback(int callerRet, const char* msg, size_t len, void* userData);
+    static void start_callback(int callerRet, char* msg, size_t len, void* userData);
+    static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
 };

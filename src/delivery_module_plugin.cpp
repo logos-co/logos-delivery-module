@@ -1,7 +1,10 @@
 #include "delivery_module_plugin.h"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <initializer_list>
 #include <memory>
@@ -9,6 +12,10 @@
 #include <optional>
 #include <semaphore>
 #include <unordered_map>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
@@ -24,6 +31,77 @@ extern "C" {
 
 namespace {
 namespace b64 = boost::beast::detail::base64;
+
+#ifdef _WIN32
+// liblogosdelivery dlopens optional dependencies by BARE NAME -- libpq.dll for
+// the Postgres archive driver is the one that bites today:
+//
+//     DeliveryModuleImpl::createNode called
+//     could not load: libpq.dll          <- 4ms later
+//     ...createNode then never completes, and the caller sees a 20s timeout
+//
+// The Windows loader resolves a bare name against the EXECUTABLE's directory,
+// the system directories and PATH -- never against the directory of the DLL
+// doing the loading. Our libpq.dll ships INSIDE the package, next to this
+// plugin, so none of those find it.
+//
+// Copying it beside the host executable would work and is wrong: a module is
+// self-contained, and its dependencies must not have to be scattered into a
+// directory the module does not own (nor collide there with another module's
+// copy). Instead, add our own directory to the search order.
+//
+// SetDllDirectoryW rather than the alternatives:
+//   - AddDllDirectory needs SetDefaultDllDirectories(...USER_DIRS), which drops
+//     PATH from the search order process-wide -- a much larger blast radius for
+//     no gain here.
+//   - Preloading libpq.dll by full path (so a later bare-name load matches the
+//     already-loaded module) fixes exactly one library; this fixes every
+//     bare-name dependency the node may reach for.
+// It is process-global, but each module runs in its own logos_host process, so
+// the effect is scoped to this module. It also drops the CWD from the search
+// order, which is a small hardening win.
+void addOwnDirectoryToDllSearchPath()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&addOwnDirectoryToDllSearchPath),
+                &self)) {
+            fprintf(stderr, "DeliveryModuleImpl: GetModuleHandleExW failed (%lu); "
+                            "bare-name dependencies may not resolve\n", GetLastError());
+            return;
+        }
+
+        std::wstring path(MAX_PATH, L'\0');
+        for (;;) {
+            const DWORD n = GetModuleFileNameW(self, path.data(), static_cast<DWORD>(path.size()));
+            if (n == 0) {
+                fprintf(stderr, "DeliveryModuleImpl: GetModuleFileNameW failed (%lu)\n", GetLastError());
+                return;
+            }
+            if (n < path.size()) {
+                path.resize(n);
+                break;
+            }
+            path.resize(path.size() * 2);  // truncated, retry with room
+        }
+
+        const size_t slash = path.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        path.resize(slash);
+
+        if (!SetDllDirectoryW(path.c_str())) {
+            fprintf(stderr, "DeliveryModuleImpl: SetDllDirectoryW failed (%lu)\n", GetLastError());
+        }
+    });
+}
+#else
+void addOwnDirectoryToDllSearchPath() {}
+#endif
 
 std::string base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
@@ -41,9 +119,13 @@ std::vector<uint8_t> base64Decode(const std::string& encoded) {
 }
 
 int64_t currentTimestampNs() {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
+    // std::chrono rather than clock_gettime(CLOCK_REALTIME): the POSIX call is
+    // not available on mingw (neither the function nor CLOCK_REALTIME is
+    // declared), which broke the Windows cross-build. system_clock is the
+    // portable spelling of the same wall-clock reading.
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
 }
 
 // message_received: JSON array of byte values.
@@ -75,7 +157,10 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
 }
 } // namespace
 
-void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t len, void* userData)
+// Signature is dictated by LogosDeliveryScalarRawFn, whose payload parameter is
+// `char*` (non-const) -- start/stop keep the pointer+length convention while the
+// argument-taking entry points moved to the split reply/err_msg one.
+void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
@@ -84,7 +169,7 @@ void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t l
                       currentTimestampNs());
 }
 
-void DeliveryModuleImpl::stop_callback(int callerRet, const char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
@@ -102,7 +187,7 @@ DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
     if (deliveryCtx) {
-        logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
+        logosdelivery_destroy(deliveryCtx);
         deliveryCtx = nullptr;
     }
 }
@@ -303,6 +388,11 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
+    // Before the node dlopens anything: liblogosdelivery reaches for optional
+    // dependencies (libpq.dll) by bare name, which the loader will not find in
+    // our own package directory without this.
+    addOwnDirectoryToDllSearchPath();
+
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
     if (!cfgWithDefaults) {
         return {false, {}, "Invalid JSON config"};
@@ -313,6 +403,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         std::binary_semaphore sem{0};
         int callerRet{RET_ERR};
         std::string message;
+        void* ctx{nullptr};
     };
 
     static std::mutex pendingMutex;
@@ -326,8 +417,18 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts[callbackKey] = callbackCtx;
     }
 
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
+    // create_node no longer RETURNS the context. It arrives here as `ctx_addr`,
+    // a decimal string holding the pointer value, and only on success -- see the
+    // generated logosdelivery_create_trampoline, which parses it the same way.
+    auto callback = +[](int callerRet, const char* ctxAddr, const char* errMsg, void* userData) {
         fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", callerRet);
+
+        // A progress notification, not a completion. Releasing the semaphore on
+        // it would hand createNode a context that does not exist yet; a terminal
+        // RET_OK/RET_ERR always follows.
+        if (callerRet == NIMFFI_RET_STALE_WARN) {
+            return;
+        }
 
         std::shared_ptr<CallbackContext> callbackCtx;
         {
@@ -345,15 +446,26 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
 
         callbackCtx->callerRet = callerRet;
-        if (msg && len > 0) {
-            callbackCtx->message = std::string(msg, len);
+        if (callerRet == RET_OK) {
+            char* endp = nullptr;
+            unsigned long long addr = ctxAddr ? std::strtoull(ctxAddr, &endp, 10) : 0ULL;
+            if (ctxAddr && *ctxAddr && endp && *endp == '\0') {
+                callbackCtx->ctx = reinterpret_cast<void*>(static_cast<uintptr_t>(addr));
+            } else {
+                callbackCtx->callerRet = RET_ERR;
+                callbackCtx->message = "create returned a non-numeric context address";
+            }
+        } else if (errMsg && *errMsg) {
+            callbackCtx->message = errMsg;
             fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", callbackCtx->message.c_str());
         }
 
         callbackCtx->sem.release();
     };
 
-    deliveryCtx = logosdelivery_create_node(cfgWithPorts.c_str(), callback, callbackKey);
+    LogosdeliveryCreateNodeCtorReq createReq{};
+    createReq.configJson = cfgWithPorts.c_str();
+    (void)logosdelivery_create_node(&createReq, callback, callbackKey);
 
     fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
 
@@ -366,6 +478,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
         return {false, {}, "Timeout waiting for createNode callback"};
     }
+
+    deliveryCtx = callbackCtx->ctx;
 
     if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
         if (!callbackCtx->message.empty()) {
@@ -380,7 +494,27 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
-    logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
+    // The single global event callback is gone; events are delivered through a
+    // per-event-name listener registry instead. Register the same dispatcher for
+    // every name this module handles -- the payload still carries its own
+    // "eventType" field (emitEvent sends `newJsonEvent("message_received", …)`),
+    // so event_callback's existing parsing is unchanged.
+    for (const char* eventName : {
+             "onMessageSent",
+             "onMessageError",
+             "onMessagePropagated",
+             "onMessageReceived",
+             "onConnectionStatusChange",
+             "onChannelMessageReceived",
+             "onChannelMessageSent",
+             "onChannelMessageError",
+         }) {
+        if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
+            // A zero id means the registration did not take, which would leave
+            // this event silently undelivered for the life of the node.
+            fprintf(stderr, "DeliveryModuleImpl: failed to register listener for %s\n", eventName);
+        }
+    }
     return {true, {}};
 }
 
