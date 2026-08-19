@@ -19,6 +19,9 @@ logos_module(
     SOURCES
         src/delivery_module_plugin.h
         src/delivery_module_plugin.cpp
+        src/net_bridge.h
+        src/net_bridge.cpp
+        src/libp2p_module_transport.cpp
     EXTERNAL_LIBS
         logosdelivery
     INCLUDE_DIRS

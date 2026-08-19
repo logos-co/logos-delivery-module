@@ -2,12 +2,15 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+
+class Libp2pTransport;
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -95,6 +98,8 @@ public:
      *
      * The pre-layered flat shape (bare `WakuNodeConf` keys at top level) still
      * parses and boots the full stack.
+     *
+     * Optional `useLibp2pModule` runs the protocols over `libp2p_module`'s libp2p node, see `docs/libp2p-provider.md`.
      *
      * @param cfg UTF-8 JSON payload string.
      * @return `true` if context creation succeeds and callback returns `RET_OK`,
@@ -288,7 +293,14 @@ logos_events:
 private:
     void* deliveryCtx;
 
+    std::shared_ptr<Libp2pTransport> netTransport;
+
     std::mutex createNodeMutex;
+
+    StdLogosResult startNetBridge();
+    void stopNetBridge();
+    StdLogosResult abortCreateNode(const std::string& reason);
+    StdLogosResult verifySharedIdentity(const std::string& providerPeerId);
 
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
 

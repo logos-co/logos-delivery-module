@@ -9,10 +9,13 @@ logos_test(
     NAME delivery_module_tests
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
+        ../src/net_bridge.cpp
         mocks/delivery_module_events_stub.cpp
+        mocks/net_bridge_mock.cpp
     TEST_SOURCES
         main.cpp
         test_delivery_module.cpp
+        test_net_bridge.cpp
     MOCK_C_SOURCES
         mocks/mock_liblogosdelivery.cpp
     EXTRA_INCLUDES
@@ -22,6 +25,10 @@ logos_test(
 # delivery_module uses C++20 features (std::binary_semaphore, pack init-capture).
 # LogosTest.cmake defaults to C++17; override per-target.
 set_target_properties(delivery_module_tests PROPERTIES CXX_STANDARD 20)
+
+# net_bridge.cpp resolves the net backend ABI with dlsym, so the mocked symbols
+# must reach the dynamic symbol table of the test executable.
+set_target_properties(delivery_module_tests PROPERTIES ENABLE_EXPORTS ON)
 
 # Integration tests (real liblogosdelivery)
 
@@ -37,7 +44,9 @@ if(LIBLOGOSDELIVERY_PATH)
         NAME delivery_module_integration_tests
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
+            ../src/net_bridge.cpp
             mocks/delivery_module_events_stub.cpp
+            mocks/net_transport_stub.cpp
         TEST_SOURCES
             main.cpp
             test_delivery_integration.cpp
