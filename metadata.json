@@ -11,6 +11,9 @@
         "impl_header": "delivery_module_plugin.h"
     },
     "dependencies": [],
+    "interface_dependencies": [
+        { "name": "libp2p", "file": "interfaces/libp2p.h", "impl_class": "ILibp2p" }
+    ],
     "include": [
         "liblogosdelivery.so",
         "liblogosdelivery.dylib",

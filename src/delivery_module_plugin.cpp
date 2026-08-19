@@ -14,6 +14,7 @@
 #include <boost/beast/core/detail/base64.hpp>
 
 #include "api_call_handler.h"
+#include "net_bridge.h"
 extern "C" {
 #include <liblogosdelivery.h>
 // Kernel tier: unstable, may change without a deprecation cycle. Only
@@ -105,6 +106,7 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
         logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
         deliveryCtx = nullptr;
     }
+    stopNetBridge();
 }
 
 void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
@@ -235,11 +237,27 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
         const std::string key = toLowerCopy(entry.key());
         if (key != "entrylayer" && key != "mode" && key != "preset"
             && key != "kernelconf" && key != "messagingoverrides"
-            && key != "channelsoverrides") {
+            && key != "channelsoverrides" && key != "libp2pprovider") {
             return true;
         }
     }
     return false;
+}
+
+// Nothing means the default node, and a malformed value is liblogosdelivery's to reject.
+static std::optional<std::string> libp2pProviderOf(const nlohmann::json& cfgObj)
+{
+    auto key = findKey(cfgObj, {"libp2pprovider"});
+    if (!key || !cfgObj[*key].is_string()) {
+        return std::nullopt;
+    }
+
+    std::string provider = cfgObj[*key].get<std::string>();
+    const auto first = provider.find_first_not_of(" \t\n\r");
+    if (first == std::string::npos) {
+        return std::nullopt;
+    }
+    return provider.substr(first, provider.find_last_not_of(" \t\n\r") - first + 1);
 }
 
 // Defaults the node's storage directory to the host's per-instance path, so
@@ -247,8 +265,8 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // path goes where each config shape accepts it: kernelConf when present,
 // messagingOverrides (created if needed) for the layered shapes, top level
 // for the legacy flat shape.
-static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
-                                                      const std::string& persistencePath)
+static std::optional<nlohmann::json> applyConfigDefaults(const std::string& cfg,
+                                                        const std::string& persistencePath)
 {
     nlohmann::json cfgObj;
     try {
@@ -288,7 +306,57 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         }
     }
 
-    return cfgObj.dump();
+    return cfgObj;
+}
+
+StdLogosResult DeliveryModuleImpl::startNetBridge(const std::string& provider)
+{
+    netTransport = makeLibp2pTransport(*this, provider);
+    auto started = Libp2pNetBridge::instance()->start(netTransport, provider);
+    if (!started.success) {
+        return abortCreateNode(started.error);
+    }
+    return started;
+}
+
+// Unwinds whatever createNode built so far, and names the reason once for the log and the caller.
+StdLogosResult DeliveryModuleImpl::abortCreateNode(const std::string& reason)
+{
+    deliveryCtx = nullptr;
+    stopNetBridge();
+    fprintf(stderr, "DeliveryModuleImpl: %s\n", reason.c_str());
+    return {false, {}, reason};
+}
+
+// A worker still inside a provider call sees the flag before it reaches the transport.
+void DeliveryModuleImpl::stopNetBridge()
+{
+    if (!netTransport) {
+        return;
+    }
+
+    netTransport->alive = false;
+    Libp2pNetBridge::instance()->stop(netTransport);
+    netTransport.reset();
+}
+
+// A split identity breaks metadata and peer exchange in ways a dial error hides.
+StdLogosResult DeliveryModuleImpl::verifySharedIdentity(const std::string& provider,
+                                                        const std::string& providerPeerId)
+{
+    auto local = getNodeInfo("MyPeerId");
+    if (!local.success || !local.value.is_string() || local.value.get<std::string>().empty()) {
+        fprintf(stderr, "DeliveryModuleImpl: peer id unavailable, the shared identity with %s stays unverified\n",
+                provider.c_str());
+        return {true, {}};
+    }
+
+    const std::string localPeerId = local.value.get<std::string>();
+    if (localPeerId != providerPeerId) {
+        return {false, {}, "node key differs from " + provider + ": "
+                           + localPeerId + " vs " + providerPeerId};
+    }
+    return {true, {}};
 }
 
 StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
@@ -307,7 +375,17 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     if (!cfgWithDefaults) {
         return {false, {}, "Invalid JSON config"};
     }
-    const std::string& cfgWithPorts = *cfgWithDefaults;
+    const std::string cfgWithPorts = cfgWithDefaults->dump();
+
+    const auto provider = libp2pProviderOf(*cfgWithDefaults);
+    std::string providerPeerId;
+    if (provider) {
+        auto bridge = startNetBridge(*provider);
+        if (!bridge.success) {
+            return bridge;
+        }
+        providerPeerId = bridge.value.get<std::string>();
+    }
 
     struct CallbackContext {
         std::binary_semaphore sem{0};
@@ -360,28 +438,29 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     if (!callbackCtx->sem.try_acquire_for(CALLBACK_TIMEOUT)) {
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
-
-        deliveryCtx = nullptr;
-
-        fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
-        return {false, {}, "Timeout waiting for createNode callback"};
+        return abortCreateNode("Timeout waiting for createNode callback");
     }
 
     if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
         if (!callbackCtx->message.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: createNode callback error: %s\n", callbackCtx->message.c_str());
         }
-
-        deliveryCtx = nullptr;
-
-        fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
-        return {false, {}, "Failed to create Delivery context"};
+        return abortCreateNode("Failed to create Delivery context");
     }
 
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
     logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
-    return {true, {}};
+
+    if (!provider) {
+        return {true, {}};
+    }
+    auto identity = verifySharedIdentity(*provider, providerPeerId);
+    if (!identity.success) {
+        logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
+        return abortCreateNode(identity.error);
+    }
+    return identity;
 }
 
 StdLogosResult DeliveryModuleImpl::start()
