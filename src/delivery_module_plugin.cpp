@@ -73,10 +73,31 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
     }
     return base64Decode(payloadValue.get<std::string>());
 }
+
+// Wire names of the events this module forwards. nim-ffi 0.3.0 replaced the
+// single global event callback with a per-event listener registry, so each name
+// is registered separately; the JSON payload still carries the snake_case
+// "eventType" that event_callback dispatches on. Upstream also emits
+// onTopicHealthChange, onConnectionChange and onReceivedMessage, which the
+// module does not surface.
+constexpr const char* kEventNames[] = {
+    "onMessageSent",
+    "onMessageError",
+    "onMessagePropagated",
+    "onMessageReceived",
+    "onConnectionStatusChange",
+    "onChannelMessageReceived",
+    "onChannelMessageSent",
+    "onChannelMessageError",
+};
 } // namespace
 
-void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, void* userData)
 {
+    if (callerRet == RET_STALE_WARN) {
+        return;
+    }
+
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
     impl->nodeStarted(callerRet == RET_OK,
@@ -84,8 +105,12 @@ void DeliveryModuleImpl::start_callback(int callerRet, const char* msg, size_t l
                       currentTimestampNs());
 }
 
-void DeliveryModuleImpl::stop_callback(int callerRet, const char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, void* userData)
 {
+    if (callerRet == RET_STALE_WARN) {
+        return;
+    }
+
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
     impl->nodeStopped(callerRet == RET_OK,
@@ -93,7 +118,7 @@ void DeliveryModuleImpl::stop_callback(int callerRet, const char* msg, size_t le
                       currentTimestampNs());
 }
 
-DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
+DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
     fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
@@ -101,8 +126,11 @@ DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr)
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
-    if (deliveryCtx) {
-        logosdelivery_destroy(deliveryCtx, nullptr, nullptr);
+    if (deliveryCtxHandle) {
+        // Frees the handle and stops the node, tearing down the event
+        // listeners registered against it along the way.
+        logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
+        deliveryCtxHandle = nullptr;
         deliveryCtx = nullptr;
     }
 }
@@ -309,16 +337,19 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
-    struct CallbackContext {
+    // logosdelivery_ctx_create packs the request struct and turns the decimal
+    // context address the FFI reports back into a LogosDeliveryCtx handle.
+    struct CreateContext {
         std::binary_semaphore sem{0};
         int callerRet{RET_ERR};
         std::string message;
+        LogosDeliveryCtx* ctx{nullptr};
     };
 
     static std::mutex pendingMutex;
-    static std::unordered_map<void*, std::shared_ptr<CallbackContext>> pendingContexts;
+    static std::unordered_map<void*, std::shared_ptr<CreateContext>> pendingContexts;
 
-    auto callbackCtx = std::make_shared<CallbackContext>();
+    auto callbackCtx = std::make_shared<CreateContext>();
     void* callbackKey = static_cast<void*>(callbackCtx.get());
 
     {
@@ -326,14 +357,19 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts[callbackKey] = callbackCtx;
     }
 
-    auto callback = +[](int callerRet, const char* msg, size_t len, void* userData) {
-        fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", callerRet);
+    auto callback = +[](int errCode, LogosDeliveryCtx* ctx, const char* errMsg, void* userData) {
+        fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", errCode);
 
-        std::shared_ptr<CallbackContext> callbackCtx;
+        std::shared_ptr<CreateContext> callbackCtx;
         {
             std::lock_guard<std::mutex> lock(pendingMutex);
             auto it = pendingContexts.find(userData);
             if (it == pendingContexts.end()) {
+                // createNode already gave up waiting. Destroy the node we were
+                // handed rather than leaving it running with no owner.
+                if (ctx) {
+                    logosdelivery_ctx_destroy(ctx);
+                }
                 return;
             }
             callbackCtx = it->second;
@@ -344,16 +380,23 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             return;
         }
 
-        callbackCtx->callerRet = callerRet;
-        if (msg && len > 0) {
-            callbackCtx->message = std::string(msg, len);
-            fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", callbackCtx->message.c_str());
+        callbackCtx->callerRet = errCode;
+        callbackCtx->ctx = ctx;
+        if (errCode != RET_OK && errMsg) {
+            callbackCtx->message = errMsg;
+            fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", errMsg);
         }
 
         callbackCtx->sem.release();
     };
 
-    deliveryCtx = logosdelivery_create_node(cfgWithPorts.c_str(), callback, callbackKey);
+    if (logosdelivery_ctx_create(cfgWithPorts.c_str(), callback, callbackKey) != RET_OK) {
+        std::lock_guard<std::mutex> lock(pendingMutex);
+        pendingContexts.erase(callbackKey);
+
+        fprintf(stderr, "DeliveryModuleImpl: Failed to initiate createNode\n");
+        return {false, {}, "Failed to initiate createNode"};
+    }
 
     fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
 
@@ -361,26 +404,34 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         std::lock_guard<std::mutex> lock(pendingMutex);
         pendingContexts.erase(callbackKey);
 
-        deliveryCtx = nullptr;
-
         fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
         return {false, {}, "Timeout waiting for createNode callback"};
     }
 
-    if (callbackCtx->callerRet != RET_OK || deliveryCtx == nullptr) {
+    if (callbackCtx->callerRet != RET_OK || callbackCtx->ctx == nullptr
+        || callbackCtx->ctx->ptr == nullptr) {
         if (!callbackCtx->message.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: createNode callback error: %s\n", callbackCtx->message.c_str());
         }
-
-        deliveryCtx = nullptr;
+        // A handle carrying a null context is still a handle: free it.
+        if (callbackCtx->ctx) {
+            logosdelivery_ctx_destroy(callbackCtx->ctx);
+        }
 
         fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
         return {false, {}, "Failed to create Delivery context"};
     }
 
+    deliveryCtxHandle = callbackCtx->ctx;
+    deliveryCtx = callbackCtx->ctx->ptr;
+
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
-    logosdelivery_set_event_callback(deliveryCtx, event_callback, this);
+    for (const char* eventName : kEventNames) {
+        if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
+            fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
+        }
+    }
     return {true, {}};
 }
 
@@ -433,7 +484,8 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
     auto outcome = callApiRetValue(
         "send",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_send, deliveryCtx, messageJson.c_str()));
+        bindApiCall(logosdelivery_send, deliveryCtx,
+                    LogosdeliverySendReq{.messageJson = messageJson.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
@@ -459,7 +511,8 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
     auto outcome = callApiRetVoid(
         "subscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_subscribe, deliveryCtx, contentTopic.c_str()));
+        bindApiCall(logosdelivery_subscribe, deliveryCtx,
+                    LogosdeliverySubscribeReq{.contentTopicStr = contentTopic.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
@@ -482,7 +535,8 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     auto outcome = callApiRetVoid(
         "unsubscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_unsubscribe, deliveryCtx, contentTopic.c_str()));
+        bindApiCall(logosdelivery_unsubscribe, deliveryCtx,
+                    LogosdeliveryUnsubscribeReq{.contentTopicStr = contentTopic.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
@@ -514,7 +568,9 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
         "store_query",
         callbackTimeout,
         bindApiCall(waku_store_query, deliveryCtx,
-                    jsonQuery.c_str(), peerAddr.c_str(), static_cast<int>(timeoutMs)));
+                    WakuStoreQueryReq{.jsonQuery = jsonQuery.c_str(),
+                                      .peerAddr = peerAddr.c_str(),
+                                      .timeoutMs = static_cast<int32_t>(timeoutMs)}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Store query failed for peer: %s, reason: %s\n",
@@ -539,7 +595,9 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
         "channel_create",
         CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_channel_create, deliveryCtx,
-                    channelId.c_str(), contentTopic.c_str(), senderId.c_str()));
+                    LogosdeliveryChannelCreateReq{.channelIdStr = channelId.c_str(),
+                                                  .contentTopicStr = contentTopic.c_str(),
+                                                  .senderIdStr = senderId.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
@@ -560,7 +618,8 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
     auto outcome = callApiRetValue(
         "channel_exists",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_exists, deliveryCtx, channelId.c_str()));
+        bindApiCall(logosdelivery_channel_exists, deliveryCtx,
+                    LogosdeliveryChannelExistsReq{.channelIdStr = channelId.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel exists failed for id: %s, reason: %s\n",
@@ -588,7 +647,8 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
         "channel_send",
         CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_channel_send, deliveryCtx,
-                    channelId.c_str(), messageJson.c_str()));
+                    LogosdeliveryChannelSendReq{.channelIdStr = channelId.c_str(),
+                                                .messageJson = messageJson.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel send failed for id: %s, reason: %s\n",
@@ -614,7 +674,8 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
     auto outcome = callApiRetVoid(
         "channel_close",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_close, deliveryCtx, channelId.c_str()));
+        bindApiCall(logosdelivery_channel_close, deliveryCtx,
+                    LogosdeliveryChannelCloseReq{.channelIdStr = channelId.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel close failed for id: %s, reason: %s\n",
@@ -633,7 +694,7 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
     auto outcome = callApiRetValue(
         "get_available_node_info_ids",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
+        bindScalarApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
@@ -651,7 +712,8 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx, nodeInfoId.c_str()));
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx,
+                    LogosdeliveryGetNodeInfoReq{.nodeInfoId = nodeInfoId.c_str()}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
@@ -671,7 +733,7 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
     auto outcome = callApiRetValue(
         "get_available_configs",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_available_configs, deliveryCtx));
+        bindScalarApiCall(logosdelivery_get_available_configs, deliveryCtx));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
@@ -691,7 +753,8 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx, "Metrics"));
+        bindApiCall(logosdelivery_get_node_info, deliveryCtx,
+                    LogosdeliveryGetNodeInfoReq{.nodeInfoId = "Metrics"}));
 
     if (!outcome.success || !outcome.value.is_string()) {
         fprintf(stderr, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",

@@ -286,7 +286,12 @@ logos_events:
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
 private:
+    // Raw FFI context: what every call and the event registry take.
     void* deliveryCtx;
+    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
+    // as void* so the C ABI header stays out of this header's includers.
+    // Released with logosdelivery_ctx_destroy.
+    void* deliveryCtxHandle;
 
     std::mutex createNodeMutex;
 
@@ -303,6 +308,8 @@ private:
 
     // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
     // userData is the DeliveryModuleImpl*.
-    static void start_callback(int callerRet, const char* msg, size_t len, void* userData);
-    static void stop_callback(int callerRet, const char* msg, size_t len, void* userData);
+    // Both take the scalar-fast-path reply shape and ignore RET_STALE_WARN,
+    // the non-terminal progress tick a long start/stop emits.
+    static void start_callback(int callerRet, char* msg, size_t len, void* userData);
+    static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
 };

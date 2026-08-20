@@ -26,7 +26,7 @@ LOGOS_TEST(createNode_succeeds_when_ffi_returns_non_null_context) {
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO"})").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_create_node"));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_event_callback"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_add_event_listener"));
 }
 
 LOGOS_TEST(createNode_fails_when_ffi_returns_null) {
@@ -54,7 +54,7 @@ LOGOS_TEST(createNode_succeeds_with_logos_dev_preset_config) {
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"DEBUG","mode":"Core","preset":"logos.dev"})").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_create_node"));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_event_callback"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_add_event_listener"));
 }
 
 // start
