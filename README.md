@@ -147,6 +147,11 @@ and metrics keep working.
 The pre-layered flat shape (bare `WakuNodeConf` keys at top level) still parses
 and boots the full stack.
 
+The optional top-level `useLibp2pModule` runs the delivery protocols over the
+libp2p node `logos-libp2p-module` already owns, instead of starting one. Both
+modules need the same key, and it covers the Edge protocols: see
+[docs/libp2p-provider.md](docs/libp2p-provider.md).
+
 ### Content Topics
 
 Content topics identify message channels for publishing and subscribing. Use a
