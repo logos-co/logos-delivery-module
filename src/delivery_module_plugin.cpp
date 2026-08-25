@@ -1,6 +1,8 @@
 #include "delivery_module_plugin.h"
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <initializer_list>
@@ -349,8 +351,14 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     static std::mutex pendingMutex;
     static std::unordered_map<void*, std::shared_ptr<CreateContext>> pendingContexts;
 
+    // Keyed by a counter, not the context's address: a createNode that timed
+    // out leaves its key behind, and a retry allocating its CreateContext at
+    // the recycled address would let that late reply wake the retry and hand
+    // it the abandoned node. Same reasoning as the ticket in api_call_handler.h.
+    static std::atomic<uintptr_t> createTicket{0};
+
     auto callbackCtx = std::make_shared<CreateContext>();
-    void* callbackKey = static_cast<void*>(callbackCtx.get());
+    void* callbackKey = reinterpret_cast<void*>(++createTicket);
 
     {
         std::lock_guard<std::mutex> lock(pendingMutex);
