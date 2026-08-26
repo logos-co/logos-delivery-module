@@ -51,6 +51,13 @@
               install_name_tool -change "$OLD_RLN" "@rpath/librln.dylib" lib/liblogosdelivery.dylib
             fi
           fi
+          # Linux: the integration test binary links the staged lib/ libraries
+          # by absolute path at build time, but the check phase runs from the
+          # build dir where the dynamic linker can't find them. Same class of
+          # gap as the darwin rewrite above (see TODO there).
+          if [ -f lib/liblogosdelivery.so ]; then
+            export LD_LIBRARY_PATH="$(pwd)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
         '';
       };
       # Bundle runtime libraries alongside the plugin.
