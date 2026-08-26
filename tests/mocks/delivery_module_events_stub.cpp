@@ -15,6 +15,7 @@
 namespace delivery_test_events {
 NodeLifecycleEvent g_lastNodeStarted{};
 NodeLifecycleEvent g_lastNodeStopped{};
+RlnRequestEvent g_lastRlnRequest{};
 } // namespace delivery_test_events
 
 void DeliveryModuleImpl::messageSent(const std::string&, const std::string&, int64_t) {}
@@ -31,4 +32,9 @@ void DeliveryModuleImpl::nodeStarted(bool success, const std::string& message, i
 }
 void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, int64_t timestamp) {
     delivery_test_events::g_lastNodeStopped = {success, message, timestamp, true};
+}
+
+void DeliveryModuleImpl::rlnRequest(int64_t reqId, const std::string& op,
+                                    const std::string& payloadJson, int64_t timestamp) {
+    delivery_test_events::g_lastRlnRequest = {reqId, op, payloadJson, timestamp, true};
 }

@@ -294,6 +294,28 @@ public:
      */
     std::string collectOpenMetricsText();
 
+    /**
+     * @brief Completes an outstanding RLN request (see the `rlnRequest` event).
+     *
+     * The delivery library outsources RLN operations to an external RLN
+     * module: whenever it needs one, this module emits `rlnRequest(reqId, op,
+     * payloadJson)`. Whoever handles that event answers by calling this method
+     * with the same `reqId` and a `resultJson` reply envelope
+     * (`{"ok": ...}` / `{"err": {"kind": ..., "message": ...}}`). Both JSON
+     * strings pass through this module verbatim — the wire schema is owned by
+     * the RLN module and the delivery library, not modelled here.
+     *
+     * There is no response deadline to manage on this side: if no response
+     * arrives in time, the delivery library synthesizes a TRANSIENT failure
+     * itself. A response for a request that already timed out (or was never
+     * issued) fails with an error.
+     *
+     * @param reqId Request id from the `rlnRequest` event.
+     * @param resultJson UTF-8 JSON reply envelope, passed through verbatim.
+     * @return `true` when the response was accepted, or error details.
+     */
+    StdLogosResult rlnRespond(int64_t reqId, const std::string& resultJson);
+
     std::string name() const { return "delivery_module"; }
 
 /** @} */
@@ -354,6 +376,17 @@ logos_events:
     /** @brief Emitted when @ref stop finishes; `message` carries the reason when `success` is false. */
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
+    /**
+     * @brief The delivery library requests an RLN operation from the external
+     * RLN module.
+     *
+     * `op` is one of: `start`, `stop`, `register_membership`,
+     * `get_membership_state`, `get_epoch_quota`, `generate_proof`,
+     * `verify_proof`. `payloadJson` is opaque JSON owned by the RLN module's
+     * wire schema. Answer via @ref rlnRespond with the same `reqId`.
+     */
+    void rlnRequest(int64_t reqId, const std::string& op, const std::string& payloadJson, int64_t timestamp);
+
 /** @} */
 
 private:
@@ -383,4 +416,9 @@ private:
     // the non-terminal progress tick a long start/stop emits.
     static void start_callback(int callerRet, char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
+
+    // Common target of the seven RLN callback slots registered in createNode;
+    // emits rlnRequest. Fired by liblogosdelivery, possibly on a foreign
+    // thread. userData is the DeliveryModuleImpl*.
+    static void rln_op_callback(const char* op, uint64_t reqId, const char* payloadJson, void* userData);
 };

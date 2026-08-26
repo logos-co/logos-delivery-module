@@ -293,6 +293,45 @@ LOGOS_TEST(integration_channel_send_fails_on_unknown_channel) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests - RLN bridge (registration + response path against the real library)
+//
+// The full request round trip (library fires a callback -> rlnRequest event ->
+// rlnRespond completes it) cannot be exercised yet: nothing in the library
+// calls its internal rlnInvoke, and no trigger entry point is exported. These
+// tests cover what IS reachable: the real logosdelivery_rln_set_callbacks /
+// logosdelivery_rln_response symbols resolve, registration and clearing
+// survive against the real library, and the response path rejects unknown
+// request ids through the real in-flight list.
+// ---------------------------------------------------------------------------
+
+LOGOS_TEST(integration_rlnRespond_rejects_unknown_reqid) {
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kMinimalConfig).success);
+
+    // No RLN request is in flight (nothing triggers rlnInvoke yet), so any
+    // reqId is unknown: the real library returns non-zero and the module
+    // surfaces it as an error.
+    StdLogosResult result = impl.rlnRespond(123456789, R"({"ok":{}})");
+    LOGOS_ASSERT_FALSE(result.success);
+    LOGOS_ASSERT_FALSE(result.error.empty());
+}
+
+LOGOS_TEST(integration_rln_callbacks_register_and_clear) {
+    {
+        DeliveryModuleImpl impl;
+        LOGOS_ASSERT_TRUE(impl.createNode(kMinimalConfig).success);
+        // Destructor clears the RLN surface (NULL registration) before
+        // destroying the node; must complete without crashing.
+    }
+
+    // The surface is process-global in the library; a fresh module instance
+    // must be able to register again after a clear.
+    DeliveryModuleImpl impl2;
+    LOGOS_ASSERT_TRUE(impl2.createNode(kMinimalConfig).success);
+    LOGOS_ASSERT_FALSE(impl2.rlnRespond(1, R"({"ok":{}})").success);
+}
+
+// ---------------------------------------------------------------------------
 // Tests - send (as in simple.cpp interactive loop)
 // ---------------------------------------------------------------------------
 

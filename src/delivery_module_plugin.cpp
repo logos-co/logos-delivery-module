@@ -22,6 +22,7 @@ extern "C" {
 // waku_store_query is consumed from it; everything else goes through the
 // stable surface above.
 #include <liblogosdelivery_kernel.h>
+#include <liblogosdelivery_rln.h>
 }
 
 namespace {
@@ -100,6 +101,31 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
                       currentTimestampNs());
 }
 
+void DeliveryModuleImpl::rln_op_callback(const char* op, uint64_t reqId, const char* payloadJson, void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_op_callback: Invalid userData\n");
+        return;
+    }
+
+    fprintf(stderr, "DeliveryModuleImpl::rln_op_callback op: %s, reqId: %llu\n",
+            op, static_cast<unsigned long long>(reqId));
+
+    // C callback invoked from the Nim runtime, possibly on a foreign thread:
+    // a C++ exception escaping here would unwind into Nim frames and terminate
+    // the process. The payload is opaque JSON owned by the RLN module's wire
+    // schema — passed through verbatim, never parsed here. The response comes
+    // back later via rlnRespond; response timeouts are the library's job.
+    try {
+        impl->rlnRequest(static_cast<int64_t>(reqId), op,
+                         payloadJson ? std::string(payloadJson) : std::string(),
+                         currentTimestampNs());
+    } catch (...) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_op_callback: dropped %s request\n", op);
+    }
+}
+
 DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
@@ -109,6 +135,10 @@ DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHand
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
     if (deliveryCtxHandle) {
+        // Clear the RLN surface first: fails all in-flight RLN requests so no
+        // new RLN callback is dispatched into this object during destruction.
+        // (A callback already executing on the library thread is not joined.)
+        logosdelivery_rln_set_callbacks(nullptr, nullptr);
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
@@ -420,6 +450,34 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
         }
     }
+
+    // RLN surface: register before node start so the library can reach the
+    // external RLN module from its first operation. The setter is process-
+    // global (no ctx argument), consistent with the single-context rule this
+    // method enforces; the struct is static so it outlives the node. Each slot
+    // funnels into rln_op_callback with its op name.
+    static const LogosDeliveryRlnCallbacks rlnCallbacks = {
+        .start = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("start", reqId, payload, userData); },
+        .stop = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("stop", reqId, payload, userData); },
+        .register_membership = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("register_membership", reqId, payload, userData); },
+        .get_membership_state = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("get_membership_state", reqId, payload, userData); },
+        .get_epoch_quota = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("get_epoch_quota", reqId, payload, userData); },
+        .generate_proof = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("generate_proof", reqId, payload, userData); },
+        .verify_proof = [](uint64_t reqId, const char* payload, void* userData) {
+            rln_op_callback("verify_proof", reqId, payload, userData); },
+    };
+    if (logosdelivery_rln_set_callbacks(&rlnCallbacks, this) != 0) {
+        // Not fatal: without a registered surface the library fails RLN ops
+        // itself; everything non-RLN keeps working.
+        fprintf(stderr, "DeliveryModuleImpl: failed to register RLN callbacks\n");
+    }
+
     return {true, {}};
 }
 
@@ -753,4 +811,30 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     // Hand the exposition text back verbatim; the openmetrics module parses it,
     // injects the module="delivery_module" label, and merges it with others.
     return outcome.value.get<std::string>();
+}
+
+StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)
+{
+    fprintf(stderr, "DeliveryModuleImpl::rlnRespond called with reqId: %lld\n",
+            static_cast<long long>(reqId));
+
+    if (!deliveryCtx) {
+        return {false, {}, "Context not initialized"};
+    }
+
+    if (reqId < 0) {
+        return {false, {}, "Invalid reqId"};
+    }
+
+    // resultJson passes through verbatim (opaque JSON, RLN module's schema).
+    // A non-zero return means the reqId is unknown — typically the request
+    // already timed out library-side and was answered with a synthetic
+    // TRANSIENT failure.
+    if (logosdelivery_rln_response(static_cast<uint64_t>(reqId), resultJson.c_str()) != 0) {
+        fprintf(stderr, "DeliveryModuleImpl: rlnRespond rejected for reqId: %lld\n",
+                static_cast<long long>(reqId));
+        return {false, {}, "unknown or already-completed reqId"};
+    }
+
+    return {true, {}};
 }
