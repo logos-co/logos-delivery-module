@@ -484,52 +484,85 @@ LOGOS_TEST(createNode_registers_rln_callbacks) {
     delete impl;
 }
 
-LOGOS_TEST(rln_callback_emits_rlnRequest_with_op_name_and_verbatim_payload) {
+LOGOS_TEST(rln_generate_proof_callback_emits_typed_event_with_verbatim_args) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     delivery_test_events::resetRlnRequestEvent();
     auto* impl = createInitializedImpl(t);
 
-    const char* payload = R"({"registry_id":"eip155:59144:0xb9cd","signal":"ab01","timestamp":1700000000})";
-    delivery_test_rln::g_callbacks.generate_proof(7, payload, delivery_test_rln::g_userData);
+    delivery_test_rln::g_callbacks.generate_proof(7, "eip155:59144:0xb9cd", "0xdead", "ab01",
+                                                  1700000000, delivery_test_rln::g_userData);
 
-    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastRlnRequest.fired);
-    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.reqId, static_cast<int64_t>(7));
-    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.op, std::string("generate_proof"));
-    // Opaque-JSON rule: the payload must pass through untouched.
-    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.payloadJson, std::string(payload));
+    const auto& e = delivery_test_events::g_lastRlnRequest;
+    LOGOS_ASSERT_EQ(e.op, std::string("generate_proof"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(7));
+    LOGOS_ASSERT_EQ(e.registryId, std::string("eip155:59144:0xb9cd"));
+    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("0xdead"));
+    LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
+    LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000000));
 
     delete impl;
 }
 
-LOGOS_TEST(rln_callback_slots_map_to_their_op_names) {
+LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
+    void* ud = delivery_test_rln::g_userData;
 
-    // Guards against slot/op mix-ups in the aggregate initializer.
-    struct SlotCase {
-        LogosDeliveryRlnOpFn slot;
-        const char* op;
-    };
-    const SlotCase cases[] = {
-        {delivery_test_rln::g_callbacks.start, "start"},
-        {delivery_test_rln::g_callbacks.stop, "stop"},
-        {delivery_test_rln::g_callbacks.register_membership, "register_membership"},
-        {delivery_test_rln::g_callbacks.get_membership_state, "get_membership_state"},
-        {delivery_test_rln::g_callbacks.get_epoch_quota, "get_epoch_quota"},
-        {delivery_test_rln::g_callbacks.generate_proof, "generate_proof"},
-        {delivery_test_rln::g_callbacks.verify_proof, "verify_proof"},
-    };
-    int64_t reqId = 1;
-    for (const auto& c : cases) {
-        delivery_test_events::resetRlnRequestEvent();
-        c.slot(static_cast<uint64_t>(reqId), "{}", delivery_test_rln::g_userData);
-        LOGOS_ASSERT_TRUE(delivery_test_events::g_lastRlnRequest.fired);
-        LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.op, std::string(c.op));
-        LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.reqId, reqId);
-        reqId++;
-    }
+    // Slot/arg mix-ups within a signature are invisible to the compiler for
+    // same-typed string params, so each slot is fired once and its routing
+    // asserted. The opaque JSON args (options/proof) must pass through
+    // untouched.
+    const auto& e = delivery_test_events::g_lastRlnRequest;
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.start(1, ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("start"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(1));
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.stop(2, ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("stop"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(2));
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.register_membership(3, "reg", "rln-id",
+                                                       R"({"rate_limit":10})", ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("register_membership"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(3));
+    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
+    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
+    LOGOS_ASSERT_EQ(e.optionsJson, std::string(R"({"rate_limit":10})"));
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.get_membership_state(4, "reg", "rln-id", ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("get_membership_state"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(4));
+    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
+    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.get_epoch_quota(5, "reg", "rln-id", 1700000001, ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("get_epoch_quota"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(5));
+    LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000001));
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.generate_proof(6, "reg", "rln-id", "ab01", 1700000002, ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("generate_proof"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(6));
+    LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
+    LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000002));
+
+    delivery_test_events::resetRlnRequestEvent();
+    delivery_test_rln::g_callbacks.verify_proof(8, "reg", "rln-id", "ab01", 1700000003,
+                                                R"({"proof":"00ff"})", ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("verify_proof"));
+    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(8));
+    LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
+    LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000003));
+    LOGOS_ASSERT_EQ(e.proofJson, std::string(R"({"proof":"00ff"})"));
 
     delete impl;
 }
@@ -572,13 +605,16 @@ LOGOS_TEST(rlnRespond_fails_on_unknown_req_id) {
     delete impl;
 }
 
-LOGOS_TEST(rlnRespond_rejects_negative_req_id) {
+LOGOS_TEST(rlnRespond_passes_negative_req_id_bit_exactly) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
 
-    LOGOS_ASSERT_FALSE(impl->rlnRespond(-1, R"({"ok":{}})").success);
-    LOGOS_ASSERT_FALSE(delivery_test_rln::g_responseFired);
+    // A negative reqId is the int64 view of a library id >= 2^63; it must
+    // round-trip bit-exactly, not be rejected.
+    LOGOS_ASSERT_TRUE(impl->rlnRespond(-1, R"({"ok":{}})").success);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_responseFired);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, UINT64_MAX);
 
     delete impl;
 }
