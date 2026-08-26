@@ -23,6 +23,18 @@
 #include <cstdio>
 #include <cstring>
 
+#include "mock_rln_state.h"
+
+namespace delivery_test_rln {
+LogosDeliveryRlnCallbacks g_callbacks{};
+void* g_userData = nullptr;
+bool g_callbacksSet = false;
+int g_setCallbacksCalls = 0;
+uint64_t g_lastResponseReqId = 0;
+std::string g_lastResponseJson;
+bool g_responseFired = false;
+} // namespace delivery_test_rln
+
 #define RET_OK  0
 #define RET_ERR 1
 
@@ -177,6 +189,36 @@ int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_scalar cb, 
     LOGOS_CMOCK_RECORD("logosdelivery_get_available_configs");
     scalarOk("logosdelivery_get_available_configs", cb, userData);
     return RET_OK;
+}
+
+// RLN surface (liblogosdelivery_rln.h). Registration is recorded so tests can
+// fire the stored callback slots, simulating the library requesting an RLN op.
+int logosdelivery_rln_set_callbacks(const LogosDeliveryRlnCallbacks* cbs, void* user_data) {
+    LOGOS_CMOCK_RECORD("logosdelivery_rln_set_callbacks");
+    delivery_test_rln::g_setCallbacksCalls++;
+    if (cbs) {
+        delivery_test_rln::g_callbacks = *cbs;
+        delivery_test_rln::g_userData = user_data;
+        delivery_test_rln::g_callbacksSet = true;
+    } else {
+        // NULL clears the surface (and, in the real library, fails all
+        // in-flight requests).
+        delivery_test_rln::g_callbacks = LogosDeliveryRlnCallbacks{};
+        delivery_test_rln::g_userData = nullptr;
+        delivery_test_rln::g_callbacksSet = false;
+    }
+    return 0;
+}
+
+// Return value is controllable (default 0 = accepted); set non-zero to
+// simulate an unknown / already-completed reqId:
+//   t.mockCFunction("logosdelivery_rln_response").returns(1);
+int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
+    LOGOS_CMOCK_RECORD("logosdelivery_rln_response");
+    delivery_test_rln::g_lastResponseReqId = req_id;
+    delivery_test_rln::g_lastResponseJson = result_json ? result_json : "";
+    delivery_test_rln::g_responseFired = true;
+    return LOGOS_CMOCK_RETURN(int, "logosdelivery_rln_response");
 }
 
 } // extern "C"

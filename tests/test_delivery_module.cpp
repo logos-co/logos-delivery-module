@@ -6,6 +6,7 @@
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
 #include "mocks/delivery_module_events_stub.h"
+#include "mocks/mock_rln_state.h"
 
 // ---------------------------------------------------------------------------
 // Helper: create an impl that has a valid delivery context (createNode called).
@@ -458,6 +459,143 @@ LOGOS_TEST(collectOpenMetricsText_returns_metrics_text_verbatim) {
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_node_info"));
 
     delete impl;
+}
+
+// RLN bridge (liblogosdelivery_rln.h)
+
+LOGOS_TEST(createNode_registers_rln_callbacks) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_rln_set_callbacks"));
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    // userData must be the module instance so the trampolines can emit events.
+    LOGOS_ASSERT(delivery_test_rln::g_userData == static_cast<void*>(impl));
+    // All seven slots populated.
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.start != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.stop != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.register_membership != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_membership_state != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_epoch_quota != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.generate_proof != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.verify_proof != nullptr);
+
+    delete impl;
+}
+
+LOGOS_TEST(rln_callback_emits_rlnRequest_with_op_name_and_verbatim_payload) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    delivery_test_events::resetRlnRequestEvent();
+    auto* impl = createInitializedImpl(t);
+
+    const char* payload = R"({"registry_id":"eip155:59144:0xb9cd","signal":"ab01","timestamp":1700000000})";
+    delivery_test_rln::g_callbacks.generate_proof(7, payload, delivery_test_rln::g_userData);
+
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastRlnRequest.fired);
+    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.reqId, static_cast<int64_t>(7));
+    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.op, std::string("generate_proof"));
+    // Opaque-JSON rule: the payload must pass through untouched.
+    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.payloadJson, std::string(payload));
+
+    delete impl;
+}
+
+LOGOS_TEST(rln_callback_slots_map_to_their_op_names) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    // Guards against slot/op mix-ups in the aggregate initializer.
+    struct SlotCase {
+        LogosDeliveryRlnOpFn slot;
+        const char* op;
+    };
+    const SlotCase cases[] = {
+        {delivery_test_rln::g_callbacks.start, "start"},
+        {delivery_test_rln::g_callbacks.stop, "stop"},
+        {delivery_test_rln::g_callbacks.register_membership, "register_membership"},
+        {delivery_test_rln::g_callbacks.get_membership_state, "get_membership_state"},
+        {delivery_test_rln::g_callbacks.get_epoch_quota, "get_epoch_quota"},
+        {delivery_test_rln::g_callbacks.generate_proof, "generate_proof"},
+        {delivery_test_rln::g_callbacks.verify_proof, "verify_proof"},
+    };
+    int64_t reqId = 1;
+    for (const auto& c : cases) {
+        delivery_test_events::resetRlnRequestEvent();
+        c.slot(static_cast<uint64_t>(reqId), "{}", delivery_test_rln::g_userData);
+        LOGOS_ASSERT_TRUE(delivery_test_events::g_lastRlnRequest.fired);
+        LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.op, std::string(c.op));
+        LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnRequest.reqId, reqId);
+        reqId++;
+    }
+
+    delete impl;
+}
+
+LOGOS_TEST(rlnRespond_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    DeliveryModuleImpl impl;
+
+    LOGOS_ASSERT_FALSE(impl.rlnRespond(1, R"({"ok":{}})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_responseFired);
+}
+
+LOGOS_TEST(rlnRespond_forwards_req_id_and_verbatim_json) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    const char* resultJson = R"({"ok":{"verdict":"VALID","recovered_secret":null}})";
+    LOGOS_ASSERT_TRUE(impl->rlnRespond(42, resultJson).success);
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_rln_response"));
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(42));
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseJson, std::string(resultJson));
+
+    delete impl;
+}
+
+LOGOS_TEST(rlnRespond_fails_on_unknown_req_id) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    // Non-zero response code = reqId unknown (e.g. already timed out
+    // library-side).
+    t.mockCFunction("logosdelivery_rln_response").returns(1);
+    StdLogosResult result = impl->rlnRespond(99, R"({"ok":{}})");
+    LOGOS_ASSERT_FALSE(result.success);
+    LOGOS_ASSERT_FALSE(result.error.empty());
+
+    delete impl;
+}
+
+LOGOS_TEST(rlnRespond_rejects_negative_req_id) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_FALSE(impl->rlnRespond(-1, R"({"ok":{}})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_responseFired);
+
+    delete impl;
+}
+
+LOGOS_TEST(destructor_clears_rln_callbacks) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+
+    delete impl;
+
+    // Destruction must clear the surface (NULL registration) so no in-flight
+    // request can fire into a destroyed object.
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.generate_proof == nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_setCallbacksCalls, 2);
 }
 
 // module name

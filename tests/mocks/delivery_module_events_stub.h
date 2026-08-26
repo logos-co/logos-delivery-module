@@ -18,9 +18,23 @@ struct NodeLifecycleEvent {
 extern NodeLifecycleEvent g_lastNodeStarted;
 extern NodeLifecycleEvent g_lastNodeStopped;
 
+struct RlnRequestEvent {
+    int64_t reqId = 0;
+    std::string op;
+    std::string payloadJson;
+    int64_t timestamp = 0;
+    bool fired = false;  // set true once the event has been emitted at least once
+};
+
+extern RlnRequestEvent g_lastRlnRequest;
+
 inline void resetNodeLifecycleEvents() {
     g_lastNodeStarted = NodeLifecycleEvent{};
     g_lastNodeStopped = NodeLifecycleEvent{};
+}
+
+inline void resetRlnRequestEvent() {
+    g_lastRlnRequest = RlnRequestEvent{};
 }
 
 } // namespace delivery_test_events
