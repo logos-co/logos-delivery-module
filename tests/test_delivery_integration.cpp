@@ -10,6 +10,7 @@
 #include "mocks/delivery_module_events_stub.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -151,9 +152,15 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
     std::string nodeInfoIDs = idsResult.value.get<std::string>();
     LOGOS_ASSERT_FALSE(nodeInfoIDs.empty());
 
-    // IDs are returned as a JSON array of strings: ["ID1","ID2",...].
-    if (nodeInfoIDs.size() > 1 &&
-        nodeInfoIDs.front() == '[' && nodeInfoIDs.back() == ']') {
+    // Older liblogosdelivery returns the IDs as Nim repr "@[ID1, ID2, ...]",
+    // newer ones as a JSON array ["ID1", "ID2", ...]. Strip either wrapper,
+    // then split on comma and drop spaces/quotes.
+    if (nodeInfoIDs.size() > 3 &&
+        nodeInfoIDs[0] == '@' && nodeInfoIDs[1] == '[' &&
+        nodeInfoIDs.back() == ']') {
+        nodeInfoIDs = nodeInfoIDs.substr(2, nodeInfoIDs.size() - 3);
+    } else if (nodeInfoIDs.size() > 2 &&
+               nodeInfoIDs.front() == '[' && nodeInfoIDs.back() == ']') {
         nodeInfoIDs = nodeInfoIDs.substr(1, nodeInfoIDs.size() - 2);
     }
 
@@ -329,6 +336,103 @@ LOGOS_TEST(integration_rln_callbacks_register_and_clear) {
     DeliveryModuleImpl impl2;
     LOGOS_ASSERT_TRUE(impl2.createNode(kMinimalConfig).success);
     LOGOS_ASSERT_FALSE(impl2.rlnRespond(1, R"({"ok":{}})").success);
+}
+
+// Blocks until any rln*Request event with the given op fires (or times out).
+// The library awaits each response for ~10s before synthesizing a TRANSIENT
+// failure, so requests appear well inside this window when the chain is live.
+static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (delivery_test_events::g_lastRlnRequest.op == op) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return delivery_test_events::g_lastRlnRequest.op == op;
+}
+
+// The full start chain, with this test playing the RLN module:
+//
+//   start() -> library fires the start callback -> rlnStartRequest event
+//   -> rlnRespond(reqId, ok) -> library's await returns
+//   -> library fires register_membership -> rlnRegisterRequest event
+//   -> rlnRespond(reqId, ok) -> start_node completes -> nodeStarted
+//
+// node_api.nim drives this chain from logosdelivery_start_node, but only when
+// self.waku.conf.rlnRelayConf.isSome(). Enabling that (kRlnConfig below) also
+// makes waku want to mount its own on-node RLN relay, which needs a live eth
+// RPC (rln-relay-dynamic=true) or a provisioned zerokit membership instance
+// (dynamic=false, else SIGSEGV in createRLNInstanceLocal). The live path here
+// therefore depends on logos-delivery temporarily skipping that native mount
+// ("skipping native RLN relay mount; external RLN module in use"). Because a
+// segfault can't be caught, this test does NOT enable RLN by default — it runs
+// the live chain only when LOGOS_DELIVERY_RLN_LIVE is set (against a build that
+// has the native-mount skip); otherwise it uses kMinimalConfig, sees no RLN
+// request, and SKIPs. The real end-to-end (real logos-rln-module) is Tier 2.
+static const char* kRlnConfig = R"({
+  "logLevel": "INFO",
+  "mode": "Edge",
+  "relay": true,
+  "numShardsInNetwork": 8,
+  "rln-relay": true,
+  "rln-relay-dynamic": false,
+  "rln-relay-chain-id": 1,
+  "rln-relay-eth-contract-address": "0x0000000000000000000000000000000000000000"
+})";
+
+LOGOS_TEST(integration_rln_start_chain_round_trip) {
+    delivery_test_events::resetNodeLifecycleEvents();
+    delivery_test_events::resetRlnRequestEvent();
+
+    const bool rlnLive = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
+
+    // The shared ensureStarted() node (g_impl) from earlier tests may still be
+    // running and holding the fixed discv5 UDP port; tear it down so this test's
+    // node can bind. integration_send (next) re-creates it via ensureStarted().
+    if (g_impl) {
+        g_impl->stop();
+        delete g_impl;
+        g_impl = nullptr;
+    }
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(rlnLive ? kRlnConfig : kMinimalConfig).success);
+    LOGOS_ASSERT_TRUE(impl.start().success);
+
+    if (!waitForRlnRequestOp("start")) {
+        fprintf(stderr,
+                "SKIP integration_rln_start_chain_round_trip: no RLN start "
+                "request (set LOGOS_DELIVERY_RLN_LIVE against a native-mount-skip "
+                "build to exercise the live chain)\n");
+        impl.stop();
+        waitForNodeStopped();
+        return;
+    }
+
+    // Answer the start request; the library's await must accept it.
+    const int64_t startReqId = delivery_test_events::g_lastRlnRequest.reqId;
+    LOGOS_ASSERT_TRUE(impl.rlnRespond(startReqId, R"({"ok":{}})").success);
+
+    // On success the library registers the membership: distinct request,
+    // typed identity args populated from the node's RLN bring-up config.
+    LOGOS_ASSERT_TRUE(waitForRlnRequestOp("register_membership"));
+    const auto& reg = delivery_test_events::g_lastRlnRequest;
+    LOGOS_ASSERT_FALSE(reg.registryId.empty());
+    LOGOS_ASSERT_FALSE(reg.rlnIdentifier.empty());
+    LOGOS_ASSERT_FALSE(reg.optionsJson.empty());
+    LOGOS_ASSERT_TRUE(
+        impl.rlnRespond(reg.reqId, R"({"ok":{"state":"REGISTERED"}})").success);
+
+    // With the RLN chain answered, node startup completes.
+    LOGOS_ASSERT_TRUE(waitForNodeStarted());
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStarted.success);
+
+    // A second response for an already-completed request must be rejected
+    // through the real in-flight list.
+    LOGOS_ASSERT_FALSE(impl.rlnRespond(startReqId, R"({"ok":{}})").success);
+
+    LOGOS_ASSERT_TRUE(impl.stop().success);
+    LOGOS_ASSERT_TRUE(waitForNodeStopped());
 }
 
 // ---------------------------------------------------------------------------

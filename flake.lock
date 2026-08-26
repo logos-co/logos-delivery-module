@@ -3824,11 +3824,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1787736501,
-        "narHash": "sha256-rC0x7H2XDMraPzmwkC35oWDm0M3SJfV82jXB3SGEWRo=",
+        "lastModified": 1787747811,
+        "narHash": "sha256-UPIc58Ng8ozkQGejG4gzj8AdYzOqr1fXW6zJHLdJRSk=",
         "ref": "impl-plugable-rln-api-module",
-        "rev": "d372cd389b170f29625aaab8ccee0a59871454f5",
-        "revCount": 2452,
+        "rev": "6c2314ee0fb560e8160ef5892af4c9780cbb049b",
+        "revCount": 2462,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
