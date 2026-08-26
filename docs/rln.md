@@ -2,21 +2,30 @@
 
 The delivery library (liblogosdelivery) does not implement RLN itself — it
 outsources every RLN operation to an external RLN module across a C callback
-surface (`liblogosdelivery_rln.h`). This module is the bridge: it registers the
-callbacks with the library and exposes the request/response loop on the module
-surface, so the host can route requests to whichever module implements RLN.
+surface (`liblogosdelivery_rln.h`, one typed callback per RLN function). This
+module is the bridge: it registers the callbacks with the library and exposes
+the request/response loop on the module surface, so the host can route
+requests to whichever module implements RLN. The header is mirrored at
+`tests/stubs/lib/liblogosdelivery_rln.h`, pinned to the logos-delivery flake
+input rev — keep the two in sync when bumping the input.
 
 ## Request/response loop
 
-1. The delivery library needs an RLN operation and fires the registered
-   callback. This module emits the `rlnRequest` event:
+1. The delivery library needs an RLN operation and fires that operation's
+   registered callback. This module emits the matching typed event:
 
    ```
-   rlnRequest(reqId, op, payloadJson, timestamp)
+   rlnStartRequest(reqId, timestamp)
+   rlnStopRequest(reqId, timestamp)
+   rlnRegisterRequest(reqId, registryId, rlnIdentifier, optionsJson, timestamp)
+   rlnGetMembershipStateRequest(reqId, registryId, rlnIdentifier, timestamp)
+   rlnGetEpochQuotaRequest(reqId, registryId, rlnIdentifier, epochTimestamp, timestamp)
+   rlnGenerateProofRequest(reqId, registryId, rlnIdentifier, signalHex, epochTimestamp, timestamp)
+   rlnVerifyProofRequest(reqId, registryId, rlnIdentifier, signalHex, epochTimestamp, proofJson, timestamp)
    ```
 
-   `op` is one of `start`, `stop`, `register_membership`,
-   `get_membership_state`, `get_epoch_quota`, `generate_proof`, `verify_proof`.
+   `epochTimestamp` is the ABI's epoch/quota timestamp; the trailing
+   `timestamp` is the local emission time, as on every other event.
 
 2. Whoever handles the event (the RLN module, or a router in front of it)
    performs the operation and answers with the same `reqId`:
@@ -25,16 +34,22 @@ surface, so the host can route requests to whichever module implements RLN.
    rlnRespond(reqId, resultJson)
    ```
 
+   `reqId` values >= 2^63 appear negative (int64 view of the library's uint64
+   id); echo them back unchanged — they round-trip bit-exactly.
+
 Callbacks are registered during `createNode` (before node start, as the
 library requires) and cleared on module destruction, which fails any in-flight
 requests.
 
-## Payloads are opaque JSON
+## Option, proof and result payloads are opaque JSON
 
-This module never parses `payloadJson` or `resultJson` — both pass through
-verbatim. The schema is the contract between the delivery library and the RLN
-module (see the RLN Module API spec, logos-lips #376, and the wire-schema notes
-in logos-delivery). The essentials a responder must honor:
+Scalar arguments (`registryId`, `rlnIdentifier`, `signalHex`,
+`epochTimestamp`) are typed event parameters. The JSON arguments —
+`optionsJson`, `proofJson` and every `resultJson` — pass through this module
+verbatim, never parsed. Their schema is the contract between the delivery
+library and the RLN module (see the RLN Module API spec, logos-lips #376, and
+the wire-schema notes in logos-delivery). The essentials a responder must
+honor:
 
 - Every `resultJson` is a reply envelope with exactly one of:
   - `{"ok": <op-specific result>}`
@@ -52,6 +67,6 @@ itself; a late `rlnRespond` for that request then fails with
 
 ## No RLN module present
 
-Registration is unconditional. If no module handles `rlnRequest`, the
-library's own timeout answers each request with a `TRANSIENT` failure;
+Registration is unconditional. If no module handles the `rln*Request` events,
+the library's own timeout answers each request with a `TRANSIENT` failure;
 everything non-RLN keeps working.
