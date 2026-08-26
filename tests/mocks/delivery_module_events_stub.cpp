@@ -34,7 +34,87 @@ void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, i
     delivery_test_events::g_lastNodeStopped = {success, message, timestamp, true};
 }
 
-void DeliveryModuleImpl::rlnRequest(int64_t reqId, const std::string& op,
-                                    const std::string& payloadJson, int64_t timestamp) {
-    delivery_test_events::g_lastRlnRequest = {reqId, op, payloadJson, timestamp, true};
+void DeliveryModuleImpl::rlnStartRequest(int64_t reqId, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "start";
+    e.reqId = reqId;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::rlnStopRequest(int64_t reqId, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "stop";
+    e.reqId = reqId;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::rlnRegisterRequest(int64_t reqId, const std::string& registryId,
+                                            const std::string& rlnIdentifier,
+                                            const std::string& optionsJson, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "register_membership";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.optionsJson = optionsJson;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
+                                                      const std::string& rlnIdentifier,
+                                                      int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "get_membership_state";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::rlnGetEpochQuotaRequest(int64_t reqId, const std::string& registryId,
+                                                 const std::string& rlnIdentifier,
+                                                 int64_t epochTimestamp, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "get_epoch_quota";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.epochTimestamp = epochTimestamp;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::rlnGenerateProofRequest(int64_t reqId, const std::string& registryId,
+                                                 const std::string& rlnIdentifier,
+                                                 const std::string& signalHex,
+                                                 int64_t epochTimestamp, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "generate_proof";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.signalHex = signalHex;
+    e.epochTimestamp = epochTimestamp;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::rlnVerifyProofRequest(int64_t reqId, const std::string& registryId,
+                                               const std::string& rlnIdentifier,
+                                               const std::string& signalHex, int64_t epochTimestamp,
+                                               const std::string& proofJson, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "verify_proof";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.signalHex = signalHex;
+    e.epochTimestamp = epochTimestamp;
+    e.proofJson = proofJson;
+    e.timestamp = timestamp;
 }

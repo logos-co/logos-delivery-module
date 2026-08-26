@@ -295,7 +295,7 @@ LOGOS_TEST(integration_channel_send_fails_on_unknown_channel) {
 // ---------------------------------------------------------------------------
 // Tests - RLN bridge (registration + response path against the real library)
 //
-// The full request round trip (library fires a callback -> rlnRequest event ->
+// The full request round trip (library fires a callback -> rln*Request event ->
 // rlnRespond completes it) cannot be exercised yet: nothing in the library
 // calls its internal rlnInvoke, and no trigger entry point is exported. These
 // tests cover what IS reachable: the real logosdelivery_rln_set_callbacks /
