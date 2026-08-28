@@ -172,7 +172,7 @@ logoscore stop
 
 > For a fully pinned, build-from-this-commit walkthrough — plus notes on the
 > blocking Kademlia bootstrap in headless runs — see the
-> [runtime doc-test](../doctests/outputs/delivery-module-runtime.md).
+> [runtime doc-test](https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md).
 
 ## Configuration
 
@@ -193,7 +193,7 @@ the p2p ports to match the Docker port mappings.
 For the dev network, use [`conf/logos-dev.json`](../conf/logos-dev.json)
 (preset `logos.dev`). The full config grammar, including kernel-only nodes
 (`"entryLayer": "kernel"`), is documented in the
-[README](../README.md#node-configuration-createnode).
+[README](https://github.com/logos-co/logos-delivery-module#node-configuration-createnode).
 
 The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.

@@ -1,0 +1,4 @@
+Sphinx==9.0.4
+pydata-sphinx-theme==0.17.1
+breathe==4.36.0
+myst-parser==5.1.0

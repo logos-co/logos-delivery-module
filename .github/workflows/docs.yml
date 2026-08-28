@@ -1,0 +1,117 @@
+name: Docs
+
+# Builds the Doxygen + Sphinx documentation site and publishes it to the
+# gh-pages branch on release.
+#
+# The site is published to:
+#   https://logos-co.github.io/logos-delivery-module/           (redirect to latest)
+#   https://logos-co.github.io/logos-delivery-module/latest/
+#   https://logos-co.github.io/logos-delivery-module/<tag>/
+#
+# doctests.yml publishes its reports to the same branch under main/ and pr-<N>/,
+# so every push here uses keep_files: true and shares that job's concurrency
+# group — otherwise a docs deploy would delete the report links, and two
+# concurrent pushes would race on the branch.
+#
+# Pushes to a non-master branch build the site and upload it as an artifact
+# instead of deploying, so a docs change can be reviewed before it is released.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Force deploy to GitHub Pages"
+        type: boolean
+        default: false
+  push:
+    branches-ignore: [master]
+
+permissions:
+  contents: write
+
+# Shared with doctests.yml's publish job so the two never push gh-pages at once.
+concurrency:
+  group: gh-pages-publish
+  cancel-in-progress: false
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether to publish
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ] || \
+             { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.deploy }}" = "true" ]; }; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Doxygen
+        run: sudo apt-get install -y doxygen
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r docs/requirements.txt
+
+      - name: Run Doxygen
+        run: doxygen ./docs/Doxyfile
+
+      # conf.py derives the version from the latest git tag, so this build is
+      # already stamped with the release being published.
+      - name: Build Sphinx HTML
+        run: make html
+        working-directory: docs
+
+      - name: Upload preview artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-preview
+          path: docs/_build/html
+          retention-days: 7
+
+      - name: Resolve release tag
+        id: ver
+        if: steps.gate.outputs.publish == 'true'
+        shell: bash
+        run: echo "tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish this version
+        if: steps.gate.outputs.publish == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/_build/html
+          destination_dir: ${{ steps.ver.outputs.tag }}
+          keep_files: true
+
+      - name: Publish this version as latest
+        if: steps.gate.outputs.publish == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/_build/html
+          destination_dir: latest
+          keep_files: true
+
+      - name: Publish root files
+        if: steps.gate.outputs.publish == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/_root
+          destination_dir: .
+          keep_files: true
