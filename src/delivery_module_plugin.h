@@ -383,15 +383,18 @@ logos_events:
      * operation from the external RLN module, one event per ABI function
      * (`liblogosdelivery_rln.h`).
      *
-     * Answer each via @ref rlnRespond with the same `reqId`. `optionsJson` /
-     * `proofJson` are opaque JSON owned by the RLN module's wire schema;
-     * `epochTimestamp` is the ABI's epoch/quota timestamp, while the trailing
+     * Answer each via @ref rlnRespond with the same `reqId`. Event names and
+     * argument shapes track the RLN module's own methods (register_membership
+     * maps to the module's `register`); `configJson` / `optionsJson` /
+     * `proofJson` are opaque JSON owned by the RLN module's wire schema.
+     * `rateLimit` is register's positional rate limit; `epochTimestamp` is the
+     * ABI's epoch/quota timestamp (Unix seconds), while the trailing
      * `timestamp` is the local emission time, as on every other event.
      */
-    void rlnStartRequest(int64_t reqId, int64_t timestamp);
+    void rlnStartRequest(int64_t reqId, const std::string& configJson, int64_t timestamp);
     void rlnStopRequest(int64_t reqId, int64_t timestamp);
     void rlnRegisterRequest(int64_t reqId, const std::string& registryId,
-                            const std::string& rlnIdentifier,
+                            const std::string& rlnIdentifier, int64_t rateLimit,
                             const std::string& optionsJson, int64_t timestamp);
     void rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
                                       const std::string& rlnIdentifier, int64_t timestamp);
@@ -401,10 +404,10 @@ logos_events:
     void rlnGenerateProofRequest(int64_t reqId, const std::string& registryId,
                                  const std::string& rlnIdentifier, const std::string& signalHex,
                                  int64_t epochTimestamp, int64_t timestamp);
-    void rlnVerifyProofRequest(int64_t reqId, const std::string& registryId,
-                               const std::string& rlnIdentifier, const std::string& signalHex,
-                               int64_t epochTimestamp, const std::string& proofJson,
-                               int64_t timestamp);
+    void rlnValidateProofRequest(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, const std::string& proofJson,
+                                 int64_t timestamp);
 
 /** @} */
 
@@ -440,10 +443,10 @@ private:
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
     // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
     // for the duration of the call. userData is the DeliveryModuleImpl*.
-    static void rln_start_callback(uint64_t reqId, void* userData);
+    static void rln_start_callback(uint64_t reqId, const char* configJson, void* userData);
     static void rln_stop_callback(uint64_t reqId, void* userData);
     static void rln_register_callback(uint64_t reqId, const char* registryId,
-                                      const char* rlnIdentifier,
+                                      const char* rlnIdentifier, uint64_t rateLimit,
                                       const char* optionsJson, void* userData);
     static void rln_get_membership_state_callback(uint64_t reqId, const char* registryId,
                                                   const char* rlnIdentifier, void* userData);
@@ -453,8 +456,8 @@ private:
     static void rln_generate_proof_callback(uint64_t reqId, const char* registryId,
                                             const char* rlnIdentifier, const char* signalHex,
                                             uint64_t timestamp, void* userData);
-    static void rln_verify_proof_callback(uint64_t reqId, const char* registryId,
-                                          const char* rlnIdentifier, const char* signalHex,
-                                          uint64_t timestamp, const char* proofJson,
-                                          void* userData);
+    static void rln_validate_proof_callback(uint64_t reqId, const char* registryId,
+                                            const char* rlnIdentifier, const char* signalHex,
+                                            uint64_t timestamp, const char* proofJson,
+                                            void* userData);
 };

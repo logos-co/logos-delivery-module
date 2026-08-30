@@ -49,7 +49,6 @@ int64_t currentTimestampNs() {
     return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
 }
 
-// RLN callback strings are borrowed for the duration of the call: copy now.
 std::string toStringOrEmpty(const char* s) {
     return s ? std::string(s) : std::string();
 }
@@ -114,14 +113,16 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
 // verbatim, never parsed here. Responses come back later via rlnRespond;
 // response timeouts are the library's job.
 
-void DeliveryModuleImpl::rln_start_callback(uint64_t reqId, void* userData)
+void DeliveryModuleImpl::rln_start_callback(uint64_t reqId, const char* configJson,
+                                            void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN start request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
     try {
-        impl->rlnStartRequest(static_cast<int64_t>(reqId), currentTimestampNs());
+        impl->rlnStartRequest(static_cast<int64_t>(reqId), toStringOrEmpty(configJson),
+                              currentTimestampNs());
     } catch (...) {
         fprintf(stderr, "DeliveryModuleImpl: dropped RLN start request\n");
     }
@@ -141,7 +142,7 @@ void DeliveryModuleImpl::rln_stop_callback(uint64_t reqId, void* userData)
 }
 
 void DeliveryModuleImpl::rln_register_callback(uint64_t reqId, const char* registryId,
-                                               const char* rlnIdentifier,
+                                               const char* rlnIdentifier, uint64_t rateLimit,
                                                const char* optionsJson, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
@@ -151,6 +152,7 @@ void DeliveryModuleImpl::rln_register_callback(uint64_t reqId, const char* regis
     try {
         impl->rlnRegisterRequest(static_cast<int64_t>(reqId),
                                  toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
+                                 static_cast<int64_t>(rateLimit),
                                  toStringOrEmpty(optionsJson), currentTimestampNs());
     } catch (...) {
         fprintf(stderr, "DeliveryModuleImpl: dropped RLN register_membership request\n");
@@ -208,22 +210,22 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
     }
 }
 
-void DeliveryModuleImpl::rln_verify_proof_callback(uint64_t reqId, const char* registryId,
-                                                   const char* rlnIdentifier, const char* signalHex,
-                                                   uint64_t timestamp, const char* proofJson,
-                                                   void* userData)
+void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char* registryId,
+                                                     const char* rlnIdentifier, const char* signalHex,
+                                                     uint64_t timestamp, const char* proofJson,
+                                                     void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN verify_proof request, reqId: %llu\n",
+    fprintf(stderr, "DeliveryModuleImpl: RLN validate_proof request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
     try {
-        impl->rlnVerifyProofRequest(static_cast<int64_t>(reqId),
-                                    toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
-                                    toStringOrEmpty(signalHex), static_cast<int64_t>(timestamp),
-                                    toStringOrEmpty(proofJson), currentTimestampNs());
+        impl->rlnValidateProofRequest(static_cast<int64_t>(reqId),
+                                      toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
+                                      toStringOrEmpty(signalHex), static_cast<int64_t>(timestamp),
+                                      toStringOrEmpty(proofJson), currentTimestampNs());
     } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN verify_proof request\n");
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN validate_proof request\n");
     }
 }
 
@@ -565,7 +567,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         .get_membership_state = rln_get_membership_state_callback,
         .get_epoch_quota = rln_get_epoch_quota_callback,
         .generate_proof = rln_generate_proof_callback,
-        .verify_proof = rln_verify_proof_callback,
+        .validate_proof = rln_validate_proof_callback,
     };
     if (logosdelivery_rln_set_callbacks(&rlnCallbacks, this) != 0) {
         // Not fatal: without a registered surface the library fails RLN ops
