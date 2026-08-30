@@ -479,7 +479,7 @@ LOGOS_TEST(createNode_registers_rln_callbacks) {
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_membership_state != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_epoch_quota != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.generate_proof != nullptr);
-    LOGOS_ASSERT(delivery_test_rln::g_callbacks.verify_proof != nullptr);
+    LOGOS_ASSERT(delivery_test_rln::g_callbacks.validate_proof != nullptr);
 
     delete impl;
 }
@@ -517,9 +517,10 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     const auto& e = delivery_test_events::g_lastRlnRequest;
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.start(1, ud);
+    delivery_test_rln::g_callbacks.start(1, R"({"epoch_size_sec":600})", ud);
     LOGOS_ASSERT_EQ(e.op, std::string("start"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(1));
+    LOGOS_ASSERT_EQ(e.configJson, std::string(R"({"epoch_size_sec":600})"));
 
     delivery_test_events::resetRlnRequestEvent();
     delivery_test_rln::g_callbacks.stop(2, ud);
@@ -527,13 +528,14 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(2));
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.register_membership(3, "reg", "rln-id",
-                                                       R"({"rate_limit":10})", ud);
+    delivery_test_rln::g_callbacks.register_membership(3, "reg", "rln-id", 10,
+                                                       R"({"funding_holding_account_id":"acct"})", ud);
     LOGOS_ASSERT_EQ(e.op, std::string("register_membership"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(3));
     LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
     LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
-    LOGOS_ASSERT_EQ(e.optionsJson, std::string(R"({"rate_limit":10})"));
+    LOGOS_ASSERT_EQ(e.rateLimit, static_cast<int64_t>(10));
+    LOGOS_ASSERT_EQ(e.optionsJson, std::string(R"({"funding_holding_account_id":"acct"})"));
 
     delivery_test_events::resetRlnRequestEvent();
     delivery_test_rln::g_callbacks.get_membership_state(4, "reg", "rln-id", ud);
@@ -556,9 +558,9 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000002));
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.verify_proof(8, "reg", "rln-id", "ab01", 1700000003,
-                                                R"({"proof":"00ff"})", ud);
-    LOGOS_ASSERT_EQ(e.op, std::string("verify_proof"));
+    delivery_test_rln::g_callbacks.validate_proof(8, "reg", "rln-id", "ab01", 1700000003,
+                                                  R"({"proof":"00ff"})", ud);
+    LOGOS_ASSERT_EQ(e.op, std::string("validate_proof"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(8));
     LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
     LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000003));
@@ -572,7 +574,7 @@ LOGOS_TEST(rlnRespond_fails_without_createNode) {
     delivery_test_rln::resetRlnMockState();
     DeliveryModuleImpl impl;
 
-    LOGOS_ASSERT_FALSE(impl.rlnRespond(1, R"({"ok":{}})").success);
+    LOGOS_ASSERT_FALSE(impl.rlnRespond(1, R"({"success":true,"value":{}})").success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_responseFired);
 }
 
@@ -581,7 +583,7 @@ LOGOS_TEST(rlnRespond_forwards_req_id_and_verbatim_json) {
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
 
-    const char* resultJson = R"({"ok":{"verdict":"VALID","recovered_secret":null}})";
+    const char* resultJson = R"({"success":true,"value":{"verdict":"valid"}})";
     LOGOS_ASSERT_TRUE(impl->rlnRespond(42, resultJson).success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_rln_response"));
     LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(42));
@@ -598,7 +600,7 @@ LOGOS_TEST(rlnRespond_fails_on_unknown_req_id) {
     // Non-zero response code = reqId unknown (e.g. already timed out
     // library-side).
     t.mockCFunction("logosdelivery_rln_response").returns(1);
-    StdLogosResult result = impl->rlnRespond(99, R"({"ok":{}})");
+    StdLogosResult result = impl->rlnRespond(99, R"({"success":true,"value":{}})");
     LOGOS_ASSERT_FALSE(result.success);
     LOGOS_ASSERT_FALSE(result.error.empty());
 
@@ -612,7 +614,7 @@ LOGOS_TEST(rlnRespond_passes_negative_req_id_bit_exactly) {
 
     // A negative reqId is the int64 view of a library id >= 2^63; it must
     // round-trip bit-exactly, not be rejected.
-    LOGOS_ASSERT_TRUE(impl->rlnRespond(-1, R"({"ok":{}})").success);
+    LOGOS_ASSERT_TRUE(impl->rlnRespond(-1, R"({"success":true,"value":{}})").success);
     LOGOS_ASSERT_TRUE(delivery_test_rln::g_responseFired);
     LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, UINT64_MAX);
 

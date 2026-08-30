@@ -318,7 +318,8 @@ LOGOS_TEST(integration_rlnRespond_rejects_unknown_reqid) {
     // No RLN request is in flight (nothing triggers rlnInvoke yet), so any
     // reqId is unknown: the real library returns non-zero and the module
     // surfaces it as an error.
-    StdLogosResult result = impl.rlnRespond(123456789, R"({"ok":{}})");
+    StdLogosResult result =
+        impl.rlnRespond(123456789, R"({"success":true,"value":{}})");
     LOGOS_ASSERT_FALSE(result.success);
     LOGOS_ASSERT_FALSE(result.error.empty());
 }
@@ -335,11 +336,12 @@ LOGOS_TEST(integration_rln_callbacks_register_and_clear) {
     // must be able to register again after a clear.
     DeliveryModuleImpl impl2;
     LOGOS_ASSERT_TRUE(impl2.createNode(kMinimalConfig).success);
-    LOGOS_ASSERT_FALSE(impl2.rlnRespond(1, R"({"ok":{}})").success);
+    LOGOS_ASSERT_FALSE(impl2.rlnRespond(1, R"({"success":true,"value":{}})").success);
 }
 
 // Blocks until any rln*Request event with the given op fires (or times out).
-// The library awaits each response for ~10s before synthesizing a TRANSIENT
+// The library awaits each response per the RLN module's time budgets (10s for
+// local calls, 95s for registry-reading calls) before synthesizing a TRANSIENT
 // failure, so requests appear well inside this window when the chain is live.
 static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
     const auto deadline =
@@ -351,40 +353,34 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
     return delivery_test_events::g_lastRlnRequest.op == op;
 }
 
-// The full start chain, with this test playing the RLN module:
+// The full start chain, with this test playing the RLN module (module-dialect
+// replies: result envelope for start, compact tstr JSON for register):
 //
 //   start() -> library fires the start callback -> rlnStartRequest event
-//   -> rlnRespond(reqId, ok) -> library's await returns
+//   -> rlnRespond(reqId, {"success":true,...}) -> library's await returns
 //   -> library fires register_membership -> rlnRegisterRequest event
-//   -> rlnRespond(reqId, ok) -> start_node completes -> nodeStarted
+//   -> rlnRespond(reqId, {"state":"pending",...}) -> start_node completes
+//   -> nodeStarted
 //
-// node_api.nim drives this chain from logosdelivery_start_node, but only when
-// self.waku.conf.rlnRelayConf.isSome(). Enabling that (kRlnConfig below) also
-// makes waku want to mount its own on-node RLN relay, which needs a live eth
-// RPC (rln-relay-dynamic=true) or a provisioned zerokit membership instance
-// (dynamic=false, else SIGSEGV in createRLNInstanceLocal). The live path here
-// therefore depends on logos-delivery temporarily skipping that native mount
-// ("skipping native RLN relay mount; external RLN module in use"). Because a
-// segfault can't be caught, this test does NOT enable RLN by default — it runs
-// the live chain only when LOGOS_DELIVERY_RLN_LIVE is set (against a build that
-// has the native-mount skip); otherwise it uses kMinimalConfig, sees no RLN
-// request, and SKIPs. The real end-to-end (real logos-rln-module) is Tier 2.
+// node_factory.nim drives this chain from startNode, but only when
+// conf.rlnRelayConf.isSome().
 static const char* kRlnConfig = R"({
-  "logLevel": "INFO",
-  "mode": "Edge",
+  "logLevel": "DEBUG",
   "relay": true,
   "numShardsInNetwork": 8,
   "rln-relay": true,
+  "rln-relay-lez": true,
+  "rln-relay-registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
+  "rln-relay-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "rln-relay-epoch-sec": 600,
   "rln-relay-dynamic": false,
-  "rln-relay-chain-id": 1,
-  "rln-relay-eth-contract-address": "0x0000000000000000000000000000000000000000"
+  "rln-relay-chain-id": 1
 })";
 
 LOGOS_TEST(integration_rln_start_chain_round_trip) {
     delivery_test_events::resetNodeLifecycleEvents();
     delivery_test_events::resetRlnRequestEvent();
 
-    const bool rlnLive = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
 
     // The shared ensureStarted() node (g_impl) from earlier tests may still be
     // running and holding the fixed discv5 UDP port; tear it down so this test's
@@ -396,7 +392,7 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
     }
 
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_TRUE(impl.createNode(rlnLive ? kRlnConfig : kMinimalConfig).success);
+    LOGOS_ASSERT_TRUE(impl.createNode(kRlnConfig).success);
     LOGOS_ASSERT_TRUE(impl.start().success);
 
     if (!waitForRlnRequestOp("start")) {
@@ -409,19 +405,33 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
         return;
     }
 
-    // Answer the start request; the library's await must accept it.
-    const int64_t startReqId = delivery_test_events::g_lastRlnRequest.reqId;
-    LOGOS_ASSERT_TRUE(impl.rlnRespond(startReqId, R"({"ok":{}})").success);
+    // The start request carries the module's start() config, built from this
+    // node's RLN conf: epoch_size_sec is the value every proof generator and
+    // validator must share.
+    const auto& startReq = delivery_test_events::g_lastRlnRequest;
+    LOGOS_ASSERT_TRUE(startReq.configJson.find("\"epoch_size_sec\":600") !=
+                      std::string::npos);
+    LOGOS_ASSERT_TRUE(startReq.configJson.find("logos:testnet:") != std::string::npos);
+
+    // Answer the start request; the library's await must accept it and its
+    // envelope parser must take success=true as the go-ahead to register.
+    const int64_t startReqId = startReq.reqId;
+    LOGOS_ASSERT_TRUE(
+        impl.rlnRespond(startReqId, R"({"success":true,"value":{"started":true}})")
+            .success);
 
     // On success the library registers the membership: distinct request,
-    // typed identity args populated from the node's RLN bring-up config.
+    // typed identity args populated from the node's RLN bring-up config,
+    // rate limit positional (conf default 1), options a flat JSON object.
     LOGOS_ASSERT_TRUE(waitForRlnRequestOp("register_membership"));
     const auto& reg = delivery_test_events::g_lastRlnRequest;
     LOGOS_ASSERT_FALSE(reg.registryId.empty());
     LOGOS_ASSERT_FALSE(reg.rlnIdentifier.empty());
-    LOGOS_ASSERT_FALSE(reg.optionsJson.empty());
+    LOGOS_ASSERT_TRUE(reg.rateLimit > 0);
+    LOGOS_ASSERT_EQ(reg.optionsJson, std::string("{}"));
     LOGOS_ASSERT_TRUE(
-        impl.rlnRespond(reg.reqId, R"({"ok":{"state":"REGISTERED"}})").success);
+        impl.rlnRespond(reg.reqId, R"({"state":"pending","registry_id":"logos:testnet:0"})")
+            .success);
 
     // With the RLN chain answered, node startup completes.
     LOGOS_ASSERT_TRUE(waitForNodeStarted());
@@ -429,7 +439,8 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
 
     // A second response for an already-completed request must be rejected
     // through the real in-flight list.
-    LOGOS_ASSERT_FALSE(impl.rlnRespond(startReqId, R"({"ok":{}})").success);
+    LOGOS_ASSERT_FALSE(
+        impl.rlnRespond(startReqId, R"({"success":true,"value":{}})").success);
 
     LOGOS_ASSERT_TRUE(impl.stop().success);
     LOGOS_ASSERT_TRUE(waitForNodeStopped());
