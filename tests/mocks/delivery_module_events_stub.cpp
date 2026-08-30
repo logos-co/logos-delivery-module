@@ -34,11 +34,13 @@ void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, i
     delivery_test_events::g_lastNodeStopped = {success, message, timestamp, true};
 }
 
-void DeliveryModuleImpl::rlnStartRequest(int64_t reqId, int64_t timestamp) {
+void DeliveryModuleImpl::rlnStartRequest(int64_t reqId, const std::string& configJson,
+                                         int64_t timestamp) {
     auto& e = delivery_test_events::g_lastRlnRequest;
     e = {};
     e.op = "start";
     e.reqId = reqId;
+    e.configJson = configJson;
     e.timestamp = timestamp;
 }
 
@@ -51,7 +53,7 @@ void DeliveryModuleImpl::rlnStopRequest(int64_t reqId, int64_t timestamp) {
 }
 
 void DeliveryModuleImpl::rlnRegisterRequest(int64_t reqId, const std::string& registryId,
-                                            const std::string& rlnIdentifier,
+                                            const std::string& rlnIdentifier, int64_t rateLimit,
                                             const std::string& optionsJson, int64_t timestamp) {
     auto& e = delivery_test_events::g_lastRlnRequest;
     e = {};
@@ -59,6 +61,7 @@ void DeliveryModuleImpl::rlnRegisterRequest(int64_t reqId, const std::string& re
     e.reqId = reqId;
     e.registryId = registryId;
     e.rlnIdentifier = rlnIdentifier;
+    e.rateLimit = rateLimit;
     e.optionsJson = optionsJson;
     e.timestamp = timestamp;
 }
@@ -103,13 +106,13 @@ void DeliveryModuleImpl::rlnGenerateProofRequest(int64_t reqId, const std::strin
     e.timestamp = timestamp;
 }
 
-void DeliveryModuleImpl::rlnVerifyProofRequest(int64_t reqId, const std::string& registryId,
-                                               const std::string& rlnIdentifier,
-                                               const std::string& signalHex, int64_t epochTimestamp,
-                                               const std::string& proofJson, int64_t timestamp) {
+void DeliveryModuleImpl::rlnValidateProofRequest(int64_t reqId, const std::string& registryId,
+                                                 const std::string& rlnIdentifier,
+                                                 const std::string& signalHex, int64_t epochTimestamp,
+                                                 const std::string& proofJson, int64_t timestamp) {
     auto& e = delivery_test_events::g_lastRlnRequest;
     e = {};
-    e.op = "verify_proof";
+    e.op = "validate_proof";
     e.reqId = reqId;
     e.registryId = registryId;
     e.rlnIdentifier = rlnIdentifier;
