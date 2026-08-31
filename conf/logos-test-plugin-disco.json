@@ -1,6 +1,5 @@
 {
     "preset": "logos.test",
-    "libp2pConfig": {},
     "messagingOverrides": {
         "logLevel": "DEBUG",
         "tcp-port": 30303,
