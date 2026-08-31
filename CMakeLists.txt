@@ -19,6 +19,8 @@ logos_module(
     SOURCES
         src/delivery_module_plugin.h
         src/delivery_module_plugin.cpp
+        src/service_discovery_plugin.h
+        src/service_discovery_plugin.cpp
     EXTERNAL_LIBS
         logosdelivery
     INCLUDE_DIRS
