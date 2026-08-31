@@ -1,8 +1,10 @@
 #include "service_discovery_plugin.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #include <QByteArray>
 #include <QJsonDocument>
@@ -29,6 +31,48 @@ constexpr int kCallTimeoutMs = 15000;
 // one verb; the value is only an upper bound, since nim-brokers' cross-thread
 // lane enforces its own (shorter) timeout on top.
 constexpr uint32_t kRequestTimeoutMs = 15000;
+
+// Opt-in trace of the plugin boundary, written to the file named by
+// LD_DISCO_TRACE. There is no other way to watch these calls in a running node:
+// logos-core reads a module process's merged stdout/stderr but discards every
+// line that does not look like a Qt warning (logos-liblogos
+// plugin_launcher.cpp, `onOutput`), so a module's own logging never reaches the
+// daemon log. Unset means no file is opened and nothing is written.
+FILE* traceFile()
+{
+    static FILE* f = [] () -> FILE* {
+        const char* path = getenv("LD_DISCO_TRACE");
+        if (!path || !*path) {
+            return nullptr;
+        }
+        FILE* h = fopen(path, "a");
+        if (h) {
+            setvbuf(h, nullptr, _IOLBF, 0); // line-buffered, so `tail -f` works
+        }
+        return h;
+    }();
+    return f;
+}
+
+void trace(const char* fmt, ...)
+{
+    FILE* f = traceFile();
+    if (!f) {
+        return;
+    }
+    char stamp[32] = "";
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+    if (localtime_r(&now, &tm)) {
+        std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &tm);
+    }
+    fprintf(f, "[%s] ", stamp);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+}
 
 void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
 {
@@ -160,6 +204,9 @@ int DeliveryServiceDiscoveryPlugin::forward(const char* method,
             error = std::string(method) + " failed";
         }
         fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s -> %s\n", method, error.c_str());
+        trace("%-22s FAILED  %s%s%s", method, args.empty() ? "" : "key=",
+              args.empty() ? "" : args[0].c_str(), args.empty() ? "" : "  ");
+        trace("%-22s   `-> %s", method, error.c_str());
         writeErr(errBuf, errBufLen, error);
         return LD_DISCO_ERROR;
     }
@@ -173,6 +220,12 @@ int DeliveryServiceDiscoveryPlugin::forward(const char* method,
             writeErr(errBuf, errBufLen, "out of memory copying lookup result");
             return LD_DISCO_ERROR;
         }
+        trace("%-22s OK      %srecords=%d", method,
+              args.empty() ? "" : ("key=" + args[0] + "  ").c_str(),
+              value.isValid() ? value.toList().size() : 0);
+    } else {
+        trace("%-22s OK      %s", method,
+              args.empty() ? "" : ("key=" + args[0]).c_str());
     }
     return LD_DISCO_OK;
 }
@@ -186,6 +239,7 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
     }
 
     std::string diagnostics;
+    trace("---- installing service discovery plugin ----");
 
     if (!libp2pConfig.empty()) {
         const QVariant reply = c->invokeRemoteMethod(
@@ -218,6 +272,8 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
         }
     }
 
+    trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
+          diagnostics.c_str());
     return diagnostics;
 }
 
@@ -265,8 +321,15 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
     // `data` is the JSON advertisement payload logos-delivery builds; `record`
     // is a pre-signed extended peer record, which this backend never supplies
     // (libp2p signs with its own identity when the advertisement is empty).
-    const std::string serviceData(reinterpret_cast<const char*>(data), dataLen);
-    const std::string advertisement(reinterpret_cast<const char*>(record), recordLen);
+    // Both may be (NULL, 0) -- logos-delivery passes no record, and an
+    // advertising node with nothing to say passes no data. std::string(nullptr, 0)
+    // is undefined, so build them only when there is something to copy.
+    const std::string serviceData =
+        data && dataLen ? std::string(reinterpret_cast<const char*>(data), dataLen)
+                        : std::string();
+    const std::string advertisement =
+        record && recordLen ? std::string(reinterpret_cast<const char*>(record), recordLen)
+                            : std::string();
     return LD_SELF(ctx)->forward(
         "discoStartAdvertising",
         {toServiceId(key), serviceData, advertisement},

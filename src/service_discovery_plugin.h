@@ -37,13 +37,11 @@ class LogosAPIClient;
  * nothing (capability_module mints a token for any requesting pair without
  * consulting either list).
  *
- * The cost is that calls are untyped — method names are strings and the
- * `{success, value, error}` reply is decoded by hand. That is not purely a
- * loss: the generated typed wrapper decodes a `LogosResult` return with
- * `QVariant::value<LogosResult>()`, and the plain (default, cross-process)
- * transport has no reverse conversion registered for it — the reply arrives as
- * a plain QVariantMap, so the typed path would report failure for every
- * `disco*` call. Decoding the map directly sidesteps that.
+ * The cost is real: calls are untyped, so method names are strings and the
+ * `{success, value, error}` reply is decoded by hand, with nothing checking
+ * either against libp2p's actual surface at build time. The sibling branch
+ * `poc-apply-discovery-plugin-with-dep` declares the dependency and shows what
+ * that buys — see its version of this file for the comparison.
  *
  * ## Threading
  *

@@ -59,6 +59,12 @@ Options:
   -h, --help         this text
 
 Environment:
+  LD_DISCO_TRACE     file to trace every service-discovery verb into. logos-core
+                     discards a module's stdout, so this is the only way to
+                     watch the plugin boundary in a running node.
+  LIBP2P_MODULE_CONFIG
+                     JSON overlaid on libp2p_module's options when it loads
+                     (bootstrapNodes, mountKad, mountServiceDiscovery, ...).
   LOGOSCORE_FLAKE    default: $LOGOSCORE_FLAKE
   LGPM_FLAKE         default: $LGPM_FLAKE
   LIBP2P_FLAKE       default: $LIBP2P_FLAKE
