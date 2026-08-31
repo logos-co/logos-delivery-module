@@ -16,10 +16,11 @@
 # a singleton per user — its connection file is ~/.logoscore/daemon.json — so
 # only one node at a time, whoever started it.
 #
-# libp2p_module is loaded automatically when the config asks for plugin-hosted
-# kademlia discovery ("pluginKadDiscovery": true), because delivery_module dials
-# it at createNode time and refuses to create the node if it is missing. Force
-# either way with --libp2p / --no-libp2p.
+# libp2p_module is always installed here: on this branch delivery_module lists
+# it in metadata.json#dependencies, so logos-core auto-loads it whenever
+# delivery_module is loaded — this script never loads it explicitly. (On the
+# sibling branch poc-apply-discovery-plugin it is undeclared and installed only
+# when the config asks for plugin-hosted kademlia discovery.)
 set -eu
 
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -52,8 +53,8 @@ Commands:
 Options:
   -c, --config FILE  node config passed to createNode (default: conf/logos-test.json)
   -w, --workdir DIR  where artifacts, modules and node data live (default: .run)
-      --libp2p       always load libp2p_module
-      --no-libp2p    never load it
+      --libp2p       install libp2p_module (the default; it is a dependency)
+      --no-libp2p    leave it out, to see the missing-dependency failure
       --rebuild      rebuild the nix outputs even if they are already linked
       --clean        (with down) also delete the work dir
   -h, --help         this text
@@ -111,15 +112,12 @@ daemon_running() {
   "$LOGOSCORE" status >/dev/null 2>&1
 }
 
-# Does this config want plugin-hosted kademlia discovery? Matching the key with
-# a true value is enough: delivery_module reads it wherever the config shape
-# puts it, and a false/absent value means the in-process backend.
+# libp2p_module is a declared dependency on this branch, so it has to be present
+# in the modules dir for every run, whatever the config says: logos-core resolves
+# dependencies at load time and only warns if one is missing, which would then
+# fail createNode instead. --no-libp2p exists to demonstrate exactly that.
 needs_libp2p() {
-  case $WANT_LIBP2P in
-    yes) return 0 ;;
-    no)  return 1 ;;
-  esac
-  grep -Eqi '"(plugin-kad-discovery|pluginKadDiscovery)"[[:space:]]*:[[:space:]]*true' "$CONFIG"
+  [ "$WANT_LIBP2P" != no ]
 }
 
 # nix build <flake> into <out-link>, skipping when the link already resolves.
@@ -191,12 +189,9 @@ do_up() {
     sleep 1
   done
 
-  if needs_libp2p; then
-    say "loading libp2p_module (config asks for plugin kad discovery)"
-    logoscore load-module libp2p_module
-  fi
-
-  say "loading delivery_module"
+  # No explicit load-module for libp2p_module: it is a declared dependency, so
+  # logos-core pulls it in as part of loading delivery_module.
+  say "loading delivery_module (libp2p_module comes with it)"
   logoscore load-module delivery_module
 
   say "createNode with $CONFIG"

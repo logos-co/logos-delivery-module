@@ -17,6 +17,10 @@
 
 #include "api_call_handler.h"
 #include "service_discovery_plugin.h"
+
+// Generated at build time from metadata.json#dependencies; defines the
+// LogosModules aggregate behind LogosModuleContext::modules().
+#include "logos_sdk.h"
 extern "C" {
 #include <liblogosdelivery.h>
 // Kernel tier: unstable, may change without a deprecation cycle. Only
@@ -543,7 +547,7 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
         return "context not initialized";
     }
 
-    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>();
+    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(&modules().libp2p_module);
 
     const std::string backendFailure = discoPlugin->initialiseBackend(libp2pConfig);
     if (!backendFailure.empty()) {
