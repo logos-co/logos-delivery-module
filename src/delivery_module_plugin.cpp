@@ -547,12 +547,12 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
         return "context not initialized";
     }
 
-    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(&modules().libp2p_module);
-
-    const std::string backendFailure = discoPlugin->initialiseBackend(libp2pConfig);
-    if (!backendFailure.empty()) {
-        return backendFailure;
-    }
+    // libp2p is NOT contacted here: this runs on the Qt main thread inside an
+    // inbound createNode dispatch, from which outbound calls cannot complete.
+    // The plugin brings it up on its first verb instead, on the discovery
+    // thread -- see DeliveryServiceDiscoveryPlugin::ensureBackend.
+    discoPlugin =
+        std::make_unique<DeliveryServiceDiscoveryPlugin>(&modules().libp2p_module, libp2pConfig);
 
     // The vtable is borrowed for the duration of the call and copied by the
     // node, but discoPlugin owns the object every entry point dispatches on,
