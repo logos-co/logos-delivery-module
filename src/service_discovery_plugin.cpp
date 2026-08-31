@@ -1,8 +1,10 @@
 #include "service_discovery_plugin.h"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #include <nlohmann/json.hpp>
 
@@ -16,6 +18,48 @@ namespace {
 // lane enforces its own (shorter) timeout on top. The generated std client
 // exposes no per-call deadline, so this is the only knob on our side.
 constexpr uint32_t kRequestTimeoutMs = 15000;
+
+// Opt-in trace of the plugin boundary, written to the file named by
+// LD_DISCO_TRACE. There is no other way to watch these calls in a running node:
+// logos-core reads a module process's merged stdout/stderr but discards every
+// line that does not look like a Qt warning (logos-liblogos
+// plugin_launcher.cpp, `onOutput`), so a module's own logging never reaches the
+// daemon log. Unset means no file is opened and nothing is written.
+FILE* traceFile()
+{
+    static FILE* f = [] () -> FILE* {
+        const char* path = getenv("LD_DISCO_TRACE");
+        if (!path || !*path) {
+            return nullptr;
+        }
+        FILE* h = fopen(path, "a");
+        if (h) {
+            setvbuf(h, nullptr, _IOLBF, 0); // line-buffered, so `tail -f` works
+        }
+        return h;
+    }();
+    return f;
+}
+
+void trace(const char* fmt, ...)
+{
+    FILE* f = traceFile();
+    if (!f) {
+        return;
+    }
+    char stamp[32] = "";
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+    if (localtime_r(&now, &tm)) {
+        std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &tm);
+    }
+    fprintf(f, "[%s] ", stamp);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+}
 
 void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
 {
@@ -41,6 +85,7 @@ int settle(const char* method, const StdLogosResult& r, const logos::CallError& 
         const std::string msg =
             std::string(method) + ": " + err.code + ": " + err.message;
         fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s\n", msg.c_str());
+        trace("%-22s TRANSPORT-ERR  %s", method, msg.c_str());
         writeErr(errBuf, errBufLen, msg);
         return LD_DISCO_ERROR;
     }
@@ -48,6 +93,7 @@ int settle(const char* method, const StdLogosResult& r, const logos::CallError& 
         const std::string msg =
             r.error.empty() ? std::string(method) + " failed" : r.error;
         fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s -> %s\n", method, msg.c_str());
+        trace("%-22s REFUSED        %s", method, msg.c_str());
         writeErr(errBuf, errBufLen, msg);
         return LD_DISCO_ERROR;
     }
@@ -114,6 +160,7 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
     }
 
     std::string diagnostics;
+    trace("---- installing service discovery plugin ----");
 
     if (!libp2pConfig.empty()) {
         logos::CallError err;
@@ -142,6 +189,8 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
         }
     }
 
+    trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
+          diagnostics.c_str());
     return diagnostics;
 }
 
@@ -153,14 +202,18 @@ int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBu
 {
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStart(&err);
-    return settle("discoStart", r, err, errBuf, errBufLen);
+    const int rc = settle("discoStart", r, err, errBuf, errBufLen);
+    if (rc == LD_DISCO_OK) trace("%-22s OK", "discoStart");
+    return rc;
 }
 
 int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBufLen)
 {
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStop(&err);
-    return settle("discoStop", r, err, errBuf, errBufLen);
+    const int rc = settle("discoStop", r, err, errBuf, errBufLen);
+    if (rc == LD_DISCO_OK) trace("%-22s OK", "discoStop");
+    return rc;
 }
 
 int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t limit,
@@ -176,6 +229,8 @@ int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t 
     if (rc != LD_DISCO_OK) {
         return rc;
     }
+    trace("%-22s OK             key=%s records=%zu", "discoLookup",
+          toServiceId(key).c_str(), r.value.is_array() ? r.value.size() : 0);
     return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
 }
 
@@ -188,6 +243,8 @@ int DeliveryServiceDiscoveryPlugin::cRandomLookup(void* ctx, char** outJson,
     if (rc != LD_DISCO_OK) {
         return rc;
     }
+    trace("%-22s OK             records=%zu", "discoRandomLookup",
+          r.value.is_array() ? r.value.size() : 0);
     return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
 }
 
@@ -205,12 +262,23 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
     // `data` is the JSON advertisement payload logos-delivery builds; `record`
     // is a pre-signed extended peer record, which this backend never supplies
     // (libp2p signs with its own identity when the advertisement is empty).
-    const std::string serviceData(reinterpret_cast<const char*>(data), dataLen);
-    const std::string advertisement(reinterpret_cast<const char*>(record), recordLen);
+    // Both may be (NULL, 0) -- logos-delivery passes no record, and an
+    // advertising node with nothing to say passes no data. std::string(nullptr, 0)
+    // is undefined, so build them only when there is something to copy.
+    const std::string serviceData =
+        data && dataLen ? std::string(reinterpret_cast<const char*>(data), dataLen)
+                        : std::string();
+    const std::string advertisement =
+        record && recordLen ? std::string(reinterpret_cast<const char*>(record), recordLen)
+                            : std::string();
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStartAdvertising(
         toServiceId(key), serviceData, advertisement, &err);
-    return settle("discoStartAdvertising", r, err, errBuf, errBufLen);
+    const int rc = settle("discoStartAdvertising", r, err, errBuf, errBufLen);
+    if (rc == LD_DISCO_OK)
+        trace("%-22s OK             key=%s data=%s", "discoStartAdvertising",
+              toServiceId(key).c_str(), serviceData.c_str());
+    return rc;
 }
 
 int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
@@ -219,7 +287,10 @@ int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
     logos::CallError err;
     const StdLogosResult r =
         LD_SELF(ctx)->libp2p_->discoStopAdvertising(toServiceId(key), &err);
-    return settle("discoStopAdvertising", r, err, errBuf, errBufLen);
+    const int rc = settle("discoStopAdvertising", r, err, errBuf, errBufLen);
+    if (rc == LD_DISCO_OK)
+        trace("%-22s OK             key=%s", "discoStopAdvertising", toServiceId(key).c_str());
+    return rc;
 }
 
 int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key,
@@ -228,7 +299,10 @@ int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key
     logos::CallError err;
     const StdLogosResult r =
         LD_SELF(ctx)->libp2p_->discoRegisterInterest(toServiceId(key), &err);
-    return settle("discoRegisterInterest", r, err, errBuf, errBufLen);
+    const int rc = settle("discoRegisterInterest", r, err, errBuf, errBufLen);
+    if (rc == LD_DISCO_OK)
+        trace("%-22s OK             key=%s", "discoRegisterInterest", toServiceId(key).c_str());
+    return rc;
 }
 
 int DeliveryServiceDiscoveryPlugin::cUnregisterInterest(void* ctx, const char* key,
@@ -237,7 +311,10 @@ int DeliveryServiceDiscoveryPlugin::cUnregisterInterest(void* ctx, const char* k
     logos::CallError err;
     const StdLogosResult r =
         LD_SELF(ctx)->libp2p_->discoUnregisterInterest(toServiceId(key), &err);
-    return settle("discoUnregisterInterest", r, err, errBuf, errBufLen);
+    const int rc = settle("discoUnregisterInterest", r, err, errBuf, errBufLen);
+    if (rc == LD_DISCO_OK)
+        trace("%-22s OK             key=%s", "discoUnregisterInterest", toServiceId(key).c_str());
+    return rc;
 }
 
 #undef LD_SELF
