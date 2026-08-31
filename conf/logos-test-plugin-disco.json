@@ -1,0 +1,10 @@
+{
+    "preset": "logos.test",
+    "libp2pConfig": {},
+    "messagingOverrides": {
+        "logLevel": "DEBUG",
+        "tcp-port": 30303,
+        "discv5-udp-port": 9000,
+        "pluginKadDiscovery": true
+    }
+}
