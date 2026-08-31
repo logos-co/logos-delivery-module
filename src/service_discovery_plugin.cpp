@@ -4,30 +4,17 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <QByteArray>
-#include <QJsonDocument>
-#include <QMetaType>
-#include <QString>
-#include <QVariant>
-#include <QVariantList>
-#include <QVariantMap>
+#include <nlohmann/json.hpp>
 
-#include <logos_api_client.h>
-#include <logos_types.h>
-#include <token_manager.h>
+// Generated at build time from metadata.json#dependencies.
+#include "libp2p_module_api.h"
 
 namespace {
 
-constexpr const char* kLibp2pModule = "libp2p_module";
-constexpr const char* kOriginModule = "delivery_module";
-
-// Above libp2p's own kDefaultOpTimeoutMs (10s) so a slow operation surfaces as
-// libp2p's error rather than as an SDK transport timeout with no diagnostic.
-constexpr int kCallTimeoutMs = 15000;
-
 // Handed to logos-delivery in the vtable. It caps how long the node waits for
 // one verb; the value is only an upper bound, since nim-brokers' cross-thread
-// lane enforces its own (shorter) timeout on top.
+// lane enforces its own (shorter) timeout on top. The generated std client
+// exposes no per-call deadline, so this is the only knob on our side.
 constexpr uint32_t kRequestTimeoutMs = 15000;
 
 void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
@@ -40,64 +27,56 @@ void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
     errBuf[n] = '\0';
 }
 
-/// Decodes the reply of a StdLogosResult-returning module method.
+/// Turns one typed reply into an LD_DISCO_* code.
 ///
-/// Two shapes are accepted. Cross-process (the default) the reply arrives as a
-/// plain map, because the wire encoder special-cases LogosResult into
-/// {success, value, error} but the decoder has no reverse case and no
-/// QVariantMap->LogosResult converter is registered. In-process the QVariant
-/// carries a real LogosResult, since nothing is serialized.
-bool decodeResult(const QVariant& reply, QVariant& valueOut, std::string& errorOut)
+/// Two failure channels, and they mean different things. `CallError` covers the
+/// transport -- module not loaded ("object_unavailable"), timed out, dispatch
+/// failed -- while `StdLogosResult::success` carries libp2p's own answer. Both
+/// are reported, since "libp2p refused" and "libp2p was unreachable" want
+/// different fixes; the transport code is included so the first is obvious.
+int settle(const char* method, const StdLogosResult& r, const logos::CallError& err,
+           char* errBuf, size_t errBufLen)
 {
-    if (!reply.isValid()) {
-        errorOut = "no reply from " + std::string(kLibp2pModule)
-            + " (not loaded, or the call timed out)";
-        return false;
+    if (!err.ok()) {
+        const std::string msg =
+            std::string(method) + ": " + err.code + ": " + err.message;
+        fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s\n", msg.c_str());
+        writeErr(errBuf, errBufLen, msg);
+        return LD_DISCO_ERROR;
     }
-
-    const int logosResultId = QMetaType::fromName("LogosResult").id();
-    if (logosResultId != QMetaType::UnknownType && reply.userType() == logosResultId) {
-        const LogosResult r = reply.value<LogosResult>();
-        valueOut = r.value;
-        errorOut = r.error.toString().toStdString();
-        return r.success;
+    if (!r.success) {
+        const std::string msg =
+            r.error.empty() ? std::string(method) + " failed" : r.error;
+        fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s -> %s\n", method, msg.c_str());
+        writeErr(errBuf, errBufLen, msg);
+        return LD_DISCO_ERROR;
     }
-
-    if (reply.canConvert<QVariantMap>()) {
-        const QVariantMap map = reply.toMap();
-        if (map.contains("success")) {
-            valueOut = map.value("value");
-            errorOut = map.value("error").toString().toStdString();
-            return map.value("success").toBool();
-        }
-    }
-
-    errorOut = "unrecognised reply shape from " + std::string(kLibp2pModule);
-    return false;
+    return LD_DISCO_OK;
 }
 
-/// Serialises the `value` half of a reply back into the JSON array text the
-/// plugin ABI expects. libp2p's lookups already produce
-/// {peerId, seqNo, addrs, services:[{id, data}]} records, which is exactly what
-/// logos-delivery parses, so this is a pass-through with no reshaping.
-std::string toJsonArrayText(const QVariant& value)
+/// Hands a lookup's `value` to logos-delivery as the JSON array text the plugin
+/// ABI wants. libp2p's lookups already produce
+/// {peerId, seqNo, addrs, services:[{id, data}]} records, exactly what
+/// logos-delivery parses, and the std client carries them as nlohmann::json all
+/// the way -- so this is a `dump()`, with no intermediate representation to get
+/// wrong. Ownership is plain malloc/free across the C boundary; logos-delivery
+/// hands the buffer back through freeString.
+bool emitJsonArray(const nlohmann::json& value, char** outJson,
+                   char* errBuf, size_t errBufLen)
 {
-    if (!value.isValid()) {
-        return "[]";
+    const std::string json = value.is_array() ? value.dump() : std::string("[]");
+    *outJson = strdup(json.c_str());
+    if (!*outJson) {
+        writeErr(errBuf, errBufLen, "out of memory copying lookup result");
+        return false;
     }
-    const QJsonDocument doc = QJsonDocument::fromVariant(value);
-    if (!doc.isArray()) {
-        return "[]";
-    }
-    return doc.toJson(QJsonDocument::Compact).toStdString();
+    return true;
 }
 
 } // namespace
 
-DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin()
-    : client_(std::make_unique<LogosAPIClient>(
-          QString::fromUtf8(kLibp2pModule), QString::fromUtf8(kOriginModule),
-          &TokenManager::instance()))
+DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p)
+    : libp2p_(libp2p)
     , vtable_{}
 {
     vtable_.abiVersion = LD_DISCO_ABI_VERSION;
@@ -114,8 +93,6 @@ DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin()
     vtable_.unregisterInterest = &DeliveryServiceDiscoveryPlugin::cUnregisterInterest;
 }
 
-DeliveryServiceDiscoveryPlugin::~DeliveryServiceDiscoveryPlugin() = default;
-
 std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
 {
     if (!key) {
@@ -130,91 +107,38 @@ std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
     return k;
 }
 
-int DeliveryServiceDiscoveryPlugin::forward(const char* method,
-                                            const std::vector<std::string>& args,
-                                            char** outJson,
-                                            char* errBuf,
-                                            size_t errBufLen)
-{
-    LogosAPIClient* c = client();
-    if (!c) {
-        writeErr(errBuf, errBufLen,
-                 std::string("no client for ") + kLibp2pModule
-                     + "; is the module loaded?");
-        return LD_DISCO_ERROR;
-    }
-
-    QVariantList qargs;
-    qargs.reserve(static_cast<int>(args.size()));
-    for (const std::string& a : args) {
-        qargs.append(QVariant(QString::fromStdString(a)));
-    }
-
-    const QVariant reply = c->invokeRemoteMethod(
-        kLibp2pModule, method, qargs, Timeout(kCallTimeoutMs));
-
-    QVariant value;
-    std::string error;
-    if (!decodeResult(reply, value, error)) {
-        if (error.empty()) {
-            error = std::string(method) + " failed";
-        }
-        fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s -> %s\n", method, error.c_str());
-        writeErr(errBuf, errBufLen, error);
-        return LD_DISCO_ERROR;
-    }
-
-    if (outJson) {
-        const std::string json = toJsonArrayText(value);
-        // strdup so ownership is plain malloc/free across the C boundary;
-        // logos-delivery hands the buffer back through freeString.
-        *outJson = strdup(json.c_str());
-        if (!*outJson) {
-            writeErr(errBuf, errBufLen, "out of memory copying lookup result");
-            return LD_DISCO_ERROR;
-        }
-    }
-    return LD_DISCO_OK;
-}
-
 std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string& libp2pConfig)
 {
-    LogosAPIClient* c = client();
-    if (!c) {
-        return std::string("could not reach ") + kLibp2pModule
-            + "; load it before enabling plugin kad discovery";
+    if (!libp2p_) {
+        return "no libp2p_module client";
     }
 
     std::string diagnostics;
 
     if (!libp2pConfig.empty()) {
-        const QVariant reply = c->invokeRemoteMethod(
-            kLibp2pModule, "createNode",
-            QVariantList() << QVariant(QString::fromStdString(libp2pConfig)),
-            Timeout(kCallTimeoutMs));
-        QVariant value;
-        std::string error;
-        if (!decodeResult(reply, value, error)) {
+        logos::CallError err;
+        const StdLogosResult r = libp2p_->createNode(libp2pConfig, &err);
+        if (!err.ok()) {
+            diagnostics += "createNode: " + err.code + ": " + err.message + "; ";
+        } else if (!r.success) {
             // Another module may already own the node; that is not our failure.
-            if (error.find("already created") == std::string::npos) {
-                diagnostics += "createNode: " + error + "; ";
+            if (r.error.find("already created") == std::string::npos) {
+                diagnostics += "createNode: " + r.error + "; ";
             }
             fprintf(stderr, "DeliveryServiceDiscoveryPlugin: libp2p createNode: %s\n",
-                    error.c_str());
+                    r.error.c_str());
         }
     }
 
     // libp2p's start() calls ensureContext() first, so it brings up a default
     // node when createNode was skipped or not supplied.
     {
-        const QVariant reply = c->invokeRemoteMethod(
-            kLibp2pModule, "start", QVariantList(), Timeout(kCallTimeoutMs));
-        QVariant value;
-        std::string error;
-        if (!decodeResult(reply, value, error)) {
-            diagnostics += "start: " + error + "; ";
-            fprintf(stderr, "DeliveryServiceDiscoveryPlugin: libp2p start: %s\n",
-                    error.c_str());
+        logos::CallError err;
+        const StdLogosResult r = libp2p_->start(&err);
+        if (!err.ok()) {
+            diagnostics += "start: " + err.code + ": " + err.message + "; ";
+        } else if (!r.success) {
+            diagnostics += "start: " + (r.error.empty() ? std::string("failed") : r.error) + "; ";
         }
     }
 
@@ -227,12 +151,16 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
 
 int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBufLen)
 {
-    return LD_SELF(ctx)->forward("discoStart", {}, nullptr, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStart(&err);
+    return settle("discoStart", r, err, errBuf, errBufLen);
 }
 
 int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBufLen)
 {
-    return LD_SELF(ctx)->forward("discoStop", {}, nullptr, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStop(&err);
+    return settle("discoStop", r, err, errBuf, errBufLen);
 }
 
 int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t limit,
@@ -241,14 +169,26 @@ int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t 
     // libp2p's discoLookup takes (serviceId, serviceData) and has no result
     // cap, so `limit` has nowhere to go; the caller trims what it gets back.
     (void)limit;
-    return LD_SELF(ctx)->forward(
-        "discoLookup", {toServiceId(key), std::string()}, outJson, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r =
+        LD_SELF(ctx)->libp2p_->discoLookup(toServiceId(key), std::string(), &err);
+    const int rc = settle("discoLookup", r, err, errBuf, errBufLen);
+    if (rc != LD_DISCO_OK) {
+        return rc;
+    }
+    return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
 }
 
 int DeliveryServiceDiscoveryPlugin::cRandomLookup(void* ctx, char** outJson,
                                                   char* errBuf, size_t errBufLen)
 {
-    return LD_SELF(ctx)->forward("discoRandomLookup", {}, outJson, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoRandomLookup(&err);
+    const int rc = settle("discoRandomLookup", r, err, errBuf, errBufLen);
+    if (rc != LD_DISCO_OK) {
+        return rc;
+    }
+    return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
 }
 
 void DeliveryServiceDiscoveryPlugin::cFreeString(void* ctx, char* s)
@@ -267,31 +207,37 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
     // (libp2p signs with its own identity when the advertisement is empty).
     const std::string serviceData(reinterpret_cast<const char*>(data), dataLen);
     const std::string advertisement(reinterpret_cast<const char*>(record), recordLen);
-    return LD_SELF(ctx)->forward(
-        "discoStartAdvertising",
-        {toServiceId(key), serviceData, advertisement},
-        nullptr, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStartAdvertising(
+        toServiceId(key), serviceData, advertisement, &err);
+    return settle("discoStartAdvertising", r, err, errBuf, errBufLen);
 }
 
 int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
                                                      char* errBuf, size_t errBufLen)
 {
-    return LD_SELF(ctx)->forward(
-        "discoStopAdvertising", {toServiceId(key)}, nullptr, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r =
+        LD_SELF(ctx)->libp2p_->discoStopAdvertising(toServiceId(key), &err);
+    return settle("discoStopAdvertising", r, err, errBuf, errBufLen);
 }
 
 int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key,
                                                       char* errBuf, size_t errBufLen)
 {
-    return LD_SELF(ctx)->forward(
-        "discoRegisterInterest", {toServiceId(key)}, nullptr, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r =
+        LD_SELF(ctx)->libp2p_->discoRegisterInterest(toServiceId(key), &err);
+    return settle("discoRegisterInterest", r, err, errBuf, errBufLen);
 }
 
 int DeliveryServiceDiscoveryPlugin::cUnregisterInterest(void* ctx, const char* key,
                                                         char* errBuf, size_t errBufLen)
 {
-    return LD_SELF(ctx)->forward(
-        "discoUnregisterInterest", {toServiceId(key)}, nullptr, errBuf, errBufLen);
+    logos::CallError err;
+    const StdLogosResult r =
+        LD_SELF(ctx)->libp2p_->discoUnregisterInterest(toServiceId(key), &err);
+    return settle("discoUnregisterInterest", r, err, errBuf, errBufLen);
 }
 
 #undef LD_SELF

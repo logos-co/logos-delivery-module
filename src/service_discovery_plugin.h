@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -10,7 +9,7 @@ extern "C" {
 #include <logosdelivery_service_discovery.h>
 }
 
-class LogosAPIClient;
+class Libp2pModule;
 
 /**
  * @brief Hosts logos-delivery's service-discovery plugin on top of libp2p_module.
@@ -18,43 +17,36 @@ class LogosAPIClient;
  * logos-delivery can delegate peer/service discovery to an external provider
  * through the C vtable declared in `logosdelivery_service_discovery.h`. This
  * class implements that vtable by forwarding each verb to `libp2p_module`'s
- * `disco*` API over logos-core-sdk.
+ * `disco*` API.
  *
- * ## Why libp2p_module is not a metadata.json dependency
+ * ## The dependency is declared, so the calls are typed
  *
- * Declaring it would make logos-core auto-load libp2p alongside delivery on
- * every run, and the generated `LogosModules` aggregate builds each declared
- * dependency's client eagerly in its constructor — there is no "declared but
- * skipped" state. Since discovery is opt-in per node config, the client is
- * resolved here at runtime instead. `LogosModuleContext::modules()` cannot help
- * with that -- the generated `LogosModules` holds one wrapper per declared
- * dependency and nothing else, so with none declared it exposes no `LogosAPI`
- * at all -- so this class builds its own `LogosAPIClient` against the
- * process-global transport, exactly as a generated wrapper would.
+ * `libp2p_module` is listed in `metadata.json#dependencies`, which is the only
+ * way to get a typed client: at build time logos-module-builder resolves the
+ * dependency from the like-named flake input, and logos-cpp-generator emits
+ * `libp2p_module_api.h` (a `Libp2pModule` class) plus the `LogosModules`
+ * aggregate behind `LogosModuleContext::modules()`. logos-core itself generates
+ * nothing -- it only loads the built plugins at runtime.
  *
- * A module may call any loaded module regardless of what it declares:
- * `dependencies` drives codegen, auto-load and load ordering, and authorizes
- * nothing (capability_module mints a token for any requesting pair without
- * consulting either list).
- *
- * The cost is that calls are untyped — method names are strings and the
- * `{success, value, error}` reply is decoded by hand. That is not purely a
- * loss: the generated typed wrapper decodes a `LogosResult` return with
- * `QVariant::value<LogosResult>()`, and the plain (default, cross-process)
- * transport has no reverse conversion registered for it — the reply arrives as
- * a plain QVariantMap, so the typed path would report failure for every
- * `disco*` call. Decoding the map directly sidesteps that.
+ * What declaring it costs, and why the sibling branch
+ * `poc-apply-discovery-plugin` does not: logos-core then auto-loads
+ * libp2p_module alongside this one on every run, and `LogosModules` constructs
+ * each declared dependency's client eagerly in its constructor. There is no
+ * "declared but skipped" state, so discovery stops being decidable per node
+ * config. Declaring it buys codegen, auto-load and load ordering -- and
+ * authorizes nothing, since capability_module mints a token for any requesting
+ * pair without consulting either list.
  *
  * ## Threading
  *
  * Every entry point below is invoked on logos-delivery's own discovery worker
  * thread, never on the module's Qt main thread. That is safe: the SDK's
- * synchronous `invokeRemoteMethod` bottoms out in a `std::future` wait against
- * a connection driven by its own Asio thread, needs no Qt event loop on the
- * calling thread, and is internally serialized (atomic request ids, a
- * mutex-guarded pending map, a strand for writes). The asynchronous SDK lane
- * is deliberately *not* used: its completion is posted to the Qt main thread,
- * which this thread does not run.
+ * synchronous calls bottom out in a `std::future` wait against a connection
+ * driven by its own Asio thread, need no Qt event loop on the calling thread,
+ * and are internally serialized (atomic request ids, a mutex-guarded pending
+ * map, a strand for writes). The generated `*Async` variants are deliberately
+ * unused: they post their completion to the Qt main thread, which this worker
+ * does not run.
  *
  * Calls from one node are serialized by that single worker thread, so this
  * object sees one verb at a time.
@@ -62,24 +54,20 @@ class LogosAPIClient;
 class DeliveryServiceDiscoveryPlugin
 {
 public:
-    /// Builds the libp2p_module client. Construct on the module's own thread
-    /// (createNode): LogosAPIClient is a QObject whose constructor dials the
-    /// target, while the vtable entry points below only ever use it.
-    DeliveryServiceDiscoveryPlugin();
-    ~DeliveryServiceDiscoveryPlugin();
+    /**
+     * @param libp2p Borrowed from `modules().libp2p_module`; owned by the
+     *        `LogosModules` aggregate, which outlives this object.
+     */
+    explicit DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p);
 
     /**
      * @brief Brings libp2p_module up so the vtable has something to forward to.
      *
      * `libp2pConfig` is passed to libp2p's `createNode` when non-empty; an
      * already-created node is left alone (libp2p reports "node already
-     * created", which is treated as success here — another module may own it).
-     * `start` is then called unconditionally; libp2p's own `start` lazily
-     * creates a default context if none exists.
-     *
-     * Failures are reported but not fatal: if libp2p is genuinely unusable,
-     * the plugin's `start` verb fails and logos-delivery refuses to start the
-     * node, which is one clear failure point instead of two.
+     * created", treated as success here -- another module may own it). `start`
+     * is then called unconditionally; libp2p's own `start` lazily creates a
+     * default context if none exists.
      *
      * @return empty on success, otherwise a human-readable diagnostic.
      */
@@ -89,25 +77,13 @@ public:
     const LdServiceDiscoveryPlugin* vtable() const { return &vtable_; }
 
 private:
-    /// Forwards one `disco*` call and maps its reply onto an LD_DISCO_* code.
-    /// On failure writes the diagnostic into errBuf. `outJson`, when non-null,
-    /// receives a freshly allocated copy of the reply's JSON array.
-    int forward(const char* method,
-                const std::vector<std::string>& args,
-                char** outJson,
-                char* errBuf,
-                size_t errBufLen);
-
-    /// The libp2p_module client, built in the constructor. Never null.
-    LogosAPIClient* client() { return client_.get(); }
-
     /// Criteria keys arrive as "svc:<id>" / "shard:<c>/<s>" / "cap:<x>".
     /// libp2p wants a bare service id, so the "svc:" prefix is stripped; other
     /// kinds pass through verbatim, which keeps advertise and lookup agreeing
     /// on one string without inventing a mapping libp2p could not honour.
     static std::string toServiceId(const char* key);
 
-    std::unique_ptr<LogosAPIClient> client_;
+    Libp2pModule* libp2p_;
     LdServiceDiscoveryPlugin vtable_;
 
     // --- vtable trampolines; pluginCtx is always `this` ---------------------
