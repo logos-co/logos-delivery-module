@@ -6,12 +6,38 @@
 #include <cstring>
 #include <ctime>
 
+#include <chrono>
+#include <thread>
+
 #include <nlohmann/json.hpp>
 
 // Generated at build time from metadata.json#dependencies.
 #include "libp2p_module_api.h"
 
 namespace {
+
+// libp2p needs peers before its kademlia can store a provider record or answer
+// a lookup, and it takes them only as `bootstrapNodes` in its own options --
+// there is no call to add them later. These are the logos.dev preset's entry
+// nodes, copied from logos-delivery's networks_config.nim (cluster 3).
+//
+// Hardcoded rather than derived: this module cannot read the preset the node
+// was configured with (logos-delivery resolves it internally and exposes no
+// getter), and libp2p wants the list before anything else happens. Revisit when
+// either side grows a way to pass the resolved entry nodes through.
+const char* const kLogosDevBootstrapNodes[] = {
+    "/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby",
+    "/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH",
+    "/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397",
+    "/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH",
+    "/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP",
+    "/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE",
+};
+
+// How long to wait for libp2p_module to start serving calls after it loads.
+// Generous because it has been observed taking longer than 20s, and because
+// giving up early is expensive: see the bail-out in ensureBackend.
+constexpr std::chrono::seconds kBackendReadyTimeout{90};
 
 // Handed to logos-delivery in the vtable. It caps how long the node waits for
 // one verb; the value is only an upper bound, since nim-brokers' cross-thread
@@ -121,8 +147,11 @@ bool emitJsonArray(const nlohmann::json& value, char** outJson,
 
 } // namespace
 
-DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p)
+DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p,
+                                                               std::string libp2pConfig)
     : libp2p_(libp2p)
+    , libp2pConfig_(std::move(libp2pConfig))
+    , backendReady_(false)
     , vtable_{}
 {
     vtable_.abiVersion = LD_DISCO_ABI_VERSION;
@@ -153,27 +182,93 @@ std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
     return k;
 }
 
-std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string& libp2pConfig)
+std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
 {
+    if (backendReady_) {
+        return {};
+    }
     if (!libp2p_) {
         return "no libp2p_module client";
     }
 
     std::string diagnostics;
-    trace("---- installing service discovery plugin ----");
+    trace("---- bringing up the libp2p backend ----");
 
-    if (!libp2pConfig.empty()) {
+    // Wait until libp2p will actually serve calls before configuring it.
+    //
+    // Freshly loaded, it is reachable on the transport but rejects calls at
+    // dispatch for a moment. The std generated client has no dispatch-rejection
+    // handling (the Qt one calls logosDispatchRejection), so that envelope
+    // arrives as success=false with no value and no message, and CallError
+    // stays ok() -- indistinguishable from a genuine refusal by signature.
+    //
+    // What separates them is the message: every real answer from libp2p carries
+    // one (`status` says "libp2p not initialized" while it has no context),
+    // whereas a rejection carries nothing. So "answered" means success, or a
+    // failure that bothered to say why.
+    //
+    // This matters more than it looks: bootstrap peers can only be given at
+    // createNode, so a createNode lost to this window leaves libp2p with a
+    // kademlia that has no peers and can never get any -- exactly the state in
+    // which advertising and lookups quietly do nothing.
+    // No readiness probe: `status` is one of the calls libp2p rejects (355
+    // probes over 90s, all rejected, while `start` and every disco verb answered
+    // fine in the same session), so probing with it says nothing about whether
+    // the module will serve the call we actually care about.
+    const bool alreadyHasNode = false;
+
+    // Bootstrap peers first, then whatever the operator passed on top, so a
+    // node config can override the defaults (including with an empty list).
+    nlohmann::json cfg = nlohmann::json::object();
+    cfg["bootstrapNodes"] = nlohmann::json::array();
+    for (const char* addr : kLogosDevBootstrapNodes) {
+        cfg["bootstrapNodes"].push_back(addr);
+    }
+    cfg["mountKad"] = true;
+    cfg["mountServiceDiscovery"] = true;
+
+    if (!libp2pConfig_.empty()) {
+        nlohmann::json overrides = nlohmann::json::parse(libp2pConfig_, nullptr, false);
+        if (overrides.is_object()) {
+            cfg.update(overrides);
+        } else {
+            trace("libp2pConfig is not a JSON object; ignoring it");
+        }
+    }
+
+    if (alreadyHasNode) {
+        // Someone else built it (or a previous attempt of ours did). Its options
+        // are already fixed, so our bootstrap peers cannot land -- say so
+        // plainly rather than letting discovery look configured when it is not.
+        trace("libp2p createNode        SKIPPED  node already exists; "
+              "bootstrap peers NOT applied");
+    } else {
+        const std::string cfgText = cfg.dump();
         logos::CallError err;
-        const StdLogosResult r = libp2p_->createNode(libp2pConfig, &err);
+        const StdLogosResult r = libp2p_->createNode(cfgText, &err);
+        trace("libp2p createNode        %s  bootstrapNodes=%zu",
+              (!err.ok() ? "TRANSPORT-ERR" : (r.success ? "OK" : "REFUSED")),
+              cfg["bootstrapNodes"].size());
         if (!err.ok()) {
             diagnostics += "createNode: " + err.code + ": " + err.message + "; ";
         } else if (!r.success) {
-            // Another module may already own the node; that is not our failure.
-            if (r.error.find("already created") == std::string::npos) {
-                diagnostics += "createNode: " + r.error + "; ";
-            }
-            fprintf(stderr, "DeliveryServiceDiscoveryPlugin: libp2p createNode: %s\n",
-                    r.error.c_str());
+            // Not fatal, and not currently reachable either. libp2p rejects this
+            // call from this module -- always, immediately, with no message --
+            // as it does `status` and `discoStartAdvertising`, while `start` and
+            // the other six disco verbs answer normally on the same client and
+            // thread. Until that is resolved, bootstrap peers cannot be handed
+            // over this way; set them through libp2p's own LIBP2P_MODULE_CONFIG
+            // (its metadata documents that as the load-time config channel).
+            //
+            // Discovery still starts, so the node runs and the lookup loops are
+            // driven -- they simply have an empty DHT to work against.
+            trace("libp2p createNode        `-> %s",
+                  r.error.empty() ? "(no message)" : r.error.c_str());
+            trace("libp2p bootstrap peers   NOT APPLIED  "
+                  "(set LIBP2P_MODULE_CONFIG to configure libp2p)");
+            fprintf(stderr,
+                    "DeliveryServiceDiscoveryPlugin: libp2p createNode refused; "
+                    "bootstrap peers not applied\n");
         }
     }
 
@@ -191,6 +286,8 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
 
     trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
           diagnostics.c_str());
+    backendReady_ = diagnostics.empty();
+    backendFailure_ = diagnostics;
     return diagnostics;
 }
 
@@ -200,6 +297,15 @@ std::string DeliveryServiceDiscoveryPlugin::initialiseBackend(const std::string&
 
 int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBufLen)
 {
+    // First call on the discovery thread, so this is where libp2p can be
+    // reached at all -- see ensureBackend.
+    const std::string failure = LD_SELF(ctx)->ensureBackend();
+    if (!failure.empty()) {
+        trace("libp2p backend           UNAVAILABLE  %s", failure.c_str());
+        writeErr(errBuf, errBufLen, "libp2p backend unavailable: " + failure);
+        return LD_DISCO_ERROR;
+    }
+
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStart(&err);
     const int rc = settle("discoStart", r, err, errBuf, errBufLen);

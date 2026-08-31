@@ -57,26 +57,43 @@ public:
     /**
      * @param libp2p Borrowed from `modules().libp2p_module`; owned by the
      *        `LogosModules` aggregate, which outlives this object.
+     * @param libp2pConfig Optional JSON object merged over the default libp2p
+     *        options; see @ref ensureBackend.
      */
-    explicit DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p);
-
-    /**
-     * @brief Brings libp2p_module up so the vtable has something to forward to.
-     *
-     * `libp2pConfig` is passed to libp2p's `createNode` when non-empty; an
-     * already-created node is left alone (libp2p reports "node already
-     * created", treated as success here -- another module may own it). `start`
-     * is then called unconditionally; libp2p's own `start` lazily creates a
-     * default context if none exists.
-     *
-     * @return empty on success, otherwise a human-readable diagnostic.
-     */
-    std::string initialiseBackend(const std::string& libp2pConfig);
+    DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p, std::string libp2pConfig);
 
     /// The vtable to hand to logosdelivery_install_service_discovery_plugin.
     const LdServiceDiscoveryPlugin* vtable() const { return &vtable_; }
 
 private:
+    /**
+     * @brief Brings libp2p up, once, on first use.
+     *
+     * Deliberately NOT done while registering the plugin. Registration happens
+     * inside this module's `createNode`, which logos-core dispatches on the Qt
+     * main thread -- and an outbound call from there cannot complete, because
+     * acquiring a token makes capability_module call `informModuleToken` back
+     * into this module, an inbound call needing the very thread we are
+     * occupying. Every call made from there is rejected at dispatch (verified:
+     * 80 probes over 20s, all rejected; the same calls succeed moments later
+     * from the discovery worker thread).
+     *
+     * So this runs from the plugin's `start` verb instead, which logos-delivery
+     * invokes on its own discovery thread with our main thread free -- and which
+     * is also exactly when libp2p is first needed.
+     *
+     * Calls libp2p's `createNode`, because that is the only point at which its
+     * kademlia can be given bootstrap peers: there is no call to add them
+     * afterwards, and without peers it can neither store a provider record nor
+     * answer a lookup. The config is the hardcoded logos.dev entry nodes with
+     * `libp2pConfig` merged over the top, so a node config can override or clear
+     * them. An already-created node is left alone -- libp2p reports "node
+     * already created" and another module may legitimately own it.
+     *
+     * @return empty on success, otherwise a human-readable diagnostic.
+     */
+    std::string ensureBackend();
+
     /// Criteria keys arrive as "svc:<id>" / "shard:<c>/<s>" / "cap:<x>".
     /// libp2p wants a bare service id, so the "svc:" prefix is stripped; other
     /// kinds pass through verbatim, which keeps advertise and lookup agreeing
@@ -84,6 +101,9 @@ private:
     static std::string toServiceId(const char* key);
 
     Libp2pModule* libp2p_;
+    std::string libp2pConfig_;
+    bool backendReady_;
+    std::string backendFailure_;
     LdServiceDiscoveryPlugin vtable_;
 
     // --- vtable trampolines; pluginCtx is always `this` ---------------------
