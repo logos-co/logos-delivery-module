@@ -2,12 +2,15 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+
+class DeliveryServiceDiscoveryPlugin;
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -295,7 +298,29 @@ private:
 
     std::mutex createNodeMutex;
 
+    // Non-null only when the node config asked for plugin-hosted kad discovery.
+    // Outlives every plugin call: logos-delivery releases the registration when
+    // the context is destroyed, which happens in this class's destructor.
+    std::unique_ptr<DeliveryServiceDiscoveryPlugin> discoPlugin;
+
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
+
+    /**
+     * @brief Brings libp2p_module up and installs the discovery vtable.
+     *
+     * Private, so it is not part of the module's exposed API: hosting the
+     * plugin is an implementation detail of how this module satisfies a node
+     * configured with `pluginKadDiscovery`, not something a caller drives.
+     *
+     * Runs inside createNode, after the context exists and before the node is
+     * started -- logos-delivery only accepts a registration while discovery is
+     * stopped, and refuses to start a node configured for plugin discovery
+     * without one.
+     *
+     * @param libp2pConfig Optional JSON handed to libp2p's own createNode.
+     * @return the failure reason, or empty on success.
+     */
+    std::string installServiceDiscoveryPlugin(const std::string& libp2pConfig);
 
     /**
      * @brief Global C callback used by liblogosdelivery to report async events.

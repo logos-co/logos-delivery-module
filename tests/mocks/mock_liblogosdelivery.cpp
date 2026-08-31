@@ -179,4 +179,18 @@ int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_scalar cb, 
     return RET_OK;
 }
 
+int logosdelivery_set_service_discovery_plugin(void* /*ctx*/, logosdelivery_scalar cb,
+                                               void* userData, uint64_t /*pluginPtr*/) {
+    LOGOS_CMOCK_RECORD("logosdelivery_set_service_discovery_plugin");
+    scalarOk("logosdelivery_set_service_discovery_plugin", cb, userData);
+    return RET_OK;
+}
+
+int logosdelivery_clear_service_discovery_plugin(void* /*ctx*/, logosdelivery_scalar cb,
+                                                 void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_clear_service_discovery_plugin");
+    scalarOk("logosdelivery_clear_service_discovery_plugin", cb, userData);
+    return RET_OK;
+}
+
 } // extern "C"

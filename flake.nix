@@ -11,7 +11,10 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.5";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
+    # Pinned to the head of the pluggable-discovery PR train (PR #4178,
+    # branch poc-discovery-plugin-6) until it lands on master: that branch is
+    # what carries the service-discovery plugin ABI and installs its header.
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poc-discovery-plugin-6&rev=be3717e654f2fc8220f845338dffd6a149e45926";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
