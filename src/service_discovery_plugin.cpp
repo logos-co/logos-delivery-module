@@ -398,8 +398,21 @@ int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t 
     if (rc != LD_DISCO_OK) {
         return rc;
     }
-    trace("%-22s OK             key=%s records=%zu", "discoLookup",
-          toServiceId(key).c_str(), r.value.is_array() ? r.value.size() : 0);
+    // Peer ids, not just the count: with more than one node advertising the
+    // same service the count alone cannot say whether we found a peer or only
+    // our own provider record.
+    std::string peers;
+    if (r.value.is_array()) {
+        for (const auto& rec : r.value) {
+            if (!rec.is_object() || !rec.contains("peerId")) continue;
+            const std::string id = rec["peerId"].get<std::string>();
+            if (!peers.empty()) peers += ",";
+            peers += id.size() > 12 ? id.substr(id.size() - 8) : id;
+        }
+    }
+    trace("%-22s OK             key=%s records=%zu peers=[%s]", "discoLookup",
+          toServiceId(key).c_str(), r.value.is_array() ? r.value.size() : 0,
+          peers.c_str());
     return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
 }
 
