@@ -327,20 +327,12 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
         }
     }
 
-    // libp2p's service discovery is started once here, with the node, and never
-    // stopped by us -- see cStart/cStop for why.
-    if (diagnostics.empty()) {
-        logos::CallError err;
-        const StdLogosResult r = libp2p_->discoStart(&err);
-        if (!err.ok()) {
-            diagnostics += "discoStart: " + err.code + ": " + err.message + "; ";
-        } else if (!r.success) {
-            diagnostics += "discoStart: " +
-                (r.error.empty() ? std::string("failed") : r.error) + "; ";
-        }
-        trace("libp2p discoStart        %s",
-              diagnostics.empty() ? "OK" : diagnostics.c_str());
-    }
+    // No discoStart call: createNode + start is the whole bring-up. Service
+    // discovery is mounted as an LPProtocol, so the switch's own start runs its
+    // `start` method -- which is also where kademlia bootstraps, and why a start
+    // with more than one bootstrap peer overruns libp2p's 10s call budget.
+    // Calling it again would only reach nim-libp2p's double-start guard
+    // ("Starting kad-disco twice") and return without doing anything.
 
     trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
           diagnostics.c_str());
@@ -357,13 +349,16 @@ int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBu
 {
     // Brings libp2p up on first use -- the first call that reaches us on the
     // discovery thread, which is where it can be contacted at all (see
-    // ensureBackend). libp2p's own discoStart happens there, once.
+    // ensureBackend). Beyond that this verb does not touch libp2p at all.
     //
-    // Beyond that this verb is a no-op, deliberately. libp2p's service discovery
-    // is a process-wide facility with a lifecycle of its own: it is mounted with
-    // the libp2p node and outlives any one delivery node. Driving it from here
-    // would mean a node stopping tears down discovery for every other consumer
-    // in the process, and a node restarting re-runs a bootstrap that is already
+    // Nothing needs starting: libp2p's createNode + start is the whole bring-up,
+    // and it leaves service discovery running, because discovery is an
+    // LPProtocol whose `start` the switch invokes when it starts.
+    //
+    // Nor should it be driven from here even if it could be. libp2p's discovery
+    // is a process-wide facility with a lifecycle of its own, outliving any one
+    // delivery node: a node stopping would tear it down for every other consumer
+    // in the process, and a node restarting would re-run a bootstrap already
     // done. logos-delivery's start/stop scopes ITS use of discovery -- which
     // interests are registered, which lookups run -- not the provider's
     // lifecycle.
@@ -381,8 +376,8 @@ int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBuf
 {
     // No-op, mirroring cStart: libp2p's discovery is shared and outlives this
     // node, so stopping it here would cut it out from under every other
-    // consumer. Interests registered by this node stay registered; unwinding
-    // those is what unregisterInterest is for.
+    // consumer -- and it was never ours to start. Interests registered by this
+    // node stay registered; unwinding those is what unregisterInterest is for.
     (void)ctx;
     (void)errBuf;
     (void)errBufLen;
