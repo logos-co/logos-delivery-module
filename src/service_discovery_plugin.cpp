@@ -7,6 +7,7 @@
 #include <ctime>
 
 #include <chrono>
+#include <iterator>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -21,22 +22,53 @@ namespace {
 // there is no call to add them later. These are the logos.dev preset's entry
 // nodes, copied from logos-delivery's networks_config.nim (cluster 3).
 //
+// Note the shape: libp2p wants the peer id SEPARATE from the transport
+// addresses ({peerId, addrs[]}, not a /p2p/-suffixed multiaddr string), because
+// nim-libp2p's FFI takes a Libp2pBootstrapNode of exactly that shape and parses
+// the two independently. Getting this wrong is worth avoiding carefully: the
+// Nim side raiseAsserts on an unparseable peer id rather than returning an
+// error.
+//
 // Hardcoded rather than derived: this module cannot read the preset the node
 // was configured with (logos-delivery resolves it internally and exposes no
 // getter), and libp2p wants the list before anything else happens. Revisit when
 // either side grows a way to pass the resolved entry nodes through.
-const char* const kLogosDevBootstrapNodes[] = {
-    "/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby",
-    "/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH",
-    "/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397",
-    "/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH",
-    "/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP",
-    "/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303/p2p/16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE",
+struct BootstrapPeer {
+    const char* peerId;
+    const char* addr;
+};
+
+const BootstrapPeer kLogosDevBootstrapNodes[] = {
+    {"16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby",
+     "/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303"},
+    {"16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH",
+     "/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303"},
+    {"16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397",
+     "/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303"},
+    {"16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH",
+     "/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303"},
+    {"16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP",
+     "/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303"},
+    {"16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE",
+     "/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303"},
 };
 
 // How long to wait for libp2p_module to start serving calls after it loads.
 // Generous because it has been observed taking longer than 20s, and because
 // giving up early is expensive: see the bail-out in ensureBackend.
+// How many of the above to actually hand over.
+//
+// One, because libp2p's own calls are capped at a fixed 10s (its callSync
+// deadline) and `libp2p_ctx_start` dials the bootstrap set within that budget:
+// measured here, one DNS-resolved peer takes ~8s and fits, two time out at
+// exactly 10s and the whole start fails. Raise this the moment that cap becomes
+// configurable -- one bootstrap peer is a single point of failure, and the only
+// reason to accept it is that two do not work at all.
+//
+// An operator who needs a different set can pass `libp2pConfig.bootstrapNodes`
+// in the node config, which replaces this wholesale.
+constexpr size_t kMaxBootstrapNodes = 1;
+
 constexpr std::chrono::seconds kBackendReadyTimeout{90};
 
 // Handed to logos-delivery in the vtable. It caps how long the node waits for
@@ -152,6 +184,7 @@ DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* lib
     : libp2p_(libp2p)
     , libp2pConfig_(std::move(libp2pConfig))
     , backendReady_(false)
+    , nodeCreated_(false)
     , vtable_{}
 {
     vtable_.abiVersion = LD_DISCO_ABI_VERSION;
@@ -221,8 +254,11 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     // node config can override the defaults (including with an empty list).
     nlohmann::json cfg = nlohmann::json::object();
     cfg["bootstrapNodes"] = nlohmann::json::array();
-    for (const char* addr : kLogosDevBootstrapNodes) {
-        cfg["bootstrapNodes"].push_back(addr);
+    for (size_t i = 0; i < std::size(kLogosDevBootstrapNodes) && i < kMaxBootstrapNodes; ++i) {
+        cfg["bootstrapNodes"].push_back(nlohmann::json{
+            {"peerId", kLogosDevBootstrapNodes[i].peerId},
+            {"addrs", nlohmann::json::array({kLogosDevBootstrapNodes[i].addr})},
+        });
     }
     cfg["mountKad"] = true;
     cfg["mountServiceDiscovery"] = true;
@@ -236,7 +272,13 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
         }
     }
 
-    if (alreadyHasNode) {
+    if (nodeCreated_) {
+        // A previous attempt already built it with our config; only `start`
+        // failed. Re-running createNode would be refused and would wrongly
+        // report the bootstrap peers as lost.
+        trace("libp2p createNode        ALREADY DONE  bootstrapNodes=%zu",
+              cfg["bootstrapNodes"].size());
+    } else if (alreadyHasNode) {
         // Someone else built it (or a previous attempt of ours did). Its options
         // are already fixed, so our bootstrap peers cannot land -- say so
         // plainly rather than letting discovery look configured when it is not.
@@ -249,6 +291,7 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
         trace("libp2p createNode        %s  bootstrapNodes=%zu",
               (!err.ok() ? "TRANSPORT-ERR" : (r.success ? "OK" : "REFUSED")),
               cfg["bootstrapNodes"].size());
+        nodeCreated_ = err.ok() && r.success;
         if (!err.ok()) {
             diagnostics += "createNode: " + err.code + ": " + err.message + "; ";
         } else if (!r.success) {
