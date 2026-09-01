@@ -103,6 +103,7 @@ private:
     Libp2pModule* libp2p_;
     std::string libp2pConfig_;
     bool backendReady_;
+    bool nodeCreated_;
     std::string backendFailure_;
     LdServiceDiscoveryPlugin vtable_;
 
