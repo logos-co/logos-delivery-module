@@ -327,6 +327,21 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
         }
     }
 
+    // libp2p's service discovery is started once here, with the node, and never
+    // stopped by us -- see cStart/cStop for why.
+    if (diagnostics.empty()) {
+        logos::CallError err;
+        const StdLogosResult r = libp2p_->discoStart(&err);
+        if (!err.ok()) {
+            diagnostics += "discoStart: " + err.code + ": " + err.message + "; ";
+        } else if (!r.success) {
+            diagnostics += "discoStart: " +
+                (r.error.empty() ? std::string("failed") : r.error) + "; ";
+        }
+        trace("libp2p discoStart        %s",
+              diagnostics.empty() ? "OK" : diagnostics.c_str());
+    }
+
     trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
           diagnostics.c_str());
     backendReady_ = diagnostics.empty();
@@ -340,29 +355,39 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
 
 int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBufLen)
 {
-    // First call on the discovery thread, so this is where libp2p can be
-    // reached at all -- see ensureBackend.
+    // Brings libp2p up on first use -- the first call that reaches us on the
+    // discovery thread, which is where it can be contacted at all (see
+    // ensureBackend). libp2p's own discoStart happens there, once.
+    //
+    // Beyond that this verb is a no-op, deliberately. libp2p's service discovery
+    // is a process-wide facility with a lifecycle of its own: it is mounted with
+    // the libp2p node and outlives any one delivery node. Driving it from here
+    // would mean a node stopping tears down discovery for every other consumer
+    // in the process, and a node restarting re-runs a bootstrap that is already
+    // done. logos-delivery's start/stop scopes ITS use of discovery -- which
+    // interests are registered, which lookups run -- not the provider's
+    // lifecycle.
     const std::string failure = LD_SELF(ctx)->ensureBackend();
     if (!failure.empty()) {
         trace("libp2p backend           UNAVAILABLE  %s", failure.c_str());
         writeErr(errBuf, errBufLen, "libp2p backend unavailable: " + failure);
         return LD_DISCO_ERROR;
     }
-
-    logos::CallError err;
-    const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStart(&err);
-    const int rc = settle("discoStart", r, err, errBuf, errBufLen);
-    if (rc == LD_DISCO_OK) trace("%-22s OK", "discoStart");
-    return rc;
+    trace("%-22s OK (backend already running)", "start");
+    return LD_DISCO_OK;
 }
 
 int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBufLen)
 {
-    logos::CallError err;
-    const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStop(&err);
-    const int rc = settle("discoStop", r, err, errBuf, errBufLen);
-    if (rc == LD_DISCO_OK) trace("%-22s OK", "discoStop");
-    return rc;
+    // No-op, mirroring cStart: libp2p's discovery is shared and outlives this
+    // node, so stopping it here would cut it out from under every other
+    // consumer. Interests registered by this node stay registered; unwinding
+    // those is what unregisterInterest is for.
+    (void)ctx;
+    (void)errBuf;
+    (void)errBufLen;
+    trace("%-22s OK (no-op; libp2p discovery is shared)", "stop");
+    return LD_DISCO_OK;
 }
 
 int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t limit,
@@ -423,6 +448,11 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStartAdvertising(
         toServiceId(key), serviceData, advertisement, &err);
+    // Sizes on every outcome: nim-libp2p's entry point rejects a missing
+    // serviceData outright (failIfDataMissing), so an empty payload here is the
+    // first thing to rule out when this is refused.
+    trace("%-22s ->  key=%s dataLen=%zu advertLen=%zu", "discoStartAdvertising",
+          toServiceId(key).c_str(), serviceData.size(), advertisement.size());
     const int rc = settle("discoStartAdvertising", r, err, errBuf, errBufLen);
     if (rc == LD_DISCO_OK)
         trace("%-22s OK             key=%s data=%s", "discoStartAdvertising",
