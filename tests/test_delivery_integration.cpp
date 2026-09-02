@@ -422,13 +422,13 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
 
     // On success the library registers the membership: distinct request,
     // typed identity args populated from the node's RLN bring-up config,
-    // rate limit positional (conf default 1), options a flat JSON object.
+    // options the module's RegistryOptions array with the conf rate limit
+    // (default 1) folded in as a decimal string.
     LOGOS_ASSERT_TRUE(waitForRlnRequestOp("register_membership"));
     const auto& reg = delivery_test_events::g_lastRlnRequest;
     LOGOS_ASSERT_FALSE(reg.registryId.empty());
     LOGOS_ASSERT_FALSE(reg.rlnIdentifier.empty());
-    LOGOS_ASSERT_TRUE(reg.rateLimit > 0);
-    LOGOS_ASSERT_EQ(reg.optionsJson, std::string("{}"));
+    LOGOS_ASSERT_EQ(reg.optionsJson, std::string(R"([{"key":"rate_limit","value":"1"}])"));
     LOGOS_ASSERT_TRUE(
         impl.rlnRespond(reg.reqId, R"({"state":"pending","registry_id":"logos:testnet:0"})")
             .success);

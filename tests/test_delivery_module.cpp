@@ -528,14 +528,13 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(2));
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.register_membership(3, "reg", "rln-id", 10,
-                                                       R"({"funding_holding_account_id":"acct"})", ud);
+    delivery_test_rln::g_callbacks.register_membership(
+        3, "reg", "rln-id", R"([{"key":"rate_limit","value":"10"}])", ud);
     LOGOS_ASSERT_EQ(e.op, std::string("register_membership"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(3));
     LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
     LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
-    LOGOS_ASSERT_EQ(e.rateLimit, static_cast<int64_t>(10));
-    LOGOS_ASSERT_EQ(e.optionsJson, std::string(R"({"funding_holding_account_id":"acct"})"));
+    LOGOS_ASSERT_EQ(e.optionsJson, std::string(R"([{"key":"rate_limit","value":"10"}])"));
 
     delivery_test_events::resetRlnRequestEvent();
     delivery_test_rln::g_callbacks.get_membership_state(4, "reg", "rln-id", ud);
