@@ -2,12 +2,15 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+
+class RlnBridge;
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -379,22 +382,18 @@ logos_events:
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
     /**
-     * @brief RLN request events: the delivery library requests an RLN
-     * operation from the external RLN module, one event per ABI function
+     * @brief RLN request events, one per ABI function
      * (`liblogosdelivery_rln.h`).
      *
-     * Answer each via @ref rlnRespond with the same `reqId`. Event names and
-     * argument shapes track the RLN module's own methods (register_membership
-     * maps to the module's `register`); `configJson` / `optionsJson` /
-     * `proofJson` are opaque JSON owned by the RLN module's wire schema.
-     * `rateLimit` is register's positional rate limit; `epochTimestamp` is the
-     * ABI's epoch/quota timestamp (Unix seconds), while the trailing
-     * `timestamp` is the local emission time, as on every other event.
+     * Answer each via @ref rlnRespond with the same `reqId`. The JSON args are
+     * opaque to this module (RLN module wire schema). `epochTimestamp` is the
+     * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
+     * local emission time, as on every other event.
      */
     void rlnStartRequest(int64_t reqId, const std::string& configJson, int64_t timestamp);
     void rlnStopRequest(int64_t reqId, int64_t timestamp);
     void rlnRegisterRequest(int64_t reqId, const std::string& registryId,
-                            const std::string& rlnIdentifier, int64_t rateLimit,
+                            const std::string& rlnIdentifier,
                             const std::string& optionsJson, int64_t timestamp);
     void rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
                                       const std::string& rlnIdentifier, int64_t timestamp);
@@ -412,6 +411,11 @@ logos_events:
 /** @} */
 
 private:
+    // In-process RLN responder (src/rln_bridge.h). Constructed and init()ed in
+    // the constructor (module context thread); serves only after the node
+    // config enables it ("rln-in-process") in createNode.
+    std::unique_ptr<RlnBridge> rlnBridge;
+
     // Raw FFI context: what every call and the event registry take.
     void* deliveryCtx;
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
@@ -446,7 +450,7 @@ private:
     static void rln_start_callback(uint64_t reqId, const char* configJson, void* userData);
     static void rln_stop_callback(uint64_t reqId, void* userData);
     static void rln_register_callback(uint64_t reqId, const char* registryId,
-                                      const char* rlnIdentifier, uint64_t rateLimit,
+                                      const char* rlnIdentifier,
                                       const char* optionsJson, void* userData);
     static void rln_get_membership_state_callback(uint64_t reqId, const char* registryId,
                                                   const char* rlnIdentifier, void* userData);

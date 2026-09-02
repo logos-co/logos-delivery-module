@@ -13,6 +13,12 @@
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     # TODO: repoint at master once impl-plugable-rln-api-module (RLN C ABI) merges.
     logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=impl-plugable-rln-api-module";
+    # The RLN API module. The input name is load-bearing and cannot be chosen
+    # freely: logos-module-builder resolves each metadata.json#dependencies
+    # entry as the flake input of the SAME name and generates bindings from
+    # its published <name>.lidl, and logos-core auto-loads it by that module
+    # name at runtime. Pinned to feat/lip-alignment (wire 0.7.x).
+    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=3e7c1c71ad86044604927e52237bcde92901eb09&dir=logos-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

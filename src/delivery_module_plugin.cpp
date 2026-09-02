@@ -16,6 +16,11 @@
 #include <boost/beast/core/detail/base64.hpp>
 
 #include "api_call_handler.h"
+#include "rln_bridge.h"
+
+// Generated at build time from metadata.json#dependencies; defines the
+// LogosModules aggregate behind LogosModuleContext::modules().
+#include "logos_sdk.h"
 extern "C" {
 #include <liblogosdelivery.h>
 // Kernel tier: unstable, may change without a deprecation cycle. Only
@@ -120,6 +125,9 @@ void DeliveryModuleImpl::rln_start_callback(uint64_t reqId, const char* configJs
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN start request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->start(reqId, toStringOrEmpty(configJson));
+    }
     try {
         impl->rlnStartRequest(static_cast<int64_t>(reqId), toStringOrEmpty(configJson),
                               currentTimestampNs());
@@ -134,6 +142,9 @@ void DeliveryModuleImpl::rln_stop_callback(uint64_t reqId, void* userData)
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN stop request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->stop(reqId);
+    }
     try {
         impl->rlnStopRequest(static_cast<int64_t>(reqId), currentTimestampNs());
     } catch (...) {
@@ -142,17 +153,21 @@ void DeliveryModuleImpl::rln_stop_callback(uint64_t reqId, void* userData)
 }
 
 void DeliveryModuleImpl::rln_register_callback(uint64_t reqId, const char* registryId,
-                                               const char* rlnIdentifier, uint64_t rateLimit,
+                                               const char* rlnIdentifier,
                                                const char* optionsJson, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN register_membership request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->registerMembership(reqId, toStringOrEmpty(registryId),
+                                            toStringOrEmpty(rlnIdentifier),
+                                            toStringOrEmpty(optionsJson));
+    }
     try {
         impl->rlnRegisterRequest(static_cast<int64_t>(reqId),
                                  toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
-                                 static_cast<int64_t>(rateLimit),
                                  toStringOrEmpty(optionsJson), currentTimestampNs());
     } catch (...) {
         fprintf(stderr, "DeliveryModuleImpl: dropped RLN register_membership request\n");
@@ -166,6 +181,10 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, const
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN get_membership_state request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->getMembershipState(reqId, toStringOrEmpty(registryId),
+                                            toStringOrEmpty(rlnIdentifier));
+    }
     try {
         impl->rlnGetMembershipStateRequest(static_cast<int64_t>(reqId),
                                            toStringOrEmpty(registryId),
@@ -183,6 +202,10 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, const char
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN get_epoch_quota request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->getEpochQuota(reqId, toStringOrEmpty(registryId),
+                                       toStringOrEmpty(rlnIdentifier), timestamp);
+    }
     try {
         impl->rlnGetEpochQuotaRequest(static_cast<int64_t>(reqId),
                                       toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
@@ -200,6 +223,11 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN generate_proof request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->generateProof(reqId, toStringOrEmpty(registryId),
+                                       toStringOrEmpty(rlnIdentifier),
+                                       toStringOrEmpty(signalHex), timestamp);
+    }
     try {
         impl->rlnGenerateProofRequest(static_cast<int64_t>(reqId),
                                       toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
@@ -219,6 +247,12 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
     if (!impl) return;
     fprintf(stderr, "DeliveryModuleImpl: RLN validate_proof request, reqId: %llu\n",
             static_cast<unsigned long long>(reqId));
+    if (impl->rlnBridge->enabled()) {
+        impl->rlnBridge->validateProof(reqId, toStringOrEmpty(registryId),
+                                       toStringOrEmpty(rlnIdentifier),
+                                       toStringOrEmpty(signalHex), timestamp,
+                                       toStringOrEmpty(proofJson));
+    }
     try {
         impl->rlnValidateProofRequest(static_cast<int64_t>(reqId),
                                       toStringOrEmpty(registryId), toStringOrEmpty(rlnIdentifier),
@@ -229,9 +263,14 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
     }
 }
 
-DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHandle(nullptr)
+DeliveryModuleImpl::DeliveryModuleImpl()
+    : rlnBridge(std::make_unique<RlnBridge>(&modules().liblogos_rln_module))
+    , deliveryCtx(nullptr)
+    , deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
+    // Owner-thread requirement — see rln_bridge.h's threading note.
+    rlnBridge->init();
     fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
 }
 
@@ -391,7 +430,8 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // messagingOverrides (created if needed) for the layered shapes, top level
 // for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
-                                                      const std::string& persistencePath)
+                                                      const std::string& persistencePath,
+                                                      bool& rlnInProcess)
 {
     nlohmann::json cfgObj;
     try {
@@ -404,6 +444,14 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     if (!cfgObj.is_object()) {
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
         return std::nullopt;
+    }
+
+    // Consume the module-level key before any shape sniffing below sees it:
+    // it is for this module, not the delivery library's config parser.
+    rlnInProcess = false;
+    if (auto key = findKey(cfgObj, {"rlninprocess", "rln-in-process"})) {
+        rlnInProcess = cfgObj[*key].is_boolean() && cfgObj[*key].get<bool>();
+        cfgObj.erase(*key);
     }
 
     if (!persistencePath.empty()) {
@@ -446,9 +494,17 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
+    bool rlnInProcess = false;
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnInProcess);
     if (!cfgWithDefaults) {
         return {false, {}, "Invalid JSON config"};
+    }
+    if (rlnInProcess) {
+        const std::string failure = rlnBridge->enable();
+        if (!failure.empty()) {
+            return {false, {}, "rln in-process setup failed: " + failure};
+        }
+        fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
@@ -559,7 +615,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // global (no ctx argument); with two live module instances the second
     // registration would clobber the first, so this relies on the host running
     // a single delivery module instance per process. The struct is static so
-    // it outlives the node; one typed slot per ABI function.
+    // it outlives the node.
     static const LogosDeliveryRlnCallbacks rlnCallbacks = {
         .start = rln_start_callback,
         .stop = rln_stop_callback,
@@ -570,8 +626,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         .validate_proof = rln_validate_proof_callback,
     };
     if (logosdelivery_rln_set_callbacks(&rlnCallbacks, this) != 0) {
-        // Not fatal: without a registered surface the library fails RLN ops
-        // itself; everything non-RLN keeps working.
+        // Not fatal: everything non-RLN keeps working.
         fprintf(stderr, "DeliveryModuleImpl: failed to register RLN callbacks\n");
     }
 

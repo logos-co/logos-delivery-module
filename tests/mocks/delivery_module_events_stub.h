@@ -30,7 +30,6 @@ struct RlnRequestEvent {
     std::string configJson;
     std::string optionsJson;
     std::string proofJson;
-    int64_t rateLimit = 0;
     int64_t epochTimestamp = 0;
     int64_t timestamp = 0;
 };

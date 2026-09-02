@@ -53,7 +53,7 @@ void DeliveryModuleImpl::rlnStopRequest(int64_t reqId, int64_t timestamp) {
 }
 
 void DeliveryModuleImpl::rlnRegisterRequest(int64_t reqId, const std::string& registryId,
-                                            const std::string& rlnIdentifier, int64_t rateLimit,
+                                            const std::string& rlnIdentifier,
                                             const std::string& optionsJson, int64_t timestamp) {
     auto& e = delivery_test_events::g_lastRlnRequest;
     e = {};
@@ -61,7 +61,6 @@ void DeliveryModuleImpl::rlnRegisterRequest(int64_t reqId, const std::string& re
     e.reqId = reqId;
     e.registryId = registryId;
     e.rlnIdentifier = rlnIdentifier;
-    e.rateLimit = rateLimit;
     e.optionsJson = optionsJson;
     e.timestamp = timestamp;
 }
