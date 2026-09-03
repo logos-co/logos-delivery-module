@@ -301,12 +301,17 @@ public:
      * @brief Completes an outstanding RLN request (see the `rln*Request` events).
      *
      * The delivery library outsources RLN operations to an external RLN
-     * module: whenever it needs one, this module emits the matching
-     * `rln*Request` event. Whoever handles that event answers by calling this
-     * method with the same `reqId` and a `resultJson` reply envelope
-     * (`{"ok": ...}` / `{"err": {"kind": ..., "message": ...}}`). The JSON
-     * passes through this module verbatim — the wire schema is owned by the
-     * RLN module and the delivery library, not modelled here.
+     * module; this module facilitates that message passing. When the delivery
+     * library makes an RLN request, this module emits the matching
+     * `rln*Request` event. This method takes the reqId of the original
+     * request along with the response and passes it on to the library
+     * verbatim — the wire schema is owned by the RLN module and the delivery
+     * library, not modelled here.
+     *
+     * On a node running lez RLN the in-process bridge (see
+     * @ref rlnBridgeEnable) answers each request itself; only the first
+     * response per reqId is accepted, so a second caller of this method is
+     * rejected as a duplicate.
      *
      * There is no response deadline to manage on this side: if no response
      * arrives in time, the delivery library synthesizes a TRANSIENT failure
@@ -316,10 +321,22 @@ public:
      * @param reqId Request id from the `rln*Request` event. Ids >= 2^63 appear
      *        negative here (int64 view of the library's uint64 id); they are
      *        passed through bit-exactly, so echo them back unchanged.
-     * @param resultJson UTF-8 JSON reply envelope, passed through verbatim.
-     * @return `true` when the response was accepted, or error details.
      */
     StdLogosResult rlnRespond(int64_t reqId, const std::string& resultJson);
+
+    /**
+     * @brief Enables the in-process RLN bridge.
+     *
+     * Once enabled, each `rln*Request` is answered inside this module: the
+     * bridge's worker threads call the co-loaded `liblogos_rln_module` and
+     * pass its reply back unchanged. The events keep emitting for
+     * observability, but an external responder must not also answer an
+     * enabled node: its second response per reqId is rejected. Idempotent;
+     * call any time before @ref start. @ref createNode does this
+     * automatically when the config's `rln-relay-lez` is true. Calling it
+     * directly is mainly for test purposes.
+     */
+    StdLogosResult rlnBridgeEnable();
 
     std::string name() const { return "delivery_module"; }
 
@@ -410,10 +427,12 @@ logos_events:
 
 /** @} */
 
+protected:
+    //override to init RLN bridge
+    void onContextReady() override;
+
 private:
-    // In-process RLN responder (src/rln_bridge.h). Constructed and init()ed in
-    // the constructor (module context thread); serves only after the node
-    // config enables it ("rln-in-process") in createNode.
+    // In-process RLN responder (src/rln_bridge.h). 
     std::unique_ptr<RlnBridge> rlnBridge;
 
     // Raw FFI context: what every call and the event registry take.
