@@ -66,13 +66,18 @@ LOGOS_TEST(start_fails_without_createNode) {
     LOGOS_ASSERT_FALSE(impl.start().success);
 }
 
-LOGOS_TEST(rlnBridgeEnable_succeeds_and_is_idempotent) {
+// Without a framework the context is never handed over, so enabling must
+// refuse before touching modules() rather than serve blind.
+// (The success path runs in tests/e2e/run.sh against the real daemon.)
+LOGOS_TEST(rlnBridgeEnable_fails_without_module_context) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     DeliveryModuleImpl impl;
 
-    LOGOS_ASSERT_TRUE(impl.rlnBridgeEnable().success);
-    LOGOS_ASSERT_TRUE(impl.rlnBridgeEnable().success); // idempotent
+    StdLogosResult r = impl.rlnBridgeEnable();
+    LOGOS_ASSERT_FALSE(r.success);
+    LOGOS_ASSERT_EQ(r.error, std::string("module context not ready"));
+}
 
 
 LOGOS_TEST(start_succeeds_after_createNode) {
