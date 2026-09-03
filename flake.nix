@@ -11,7 +11,15 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.5";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
+    # Pinned to the head of the pluggable-discovery PR train (PR #4178,
+    # branch poc-discovery-plugin-6) until it lands on master: that branch is
+    # what carries the service-discovery plugin ABI and installs its header.
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poc-discovery-plugin-7&rev=59158f043ec265e07cb1119deebb8799f1424f04";
+    # The input name must match the metadata.json#dependencies entry verbatim:
+    # logos-module-builder resolves each declared dependency by looking up a
+    # flake input of the same name (buildCppPlugin.nix, `moduleInputs`) and uses
+    # its headers-qt/headers-std package for codegen.
+    libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

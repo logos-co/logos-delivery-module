@@ -16,6 +16,11 @@
 #include <boost/beast/core/detail/base64.hpp>
 
 #include "api_call_handler.h"
+#include "service_discovery_plugin.h"
+
+// Generated at build time from metadata.json#dependencies; defines the
+// LogosModules aggregate behind LogosModuleContext::modules().
+#include "logos_sdk.h"
 extern "C" {
 #include <liblogosdelivery.h>
 // Kernel tier: unstable, may change without a deprecation cycle. Only
@@ -277,8 +282,81 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // path goes where each config shape accepts it: kernelConf when present,
 // messagingOverrides (created if needed) for the layered shapes, top level
 // for the legacy flat shape.
+// What createNode learned about discovery from the config it was handed.
+struct DiscoveryPluginRequest {
+    bool enabled{false};
+    // Optional JSON forwarded to libp2p_module's own createNode. Ours, not
+    // logos-delivery's, so it is stripped from the config before the node
+    // parser -- which rejects keys it does not recognise -- ever sees it.
+    std::string libp2pConfig;
+};
+
+// Locates the object that carries kernel/messaging settings for this config
+// shape. Mirrors applyConfigDefaults: kernelConf when present, messagingOverrides
+// for the layered shapes, top level for the legacy flat shape.
+static nlohmann::json* discoveryTarget(nlohmann::json& cfgObj)
+{
+    const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
+    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
+        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
+    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
+        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
+        return &cfgObj[*kernelConfKey];
+    }
+    if (kernelEntry) {
+        return nullptr;
+    }
+    if (isFlatShape(cfgObj)) {
+        return &cfgObj;
+    }
+    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
+    if (!overridesKey) {
+        return nullptr;
+    }
+    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
+}
+
+// Reads the plugin-discovery request out of the config and normalises it.
+//
+// Turning `pluginKadDiscovery` on also turns `enableKadDiscovery` off: the two
+// hosts of the same kademlia protocol are mutually exclusive, and a node would
+// otherwise be refused with an exclusivity error whenever a network preset had
+// quietly enabled the in-process one. logos-delivery's messaging-layer merge
+// already does this, but a kernelConf goes straight to the conf builder with no
+// merge step, so it is done here for every shape.
+static DiscoveryPluginRequest resolveDiscoveryPlugin(nlohmann::json& cfgObj)
+{
+    DiscoveryPluginRequest request;
+
+    if (auto libp2pKey = findKey(cfgObj, {"libp2pconfig"})) {
+        const nlohmann::json& node = cfgObj[*libp2pKey];
+        request.libp2pConfig = node.is_string() ? node.get<std::string>() : node.dump();
+        cfgObj.erase(*libp2pKey);
+    }
+
+    nlohmann::json* target = discoveryTarget(cfgObj);
+    if (!target) {
+        return request;
+    }
+
+    auto pluginKey = findKey(*target, {"pluginkaddiscovery", "plugin-kad-discovery"});
+    if (!pluginKey || !(*target)[*pluginKey].is_boolean()
+        || !(*target)[*pluginKey].get<bool>()) {
+        return request;
+    }
+
+    request.enabled = true;
+    if (auto enableKey = findKey(*target, {"enablekaddiscovery", "enable-kad-discovery"})) {
+        (*target)[*enableKey] = false;
+    } else {
+        (*target)["enableKadDiscovery"] = false;
+    }
+    return request;
+}
+
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
-                                                      const std::string& persistencePath)
+                                                      const std::string& persistencePath,
+                                                      DiscoveryPluginRequest& discovery)
 {
     nlohmann::json cfgObj;
     try {
@@ -292,6 +370,10 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
         return std::nullopt;
     }
+
+    // Before anything else: this strips our own `libp2pConfig` key, which the
+    // node parser would reject as unrecognised.
+    discovery = resolveDiscoveryPlugin(cfgObj);
 
     if (!persistencePath.empty()) {
         nlohmann::json* target = &cfgObj;
@@ -333,7 +415,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
+    DiscoveryPluginRequest discovery;
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), discovery);
     if (!cfgWithDefaults) {
         return {false, {}, "Invalid JSON config"};
     }
@@ -440,7 +523,56 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
         }
     }
+
+    if (discovery.enabled) {
+        const std::string failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
+        if (!failure.empty()) {
+            // A node configured for plugin discovery cannot start without a
+            // registered plugin, so a half-built context is worse than none:
+            // tear it down and report, rather than failing later at start().
+            discoPlugin.reset();
+            logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
+            deliveryCtxHandle = nullptr;
+            deliveryCtx = nullptr;
+            return {false, {}, "service discovery plugin setup failed: " + failure};
+        }
+    }
+
     return {true, {}};
+}
+
+std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string& libp2pConfig)
+{
+    if (!deliveryCtx) {
+        return "context not initialized";
+    }
+
+    // libp2p is NOT contacted here: this runs on the Qt main thread inside an
+    // inbound createNode dispatch, from which outbound calls cannot complete.
+    // The plugin brings it up on its first verb instead, on the discovery
+    // thread -- see DeliveryServiceDiscoveryPlugin::ensureBackend.
+    discoPlugin =
+        std::make_unique<DeliveryServiceDiscoveryPlugin>(&modules().libp2p_module, libp2pConfig);
+
+    // The vtable is borrowed for the duration of the call and copied by the
+    // node, but discoPlugin owns the object every entry point dispatches on,
+    // so it must outlive the context -- hence a member, not a local.
+    const StdLogosResult installed = callApiRetVoid(
+        "install service discovery plugin", CALLBACK_TIMEOUT,
+        [this](void* ticket) {
+            return logosdelivery_install_service_discovery_plugin(
+                deliveryCtx,
+                discoPlugin->vtable(),
+                static_cast<DeliveryScalarFn>(scalarTrampoline),
+                ticket);
+        });
+
+    if (!installed.success) {
+        return installed.error;
+    }
+
+    fprintf(stderr, "DeliveryModuleImpl: service discovery plugin installed\n");
+    return {};
 }
 
 StdLogosResult DeliveryModuleImpl::start()
