@@ -264,14 +264,27 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
 }
 
 DeliveryModuleImpl::DeliveryModuleImpl()
-    : rlnBridge(std::make_unique<RlnBridge>(&modules().liblogos_rln_module))
+    : rlnBridge(std::make_unique<RlnBridge>(&modules().liblogos_rln_module)) //rlnBridge constructed with pointer to client which communicates with the RLN Module (which needs to be co-loaded in logoscore)
     , deliveryCtx(nullptr)
     , deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
+}
+
+void DeliveryModuleImpl::onContextReady()
+{
     // Owner-thread requirement — see rln_bridge.h's threading note.
     rlnBridge->init();
-    fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
+}
+
+StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
+{
+    const std::string err = rlnBridge->enable();
+    if (!err.empty()) {
+        return {false, {}, err};
+    }
+    fprintf(stderr, "DeliveryModuleImpl: rln bridge enabled (in-process responder)\n");
+    return {true, {}};
 }
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
@@ -424,6 +437,31 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
     return false;
 }
 
+// Locates the object that carries kernel/messaging settings for this config
+// shape: kernelConf when present, messagingOverrides for the layered shapes,
+// top level for the legacy flat shape.
+static nlohmann::json* configTarget(nlohmann::json& cfgObj)
+{
+    const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
+    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
+        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
+    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
+        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
+        return &cfgObj[*kernelConfKey];
+    }
+    if (kernelEntry) {
+        return nullptr;
+    }
+    if (isFlatShape(cfgObj)) {
+        return &cfgObj;
+    }
+    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
+    if (!overridesKey) {
+        return nullptr;
+    }
+    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
+}
+
 // Defaults the node's storage directory to the host's per-instance path, so
 // side-by-side instances don't share upstream's cwd-relative "./data". The
 // path goes where each config shape accepts it: kernelConf when present,
@@ -446,12 +484,12 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
-    // Consume the module-level key before any shape sniffing below sees it:
-    // it is for this module, not the delivery library's config parser.
     rlnInProcess = false;
-    if (auto key = findKey(cfgObj, {"rlninprocess", "rln-in-process"})) {
-        rlnInProcess = cfgObj[*key].is_boolean() && cfgObj[*key].get<bool>();
-        cfgObj.erase(*key);
+    if (nlohmann::json* target = configTarget(cfgObj)) {
+        if (auto lezKey = findKey(*target, {"rlnrelaylez", "rln-relay-lez"})) {
+            rlnInProcess = (*target)[*lezKey].is_boolean()
+                && (*target)[*lezKey].get<bool>();
+        }
     }
 
     if (!persistencePath.empty()) {
@@ -975,7 +1013,7 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
     }
 
     // A negative reqId is the int64 view of a library id >= 2^63; the cast
-    // below restores the original bit pattern, so it passes through unchanged.
+    // below restores the original bit pattern.
     // resultJson passes through verbatim (opaque JSON, RLN module's schema).
     // A non-zero return means the reqId is unknown — typically the request
     // already timed out library-side and was answered with a synthetic

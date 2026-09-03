@@ -2,9 +2,9 @@
 
 // In-process RLN responder: serves the delivery library's rln* callbacks by
 // calling the co-loaded liblogos_rln_module and feeding each reply into
-// logosdelivery_rln_response. Enabled per node config ("rln-in-process");
-// when off, an external responder answers the rln*Request events instead
-// (docs/rln.md).
+// logosdelivery_rln_response. createNode enables it whenever the node config
+// runs lez RLN ("rln-relay-lez"); the rln*Request events keep emitting
+// either way, for observability (docs/rln.md).
 //
 // Two worker lanes, so a slow registry operation never delays proof
 // validation on the message hot path:
@@ -15,10 +15,11 @@
 //     typed client. These answer in milliseconds; the delivery library's own
 //     10 s budget for them expires before the client's default would.
 //
-// Threading: init() must run on the module context thread before its loop
-// pumps — that thread becomes the lp client's owner. The op entry points only
-// copy arguments and enqueue, safe from any thread (the delivery library
-// fires its callbacks on foreign threads).
+// Threading: init() is the second-phase constructor. The module context is
+// not yet ready while constructing, so init() runs from onContextReady(),
+// and the thread that runs it becomes the lp client's owner. The op entry
+// points only copy arguments and enqueue — safe from any thread (the
+// delivery library fires its callbacks on foreign threads).
 
 #include <atomic>
 #include <condition_variable>
@@ -42,7 +43,8 @@ public:
 
     void init();
 
-    // Start serving (idempotent). Returns an error string, or empty.
+    // Enable answering of RLN requests in-process
+    // Returns an error string or empty on success
     std::string enable();
     bool enabled() const { return m_enabled.load(std::memory_order_acquire); }
 

@@ -66,6 +66,15 @@ LOGOS_TEST(start_fails_without_createNode) {
     LOGOS_ASSERT_FALSE(impl.start().success);
 }
 
+LOGOS_TEST(rlnBridgeEnable_succeeds_and_is_idempotent) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    DeliveryModuleImpl impl;
+
+    LOGOS_ASSERT_TRUE(impl.rlnBridgeEnable().success);
+    LOGOS_ASSERT_TRUE(impl.rlnBridgeEnable().success); // idempotent
+
+
 LOGOS_TEST(start_succeeds_after_createNode) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
