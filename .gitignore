@@ -6,8 +6,9 @@ lib/*
 result
 result-*
 
-# scripts/run-node.sh work dir: built artifacts, installed modules, node data
-.run/
+# Local-only helpers: run scripts, cluster experiments, scratch configs. Never
+# part of the module; keep anything that is not implementation here.
+.local/
 
 # Doc-test output: generated artifacts are disposable, but keep the rendered
 # .md and the UI screenshots that the docs embed. (report.html is published by

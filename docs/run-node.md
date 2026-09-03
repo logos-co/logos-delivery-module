@@ -11,21 +11,6 @@ or HTTP API — interaction is via the `logoscore` CLI. You can run it three way
 
 All three connect the node to the `logos.test` fleet by default.
 
-To do the Nix route in one command instead of by hand, use
-[`scripts/run-node.sh`](../scripts/run-node.sh) — it builds what is missing,
-installs the module beside `capability_module`, boots the daemon and creates and
-starts the node:
-
-```bash
-scripts/run-node.sh up                                  # conf/logos-test.json
-scripts/run-node.sh up -c conf/logos-test-plugin-disco.json
-scripts/run-node.sh status
-scripts/run-node.sh down --clean
-```
-
-It loads `libp2p_module` automatically when the config asks for plugin-hosted
-kademlia discovery. Everything it creates lives in `.run/`.
-
 ## With Docker
 
 ### Prerequisites
