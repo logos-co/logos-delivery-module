@@ -334,6 +334,25 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     // Calling it again would only reach nim-libp2p's double-start guard
     // ("Starting kad-disco twice") and return without doing anything.
 
+    // Report libp2p's own identity and listen addresses. Without this there is
+    // no way to learn them: they belong to the provider, not to the delivery
+    // node, and nothing else in the stack prints them -- which makes pointing a
+    // second node's bootstrap set at this one impossible.
+    if (diagnostics.empty()) {
+        // Field names are capitalised on libp2p's side ("PeerId", "Multiaddrs");
+        // anything else comes back as "unknown field".
+        for (const char* field : {"PeerId", "Multiaddrs"}) {
+            logos::CallError err;
+            const StdLogosResult r = libp2p_->getNodeInfo(field, &err);
+            if (!err.ok() || !r.success) {
+                continue;
+            }
+            const std::string v =
+                r.value.is_string() ? r.value.get<std::string>() : r.value.dump();
+            trace("libp2p %-18s %s", field, v.c_str());
+        }
+    }
+
     trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
           diagnostics.c_str());
     backendReady_ = diagnostics.empty();
@@ -425,8 +444,19 @@ int DeliveryServiceDiscoveryPlugin::cRandomLookup(void* ctx, char** outJson,
     if (rc != LD_DISCO_OK) {
         return rc;
     }
-    trace("%-22s OK             records=%zu", "discoRandomLookup",
-          r.value.is_array() ? r.value.size() : 0);
+    // Peer ids here too, so a random-walk result can be told apart from a
+    // service-lookup one when auditing where a discovered peer came from.
+    std::string rpeers;
+    if (r.value.is_array()) {
+        for (const auto& rec : r.value) {
+            if (!rec.is_object() || !rec.contains("peerId")) continue;
+            const std::string id = rec["peerId"].get<std::string>();
+            if (!rpeers.empty()) rpeers += ",";
+            rpeers += id.size() > 12 ? id.substr(id.size() - 8) : id;
+        }
+    }
+    trace("%-22s OK             records=%zu peers=[%s]", "discoRandomLookup",
+          r.value.is_array() ? r.value.size() : 0, rpeers.c_str());
     return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
 }
 
