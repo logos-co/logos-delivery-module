@@ -14,7 +14,7 @@
     # Pinned to the head of the pluggable-discovery PR train (PR #4178,
     # branch poc-discovery-plugin-6) until it lands on master: that branch is
     # what carries the service-discovery plugin ABI and installs its header.
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poc-discovery-plugin-6&rev=16da754d72cd1f2dc301bf6249faca7dc966c836";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poc-discovery-plugin-7&rev=59158f043ec265e07cb1119deebb8799f1424f04";
     # The input name must match the metadata.json#dependencies entry verbatim:
     # logos-module-builder resolves each declared dependency by looking up a
     # flake input of the same name (buildCppPlugin.nix, `moduleInputs`) and uses
