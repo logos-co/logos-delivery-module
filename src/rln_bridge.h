@@ -15,11 +15,13 @@
 //     typed client. These answer in milliseconds; the delivery library's own
 //     10 s budget for them expires before the client's default would.
 //
-// Threading: init() is the second-phase constructor. The module context is
-// not yet ready while constructing, so init() runs from onContextReady(),
-// and the thread that runs it becomes the lp client's owner. The op entry
-// points only copy arguments and enqueue — safe from any thread (the
-// delivery library fires its callbacks on foreign threads).
+// Threading: init() is the second-phase constructor. It cannot run during
+// construction, because the module context is not ready yet. Instead it runs
+// lazily on the first enable call — enable is a module method, and methods
+// are only dispatched after the context is ready. The thread that runs
+// init() becomes the lp client's owner. The op entry points only copy
+// arguments and enqueue — safe from any thread (the delivery library fires
+// its callbacks on foreign threads).
 
 #include <atomic>
 #include <condition_variable>
@@ -34,14 +36,15 @@ class LiblogosRlnModule; // generated from metadata.json#dependencies
 
 class RlnBridge {
 public:
-    // `typed` is borrowed from modules().liblogos_rln_module, which outlives
-    // this object.
-    explicit RlnBridge(LiblogosRlnModule* typed);
+    RlnBridge();
     ~RlnBridge();
     RlnBridge(const RlnBridge&) = delete;
     RlnBridge& operator=(const RlnBridge&) = delete;
 
-    void init();
+    // Second-phase constructor: stores the typed client and creates the lp
+    // client. Safe to call more than once. `typed` is borrowed from
+    // modules().liblogos_rln_module, which outlives this object.
+    void init(LiblogosRlnModule* typed);
 
     // Enable answering of RLN requests in-process
     // Returns an error string or empty on success
@@ -110,5 +113,5 @@ private:
     std::atomic<bool> m_enabled{false};
 
     lp_client* m_client = nullptr; // created in init() (context thread)
-    LiblogosRlnModule* m_typed;
+    LiblogosRlnModule* m_typed = nullptr; // set in init()
 };

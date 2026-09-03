@@ -121,7 +121,7 @@ const char* RlnBridge::opName(Op op)
     return "?";
 }
 
-RlnBridge::RlnBridge(LiblogosRlnModule* typed) : m_typed(typed) {}
+RlnBridge::RlnBridge() = default;
 
 RlnBridge::~RlnBridge()
 {
@@ -144,8 +144,9 @@ RlnBridge::~RlnBridge()
     }
 }
 
-void RlnBridge::init()
+void RlnBridge::init(LiblogosRlnModule* typed)
 {
+    m_typed = typed;
     if (m_client) {
         return;
     }

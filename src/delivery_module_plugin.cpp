@@ -284,22 +284,27 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
 }
 
 DeliveryModuleImpl::DeliveryModuleImpl()
-    : rlnBridge(std::make_unique<RlnBridge>(&modules().liblogos_rln_module)) //rlnBridge constructed with pointer to client which communicates with the RLN Module (which needs to be co-loaded in logoscore)
+    : rlnBridge(std::make_unique<RlnBridge>())
     , deliveryCtx(nullptr)
     , deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
 }
 
-void DeliveryModuleImpl::onContextReady()
+std::string DeliveryModuleImpl::enableRlnBridge()
 {
-    // Owner-thread requirement — see rln_bridge.h's threading note.
-    rlnBridge->init();
+    if (!isContextReady()) {
+        // Unit tests construct this impl without a framework; modules() would
+        // dereference an unset pointer here.
+        return "module context not ready";
+    }
+    rlnBridge->init(&modules().liblogos_rln_module);
+    return rlnBridge->enable();
 }
 
 StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 {
-    const std::string err = rlnBridge->enable();
+    const std::string err = enableRlnBridge();
     if (!err.empty()) {
         return {false, {}, err};
     }
@@ -558,7 +563,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return {false, {}, "Invalid JSON config"};
     }
     if (rlnInProcess) {
-        const std::string failure = rlnBridge->enable();
+        const std::string failure = enableRlnBridge();
         if (!failure.empty()) {
             return {false, {}, "rln in-process setup failed: " + failure};
         }

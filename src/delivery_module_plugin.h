@@ -354,12 +354,15 @@ logos_events:
                                  int64_t epochTimestamp, const std::string& proofJson,
                                  int64_t timestamp);
 
-protected:
-    //override to init RLN bridge
-    void onContextReady() override;
-
 private:
-    // In-process RLN responder (src/rln_bridge.h). 
+    // Wires the bridge to the co-loaded RLN module on first use — modules()
+    // is only valid once the framework has handed the context over — then
+    // starts it. Both enable doors (rlnBridgeEnable, the rln-relay-lez config
+    // path) funnel through here. Returns an error string, or empty.
+    std::string enableRlnBridge();
+
+    // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
+    // and started by enableRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
 
     // Raw FFI context: what every call and the event registry take.
