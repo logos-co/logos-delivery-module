@@ -90,7 +90,6 @@ private:
 
     static bool isSlowOp(Op op);
     static bool isTstrOp(Op op);
-    static const char* opName(Op op); // TEMP: debug tracing
     // The only reply this bridge ever fabricates: a transport failure in the
     // error shape of the op's own method family (docs/rln.md).
     static std::string transportFail(Op op, const std::string& cls,
