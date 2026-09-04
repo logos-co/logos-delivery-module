@@ -342,18 +342,18 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1788216098,
-        "narHash": "sha256-LOAA3dsvB6XUms6iD10NsxgEq7It86DeN8xiI3TAGZc=",
+        "lastModified": 1788296493,
+        "narHash": "sha256-K0mM107zZ8vH4N7JXaHKR4a5b638Swnhm53r3nxB2n8=",
         "ref": "feat/lip-alignment",
-        "rev": "3e7c1c71ad86044604927e52237bcde92901eb09",
-        "revCount": 32,
+        "rev": "0079db05d5dd19de68b0ac1d42cdee01a149c22b",
+        "revCount": 33,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-rln-module",
         "ref": "feat/lip-alignment",
-        "rev": "3e7c1c71ad86044604927e52237bcde92901eb09",
+        "rev": "0079db05d5dd19de68b0ac1d42cdee01a149c22b",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
@@ -5432,17 +5432,18 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1788346086,
-        "narHash": "sha256-uGDVNwSivJ9VfmChKFBGWoJMFY5tZRiAtAy3EO/vJl4=",
+        "lastModified": 1788518229,
+        "narHash": "sha256-/fU+czVEPv2JR90yZpWNIznaTo6va3v6DSMc1FNK+DU=",
         "ref": "impl-plugable-rln-api-module",
-        "rev": "759c55540c016caa2db400855462ccf527fa8aae",
-        "revCount": 2484,
+        "rev": "78777eefac5a014b207d972e2bf074b021df684f",
+        "revCount": 2491,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
         "ref": "impl-plugable-rln-api-module",
+        "rev": "78777eefac5a014b207d972e2bf074b021df684f",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
