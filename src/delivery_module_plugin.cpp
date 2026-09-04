@@ -143,8 +143,6 @@ void DeliveryModuleImpl::rln_start_callback(uint64_t reqId, const char* configJs
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN start request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->start(reqId, toStringOrEmpty(configJson));
     }
@@ -160,8 +158,6 @@ void DeliveryModuleImpl::rln_stop_callback(uint64_t reqId, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN stop request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->stop(reqId);
     }
@@ -178,8 +174,6 @@ void DeliveryModuleImpl::rln_register_callback(uint64_t reqId, const char* regis
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN register_membership request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->registerMembership(reqId, toStringOrEmpty(registryId),
                                             toStringOrEmpty(rlnIdentifier),
@@ -199,8 +193,6 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, const
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN get_membership_state request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->getMembershipState(reqId, toStringOrEmpty(registryId),
                                             toStringOrEmpty(rlnIdentifier));
@@ -220,8 +212,6 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, const char
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN get_epoch_quota request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->getEpochQuota(reqId, toStringOrEmpty(registryId),
                                        toStringOrEmpty(rlnIdentifier), timestamp);
@@ -241,8 +231,6 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN generate_proof request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->generateProof(reqId, toStringOrEmpty(registryId),
                                        toStringOrEmpty(rlnIdentifier),
@@ -265,8 +253,6 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    fprintf(stderr, "DeliveryModuleImpl: RLN validate_proof request, reqId: %llu\n",
-            static_cast<unsigned long long>(reqId));
     if (impl->rlnBridge->enabled()) {
         impl->rlnBridge->validateProof(reqId, toStringOrEmpty(registryId),
                                        toStringOrEmpty(rlnIdentifier),
@@ -329,8 +315,7 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
 
 void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
-    fprintf(stderr, "DeliveryModuleImpl::event_callback called with ret: %d\n", callerRet);
-
+    (void)callerRet;
     DeliveryModuleImpl* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
         fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid userData\n");
@@ -339,7 +324,6 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
 
     if (msg && len > 0) {
         std::string message(msg, len);
-        fprintf(stderr, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
 
         // This function is a C callback invoked from the Nim runtime: a C++
         // exception escaping here would unwind into Nim frames and terminate
@@ -511,7 +495,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
 
     rlnInProcess = false;
     if (nlohmann::json* target = configTarget(cfgObj)) {
-        if (auto lezKey = findKey(*target, {"rlnrelaylez", "rln-relay-lez"})) {
+        if (auto lezKey = findKey(*target, {"rlnlez", "rln-lez"})) {
             rlnInProcess = (*target)[*lezKey].is_boolean()
                 && (*target)[*lezKey].get<bool>();
         }
