@@ -13,7 +13,7 @@
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
-#include <boost/beast/core/detail/base64.hpp>
+#include "base64.h"
 
 #include "api_call_handler.h"
 #include "service_discovery_plugin.h"
@@ -30,23 +30,6 @@ extern "C" {
 }
 
 namespace {
-namespace b64 = boost::beast::detail::base64;
-
-std::string base64Encode(const std::vector<uint8_t>& data) {
-    std::string out;
-    out.resize(b64::encoded_size(data.size()));
-    out.resize(b64::encode(out.data(), data.data(), data.size()));
-    return out;
-}
-
-std::vector<uint8_t> base64Decode(const std::string& encoded) {
-    std::vector<uint8_t> out;
-    out.resize(b64::decoded_size(encoded.size()));
-    auto [written, read] = b64::decode(out.data(), encoded.data(), encoded.size());
-    out.resize(written);
-    return out;
-}
-
 int64_t currentTimestampNs() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -58,7 +41,7 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
     if (!payloadValue.is_string()) {
         return {};
     }
-    return base64Decode(payloadValue.get<std::string>());
+    return delivery_base64::decode(payloadValue.get<std::string>());
 }
 
 // Wire names of the events this module forwards. nim-ffi 0.3.0 replaced the
@@ -596,7 +579,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 
     nlohmann::json messageObj;
     messageObj["contentTopic"] = contentTopic;
-    messageObj["payload"] = base64Encode(payload);
+    messageObj["payload"] = delivery_base64::encode(payload);
     messageObj["ephemeral"] = false;
 
     std::string messageJson = messageObj.dump();
@@ -758,7 +741,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
     }
 
     nlohmann::json messageObj;
-    messageObj["payload"] = base64Encode(payload);
+    messageObj["payload"] = delivery_base64::encode(payload);
     messageObj["ephemeral"] = false;
 
     std::string messageJson = messageObj.dump();

@@ -3,8 +3,10 @@
 // Mocks invoke callbacks synchronously so the semaphore inside api_call_handler.h
 // is released before try_acquire_for starts waiting.
 
+#include <cstring>
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
+#include "base64.h"
 #include "mocks/delivery_module_events_stub.h"
 
 // ---------------------------------------------------------------------------
@@ -466,4 +468,23 @@ LOGOS_TEST(name_returns_delivery_module) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_EQ(impl.name(), std::string("delivery_module"));
+}
+
+// One base64 for both plugins (payloads over the FFI, the signed record over
+// libp2p's JSON transport). RFC 4648 vectors, including the padding cases.
+LOGOS_TEST(base64_encode_matches_rfc4648_vectors) {
+    const auto enc = [](const char* s) {
+        return delivery_base64::encode(reinterpret_cast<const uint8_t*>(s), std::strlen(s));
+    };
+    LOGOS_ASSERT(enc("") == "");
+    LOGOS_ASSERT(enc("f") == "Zg==");
+    LOGOS_ASSERT(enc("fo") == "Zm8=");
+    LOGOS_ASSERT(enc("foo") == "Zm9v");
+    LOGOS_ASSERT(enc("foob") == "Zm9vYg==");
+    LOGOS_ASSERT(enc("fooba") == "Zm9vYmE=");
+    LOGOS_ASSERT(enc("foobar") == "Zm9vYmFy");
+    const uint8_t binary[] = {0x00, 0xff, 0x10};
+    LOGOS_ASSERT(delivery_base64::encode(binary, 3) == "AP8Q");
+    LOGOS_ASSERT(delivery_base64::encode(nullptr, 0).empty());
+    LOGOS_ASSERT(delivery_base64::decode("Zm9vYmFy") == std::vector<uint8_t>({'f', 'o', 'o', 'b', 'a', 'r'}));
 }

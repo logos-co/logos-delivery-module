@@ -14,6 +14,7 @@
 
 // Generated at build time from metadata.json#dependencies.
 #include "libp2p_module_api.h"
+#include "base64.h"
 
 namespace {
 
@@ -471,26 +472,35 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
                                                       const uint8_t* record, size_t recordLen,
                                                       char* errBuf, size_t errBufLen)
 {
-    // `data` is the JSON advertisement payload logos-delivery builds; `record`
-    // is a pre-signed extended peer record, which this backend never supplies
-    // (libp2p signs with its own identity when the advertisement is empty).
-    // Both may be (NULL, 0) -- logos-delivery passes no record, and an
-    // advertising node with nothing to say passes no data. std::string(nullptr, 0)
-    // is undefined, so build them only when there is something to copy.
-    const std::string serviceData =
-        data && dataLen ? std::string(reinterpret_cast<const char*>(data), dataLen)
-                        : std::string();
+    // `record` is the delivery node's own signed extended peer record, which
+    // libp2p publishes verbatim instead of one built from *its* identity. It
+    // is raw protobuf; libp2p_module's transport is JSON and its entry point
+    // takes it base64-encoded, so encode here, at the boundary that needs it.
+    //
+    // `data` is the advertised payload. Once a record is supplied it is
+    // redundant -- lookups return the record, and the payload inside it --
+    // but nim-libp2p's entry point rejects a missing serviceData outright
+    // (failIfDataMissing), and the payload may be bytes JSON cannot carry (the
+    // mix key), so send a fixed marker in its place. Without a record, `data`
+    // is sent as is: logos-delivery keeps that payload JSON-safe.
+    //
+    // Either may be (NULL, 0). std::string(nullptr, 0) is undefined, so build
+    // them only when there is something to copy.
+    const bool hasRecord = record && recordLen;
     const std::string advertisement =
-        record && recordLen ? std::string(reinterpret_cast<const char*>(record), recordLen)
-                            : std::string();
+        hasRecord ? delivery_base64::encode(record, recordLen) : std::string();
+    const std::string serviceData =
+        hasRecord ? std::string("xpr")
+        : data && dataLen ? std::string(reinterpret_cast<const char*>(data), dataLen)
+                          : std::string();
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStartAdvertising(
         toServiceId(key), serviceData, advertisement, &err);
-    // Sizes on every outcome: nim-libp2p's entry point rejects a missing
-    // serviceData outright (failIfDataMissing), so an empty payload here is the
-    // first thing to rule out when this is refused.
-    trace("%-22s ->  key=%s dataLen=%zu advertLen=%zu", "discoStartAdvertising",
-          toServiceId(key).c_str(), serviceData.size(), advertisement.size());
+    // Sizes on every outcome; recordLen is the raw size, advertLen the base64
+    // one that went over the wire.
+    trace("%-22s ->  key=%s dataLen=%zu recordLen=%zu advertLen=%zu",
+          "discoStartAdvertising", toServiceId(key).c_str(), serviceData.size(),
+          recordLen, advertisement.size());
     const int rc = settle("discoStartAdvertising", r, err, errBuf, errBufLen);
     if (rc == LD_DISCO_OK)
         trace("%-22s OK             key=%s data=%s", "discoStartAdvertising",

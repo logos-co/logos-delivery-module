@@ -99,7 +99,6 @@ private:
     /// kinds pass through verbatim, which keeps advertise and lookup agreeing
     /// on one string without inventing a mapping libp2p could not honour.
     static std::string toServiceId(const char* key);
-
     Libp2pModule* libp2p_;
     std::string libp2pConfig_;
     bool backendReady_;
