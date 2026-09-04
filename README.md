@@ -100,6 +100,7 @@ The delivery module provides the following API methods (all synchronous, all ret
 - `getNodeInfo(nodeInfoId: QString)` - Retrieve node info by identifier
 - `getAvailableConfigs()` - Retrieve available configuration parameter descriptions
 - `collectOpenMetricsText()` - Node metrics as OpenMetrics/Prometheus text for the `openmetrics` module (see [docs/run-node.md → Metrics](docs/run-node.md#metrics))
+- `rlnRespond(reqId: int64, resultJson: QString)` - Complete an RLN request previously emitted via one of the `rln*Request` events (see [docs/rln.md](docs/rln.md))
 
 ### Node Configuration (`createNode`)
 
@@ -200,6 +201,20 @@ carries a `QVariantList data` with positional values:
 - **`connectionStateChanged`** – node connectivity change
   - `data[0]` (`QString`): connection status
   - `data[1]` (`QString`): local timestamp (ISO-8601)
+- **`rln*Request`** – the delivery library requests an RLN operation from the
+  external RLN module, one typed event per RLN function; answer via
+  `rlnRespond` with the same `reqId`. `optionsJson` / `proofJson` are opaque
+  JSON (RLN module's wire schema), `epochTimestamp` is the ABI's epoch/quota
+  timestamp, and the trailing `timestamp` is the local emission time, as on
+  every other event. Positional `data` follows each signature
+  (see [docs/rln.md](docs/rln.md)):
+  - `rlnStartRequest(reqId, timestamp)`
+  - `rlnStopRequest(reqId, timestamp)`
+  - `rlnRegisterRequest(reqId, registryId, rlnIdentifier, optionsJson, timestamp)`
+  - `rlnGetMembershipStateRequest(reqId, registryId, rlnIdentifier, timestamp)`
+  - `rlnGetEpochQuotaRequest(reqId, registryId, rlnIdentifier, epochTimestamp, timestamp)`
+  - `rlnGenerateProofRequest(reqId, registryId, rlnIdentifier, signalHex, epochTimestamp, timestamp)`
+  - `rlnVerifyProofRequest(reqId, registryId, rlnIdentifier, signalHex, epochTimestamp, proofJson, timestamp)`
 
 ### Metrics
 

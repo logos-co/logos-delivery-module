@@ -2,12 +2,15 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+
+class RlnBridge;
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -269,6 +272,47 @@ public:
      */
     std::string collectOpenMetricsText();
 
+    /**
+     * @brief Completes an outstanding RLN request (see the `rln*Request` events).
+     *
+     * The delivery library outsources RLN operations to an external RLN
+     * module; this module facilitates that message passing. When the delivery
+     * library makes an RLN request, this module emits the matching
+     * `rln*Request` event. This method takes the reqId of the original
+     * request along with the response and passes it on to the library
+     * verbatim — the wire schema is owned by the RLN module and the delivery
+     * library, not modelled here.
+     *
+     * On a node running lez RLN the in-process bridge (see
+     * @ref rlnBridgeEnable) answers each request itself; only the first
+     * response per reqId is accepted, so a second caller of this method is
+     * rejected as a duplicate.
+     *
+     * There is no response deadline to manage on this side: if no response
+     * arrives in time, the delivery library synthesizes a TRANSIENT failure
+     * itself. A response for a request that already timed out (or was never
+     * issued) fails with an error.
+     *
+     * @param reqId Request id from the `rln*Request` event. Ids >= 2^63 appear
+     *        negative here (int64 view of the library's uint64 id); they are
+     *        passed through bit-exactly, so echo them back unchanged.
+     */
+    StdLogosResult rlnRespond(int64_t reqId, const std::string& resultJson);
+
+    /**
+     * @brief Enables the in-process RLN bridge.
+     *
+     * Once enabled, each `rln*Request` is answered inside this module: the
+     * bridge's worker threads call the co-loaded `liblogos_rln_module` and
+     * pass its reply back unchanged. The events keep emitting for
+     * observability, but an external responder must not also answer an
+     * enabled node: its second response per reqId is rejected. Idempotent;
+     * call any time before @ref start. @ref createNode does this
+     * automatically when the config's `rln-relay-lez` is true. Calling it
+     * directly is mainly for test purposes.
+     */
+    StdLogosResult rlnBridgeEnable();
+
     std::string name() const { return "delivery_module"; }
 
 logos_events:
@@ -285,7 +329,42 @@ logos_events:
     void nodeStarted(bool success, const std::string& message, int64_t timestamp);
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
+    /**
+     * RLN request events, one per ABI function (`liblogosdelivery_rln.h`).
+     * Answer each via @ref rlnRespond with the same `reqId`. The JSON args are
+     * opaque to this module (RLN module wire schema). `epochTimestamp` is the
+     * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
+     * local emission time, as on every other event.
+     */
+    void rlnStartRequest(int64_t reqId, const std::string& configJson, int64_t timestamp);
+    void rlnStopRequest(int64_t reqId, int64_t timestamp);
+    void rlnRegisterRequest(int64_t reqId, const std::string& registryId,
+                            const std::string& rlnIdentifier,
+                            const std::string& optionsJson, int64_t timestamp);
+    void rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
+                                      const std::string& rlnIdentifier, int64_t timestamp);
+    void rlnGetEpochQuotaRequest(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier,
+                                 int64_t epochTimestamp, int64_t timestamp);
+    void rlnGenerateProofRequest(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, int64_t timestamp);
+    void rlnValidateProofRequest(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, const std::string& proofJson,
+                                 int64_t timestamp);
+
 private:
+    // Wires the bridge to the co-loaded RLN module on first use — modules()
+    // is only valid once the framework has handed the context over — then
+    // starts it. Both enable doors (rlnBridgeEnable, the rln-relay-lez config
+    // path) funnel through here. Returns an error string, or empty.
+    std::string enableRlnBridge();
+
+    // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
+    // and started by enableRlnBridge().
+    std::unique_ptr<RlnBridge> rlnBridge;
+
     // Raw FFI context: what every call and the event registry take.
     void* deliveryCtx;
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
@@ -312,4 +391,26 @@ private:
     // the non-terminal progress tick a long start/stop emits.
     static void start_callback(int callerRet, char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
+
+    // RLN callback slots registered in createNode, one per ABI function
+    // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
+    // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
+    // for the duration of the call. userData is the DeliveryModuleImpl*.
+    static void rln_start_callback(uint64_t reqId, const char* configJson, void* userData);
+    static void rln_stop_callback(uint64_t reqId, void* userData);
+    static void rln_register_callback(uint64_t reqId, const char* registryId,
+                                      const char* rlnIdentifier,
+                                      const char* optionsJson, void* userData);
+    static void rln_get_membership_state_callback(uint64_t reqId, const char* registryId,
+                                                  const char* rlnIdentifier, void* userData);
+    static void rln_get_epoch_quota_callback(uint64_t reqId, const char* registryId,
+                                             const char* rlnIdentifier,
+                                             uint64_t timestamp, void* userData);
+    static void rln_generate_proof_callback(uint64_t reqId, const char* registryId,
+                                            const char* rlnIdentifier, const char* signalHex,
+                                            uint64_t timestamp, void* userData);
+    static void rln_validate_proof_callback(uint64_t reqId, const char* registryId,
+                                            const char* rlnIdentifier, const char* signalHex,
+                                            uint64_t timestamp, const char* proofJson,
+                                            void* userData);
 };

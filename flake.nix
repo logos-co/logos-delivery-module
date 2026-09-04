@@ -11,7 +11,14 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.5";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
+    # TODO: repoint at master once impl-plugable-rln-api-module (RLN C ABI) merges.
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=impl-plugable-rln-api-module&rev=78777eefac5a014b207d972e2bf074b021df684f";
+    # The RLN API module. The input name is load-bearing and cannot be chosen
+    # freely: logos-module-builder resolves each metadata.json#dependencies
+    # entry as the flake input of the SAME name and generates bindings from
+    # its published <name>.lidl, and logos-core auto-loads it by that module
+    # name at runtime. Pinned to feat/lip-alignment (wire 0.7.x).
+    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=0079db05d5dd19de68b0ac1d42cdee01a149c22b&dir=logos-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
@@ -49,6 +56,13 @@
             if [ -n "$OLD_RLN" ]; then
               install_name_tool -change "$OLD_RLN" "@rpath/librln.dylib" lib/liblogosdelivery.dylib
             fi
+          fi
+          # Linux: the integration test binary links the staged lib/ libraries
+          # by absolute path at build time, but the check phase runs from the
+          # build dir where the dynamic linker can't find them. Same class of
+          # gap as the darwin rewrite above (see TODO there).
+          if [ -f lib/liblogosdelivery.so ]; then
+            export LD_LIBRARY_PATH="$(pwd)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           fi
         '';
       };

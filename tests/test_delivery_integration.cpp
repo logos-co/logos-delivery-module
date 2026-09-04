@@ -10,6 +10,7 @@
 #include "mocks/delivery_module_events_stub.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -151,11 +152,16 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
     std::string nodeInfoIDs = idsResult.value.get<std::string>();
     LOGOS_ASSERT_FALSE(nodeInfoIDs.empty());
 
-    // IDs are returned as "@[ID1,ID2,...]" - strip the "@[" prefix and "]" suffix.
+    // Older liblogosdelivery returns the IDs as Nim repr "@[ID1, ID2, ...]",
+    // newer ones as a JSON array ["ID1", "ID2", ...]. Strip either wrapper,
+    // then split on comma and drop spaces/quotes.
     if (nodeInfoIDs.size() > 3 &&
         nodeInfoIDs[0] == '@' && nodeInfoIDs[1] == '[' &&
         nodeInfoIDs.back() == ']') {
         nodeInfoIDs = nodeInfoIDs.substr(2, nodeInfoIDs.size() - 3);
+    } else if (nodeInfoIDs.size() > 2 &&
+               nodeInfoIDs.front() == '[' && nodeInfoIDs.back() == ']') {
+        nodeInfoIDs = nodeInfoIDs.substr(1, nodeInfoIDs.size() - 2);
     }
 
     // Split on comma
@@ -165,7 +171,7 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
         if (c == ',') {
             if (!current.empty()) ids.push_back(current);
             current.clear();
-        } else if (c != ' ') {
+        } else if (c != ' ' && c != '"') {
             current.push_back(c);
         }
     }
@@ -291,6 +297,141 @@ LOGOS_TEST(integration_channel_send_fails_on_unknown_channel) {
 
     std::vector<uint8_t> payload{'x'};
     LOGOS_ASSERT_FALSE(g_impl->channelSend("no-such-channel", payload).success);
+}
+
+// ---------------------------------------------------------------------------
+// Tests - RLN bridge (registration + response path against the real library)
+//
+// The full request round trip (library fires a callback -> rln*Request event ->
+// rlnRespond completes it) cannot be exercised yet: nothing in the library
+// calls its internal rlnInvoke, and no trigger entry point is exported. These
+// tests cover what IS reachable: the real logosdelivery_rln_set_callbacks /
+// logosdelivery_rln_response symbols resolve, registration and clearing
+// survive against the real library, and the response path rejects unknown
+// request ids through the real in-flight list.
+// ---------------------------------------------------------------------------
+
+LOGOS_TEST(integration_rlnRespond_rejects_unknown_reqid) {
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kMinimalConfig).success);
+
+    // No RLN request is in flight (nothing triggers rlnInvoke yet), so any
+    // reqId is unknown: the real library returns non-zero and the module
+    // surfaces it as an error.
+    StdLogosResult result =
+        impl.rlnRespond(123456789, R"({"success":true,"value":{}})");
+    LOGOS_ASSERT_FALSE(result.success);
+    LOGOS_ASSERT_FALSE(result.error.empty());
+}
+
+LOGOS_TEST(integration_rln_callbacks_register_and_clear) {
+    {
+        DeliveryModuleImpl impl;
+        LOGOS_ASSERT_TRUE(impl.createNode(kMinimalConfig).success);
+        // Destructor clears the RLN surface (NULL registration) before
+        // destroying the node; must complete without crashing.
+    }
+
+    // The surface is process-global in the library; a fresh module instance
+    // must be able to register again after a clear.
+    DeliveryModuleImpl impl2;
+    LOGOS_ASSERT_TRUE(impl2.createNode(kMinimalConfig).success);
+    LOGOS_ASSERT_FALSE(impl2.rlnRespond(1, R"({"success":true,"value":{}})").success);
+}
+
+// Blocks until any rln*Request event with the given op fires (or times out).
+// The library awaits each response per the RLN module's time budgets (10s for
+// local calls, 95s for registry-reading calls) before synthesizing a TRANSIENT
+// failure, so requests appear well inside this window when the chain is live.
+static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (delivery_test_events::g_lastRlnRequest.op == op) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return delivery_test_events::g_lastRlnRequest.op == op;
+}
+
+// The full start chain, served in-process: createNode sniffs "rln-relay-lez"
+// from the config and enables the bridge, so the library's RLN callbacks are
+// answered by the co-loaded RLN module — or, when none is reachable, by the
+// bridge's own transport-failure replies. Either way every request completes
+// library-side, so this test observes the chain through the rln*Request
+// events (which keep emitting for observability) and verifies an external
+// response is rejected as a duplicate; it must not answer requests itself.
+// register_membership only fires when a live RLN module answered start with
+// success, so it is not asserted here.
+//
+// node_factory.nim drives this chain from startNode, but only when
+// conf.rlnRelayConf.isSome().
+static const char* kRlnConfig = R"({
+  "logLevel": "DEBUG",
+  "relay": true,
+  "numShardsInNetwork": 8,
+  "rln-relay": true,
+  "rln-relay-lez": true,
+  "rln-relay-registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
+  "rln-relay-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "rln-relay-epoch-sec": 600,
+  "rln-relay-dynamic": false,
+  "rln-relay-chain-id": 1
+})";
+
+LOGOS_TEST(integration_rln_start_chain_round_trip) {
+    delivery_test_events::resetNodeLifecycleEvents();
+    delivery_test_events::resetRlnRequestEvent();
+
+
+    // The shared ensureStarted() node (g_impl) from earlier tests may still be
+    // running and holding the fixed discv5 UDP port; tear it down so this test's
+    // node can bind. integration_send (next) re-creates it via ensureStarted().
+    if (g_impl) {
+        g_impl->stop();
+        delete g_impl;
+        g_impl = nullptr;
+    }
+
+    // A segfault inside the library cannot be caught by the runner, so the RLN
+    // config is opt-in: unset, the node comes up RLN-off, no start request
+    // fires, and the test takes the skip path below.
+    const bool live = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
+
+    DeliveryModuleImpl impl;
+    // The lez config also enables the in-process bridge; a bridge setup
+    // failure fails createNode, so this covers the auto-enable wiring.
+    LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnConfig : kMinimalConfig).success);
+    LOGOS_ASSERT_TRUE(impl.start().success);
+
+    if (!waitForRlnRequestOp("start")) {
+        fprintf(stderr,
+                "SKIP integration_rln_start_chain_round_trip: no RLN start "
+                "request (set LOGOS_DELIVERY_RLN_LIVE against a native-mount-skip "
+                "build to exercise the live chain)\n");
+        impl.stop();
+        waitForNodeStopped();
+        return;
+    }
+
+    // The start request carries the module's start() config, built from this
+    // node's RLN conf: epoch_size_sec is the value every proof generator and
+    // validator must share.
+    const auto& startReq = delivery_test_events::g_lastRlnRequest;
+    LOGOS_ASSERT_TRUE(startReq.configJson.find("\"epoch_size_sec\":600") !=
+                      std::string::npos);
+    LOGOS_ASSERT_TRUE(startReq.configJson.find("logos:testnet:") != std::string::npos);
+    const int64_t startReqId = startReq.reqId;
+
+    // Give the request time to complete library-side: the bridge answers it
+    // (with a transport failure when no RLN module is reachable), and the
+    // library's 10 s budget for local ops backstops even that. Afterwards an
+    // external response must be rejected through the real in-flight list.
+    std::this_thread::sleep_for(std::chrono::seconds(11));
+    LOGOS_ASSERT_FALSE(
+        impl.rlnRespond(startReqId, R"({"success":true,"value":{}})").success);
+
+    LOGOS_ASSERT_TRUE(impl.stop().success);
+    LOGOS_ASSERT_TRUE(waitForNodeStopped());
 }
 
 // ---------------------------------------------------------------------------
