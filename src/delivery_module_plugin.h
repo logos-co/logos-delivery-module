@@ -235,11 +235,10 @@ public:
      * @brief Lists the node info items this node advertises, for use with
      *        @ref getNodeInfo.
      *
-     * The list comes back as a Nim sequence rendering rather than JSON, so a
-     * caller strips the wrapper and splits on commas:
+     * The list comes back as a JSON array of strings:
      *
-     * @code
-     * @[Version, Metrics, MyMultiaddresses, MyENR, MyPeerId]
+     * @code{.json}
+     * ["Version", "Metrics", "MyMultiaddresses", "MyENR", "MyPeerId"]
      * @endcode
      *
      * Which items a node advertises depends on how it was built and
