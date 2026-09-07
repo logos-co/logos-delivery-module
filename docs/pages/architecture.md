@@ -48,10 +48,3 @@ metrics keep working.
 The concrete configuration shapes — an app developer's full stack, a node
 operator's public service node, a self-hosted network — are documented with
 `createNode` in the [API reference](api_reference.rst).
-
-## Content topics
-
-A content topic names the channel a message travels on, and publisher and
-subscriber must agree on it. Use the structured format from
-[LIP-23: Topics](https://lip.logos.co/messaging/informational/23/topics.html#content-topics)
-rather than inventing one — for example `/myapp/1/chat/proto`.

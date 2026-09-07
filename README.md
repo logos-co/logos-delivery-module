@@ -104,11 +104,6 @@ The module's documentation is published at
 **<https://logos-co.github.io/logos-delivery-module/>** — API reference,
 configuration, events, and the guides for running and querying a node.
 
-The API reference is generated from the doc comments in
-[`src/delivery_module_plugin.h`](src/delivery_module_plugin.h), so it is the
-one place the API surface is described. Update the doc comments and the site
-follows.
-
 ### Building the documentation
 
 The site is Doxygen (API extraction) → Breathe → Sphinx (rendering), with the
@@ -130,20 +125,6 @@ make docs            # build into docs/_build/html
 make docs-preview    # rebuild and reload the browser as you edit
 ```
 
-`make docs-preview` watches `src/` too, so editing the doc comments updates the
-API reference page. Set `PORT` to serve somewhere other than 8000.
-
-`docs/requirements.txt` is enough to build; the `-dev` file adds the watcher.
-
-For the full gh-pages layout, including the version dropdown, run the one-shot
-preview instead:
-
-```bash
-./docs/preview.sh                    # build and serve on http://localhost:8000
-```
-
-`make html` runs with `-W`, so a broken link or reference fails the build.
-`--watch` does not, so a half-written link doesn't kill the server.
 
 Publishing is automatic: `.github/workflows/docs.yml` deploys to the
 `gh-pages` branch when a release is published, under `latest/` and the release
