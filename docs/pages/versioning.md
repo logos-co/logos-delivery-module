@@ -38,6 +38,6 @@ Example: `0.2.3` is the fourth release of the module targeting Logos Testnet 2.
 
 ## Releasing
 
-1. Update `"version"` in [`metadata.json`](../metadata.json).
+1. Update `"version"` in [`metadata.json`](../../metadata.json).
 2. Tag the commit: `git tag v<version>`.
 3. Push the tag: `git push origin v<version>`.

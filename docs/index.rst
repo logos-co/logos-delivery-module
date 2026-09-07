@@ -3,13 +3,16 @@ Logos Delivery Module
 
 .. note::
 
-   The main Logos Messaging documentation is at
-   `docs.logos.co/messaging <https://docs.logos.co/messaging>`_. Start there
-   for the concepts, the wider stack, and how Delivery and Chat fit together.
+   | The main Logos Messaging documentation is at
+     `docs.logos.co/messaging <https://docs.logos.co/messaging>`_.
+   | Start there for the concepts and the wider stack.
 
-   **This site is the API reference** for the ``delivery_module`` Logos Core
-   module, together with the internal docs for building, running and querying
-   a node.
+   **This site is the API reference** and the internal docs.
+
+   To watch this run end-to-end against a real ``logoscore`` daemon, see the
+   `Tutorial
+   <https://logos-co.github.io/logos-doctest-hub/#logos-delivery-module/ubuntu-latest/running-this-delivery-module-against-logoscore>`_.
+
 
 The Logos Delivery Module lets your application send and receive messages over
 a peer-to-peer network, without running a server of its own. It is a Logos Core
@@ -22,8 +25,6 @@ methods on ``delivery_module``.
 Using the API
 -------------
 
-To move a message you:
-
 1. ``createNode`` -- build a node from a JSON configuration (once per context).
 2. ``start`` -- boot it and join the network.
 3. ``subscribe`` / ``send`` -- receive on a topic, publish to one.
@@ -33,26 +34,18 @@ Calls return as soon as the request is dispatched. What actually happened on
 the network arrives later as an **event** — subscribe to those rather than
 reading a return value.
 
-:doc:`API Reference <api_reference>` has every method, including the full
-``createNode`` configuration grammar. :doc:`Events <events>` has the full set
-of events and their payloads.
-
-To watch this run end-to-end against a real ``logoscore`` daemon, see the
-`Tutorial
-<https://logos-co.github.io/logos-doctest-hub/#logos-delivery-module/ubuntu-latest/running-this-delivery-module-against-logoscore>`_.
-
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: API reference
 
-   api_reference
-   events
+   pages/api_reference
+   pages/events
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Internal docs
 
-   architecture
-   run-node
-   query-node
-   versioning
+   pages/architecture
+   pages/run-node
+   pages/query-node
+   pages/versioning
