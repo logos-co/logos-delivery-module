@@ -74,6 +74,10 @@ html_css_files = ["custom.css"]
 html_theme_options = {
   "external_links": [
     {
+      "name": "Logos Messaging docs",
+      "url": "https://docs.logos.co/messaging",
+    },
+    {
       "name": "Tutorial",
       "url": "https://logos-co.github.io/logos-doctest-hub/#logos-delivery-module/ubuntu-latest/running-this-delivery-module-against-logoscore",
     },

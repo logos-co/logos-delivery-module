@@ -193,7 +193,7 @@ the p2p ports to match the Docker port mappings.
 For the dev network, use [`conf/logos-dev.json`](../conf/logos-dev.json)
 (preset `logos.dev`). The full config grammar, including kernel-only nodes
 (`"entryLayer": "kernel"`), is documented in the
-[configuration reference](index.rst).
+[API reference](api_reference.rst).
 
 The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.
