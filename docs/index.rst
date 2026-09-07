@@ -38,8 +38,7 @@ API Reference
 -------------
 
 - :doc:`API layers <pages/api-layers>`
-- :doc:`Methods <pages/api_reference>`
-- :doc:`Events <pages/events>`
+- :doc:`API reference <pages/api_reference>`
 
 Internal docs
 -------------
@@ -58,5 +57,5 @@ Internal docs
    :maxdepth: 2
 
    pages/api-layers
-   pages/api
+   pages/api_reference
    pages/internal

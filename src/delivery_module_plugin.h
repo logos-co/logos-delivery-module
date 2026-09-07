@@ -29,25 +29,21 @@
  * Asynchronous events are emitted via typed `logos_events:` declarations.
  * The codegen generates method bodies that route through
  * LogosModuleContext::emitEventImpl_.
- *
- * The raw FFI `eventType` values mapped into these typed events are:
- * - `message_sent` -> `messageSent`
- * - `message_error` -> `messageError`
- * - `message_propagated` -> `messagePropagated`
- * - `message_received` -> `messageReceived`
- * - `connection_status_change` -> `connectionStateChanged`
- * - `channel_message_received` -> `channelMessageReceived`
- * - `channel_message_sent` -> `channelMessageSent`
- * - `channel_message_error` -> `channelMessageError`
- *
- * As a general concept consider using proper content_topic format for your purpose.
- * --> https://lip.logos.co/messaging/informational/23/topics.html#content-topics
  */
 class DeliveryModuleImpl : public LogosModuleContext
 {
 public:
     DeliveryModuleImpl();
     ~DeliveryModuleImpl();
+
+/**
+ * @name Methods
+ *
+ * Every call returns as soon as its request is dispatched. Where the outcome
+ * only becomes known later, it is reported through the events below.
+ *
+ * @{
+ */
 
     /**
      * @brief Creates a liblogosdelivery node from a JSON configuration.
@@ -290,13 +286,22 @@ public:
 
     std::string name() const { return "delivery_module"; }
 
+/** @} */
+
 /**
- * @defgroup events Events
+ * @name Events
  *
- * Asynchronous notifications the module emits. These are never invoked by a
- * caller: the codegen turns each declaration into an emitter, and a request id
- * ties an event back to the call that caused it. Timestamps are nanoseconds
- * since the Unix epoch.
+ * A caller never invokes these. Every method above returns as soon as its
+ * request is dispatched, and what actually happened on the network arrives
+ * here — so subscribe to these rather than reading a return value.
+ *
+ * `send` and `channelSend` return a request id, and every event reporting the
+ * outcome of that call carries the same id, so several messages can be in
+ * flight at once.
+ *
+ * Timestamps are `int64` nanoseconds since the Unix epoch. `messageReceived`
+ * reports the timestamp carried by the message itself; every other event is
+ * stamped by the module host when the event is emitted.
  *
  * @{
  */
