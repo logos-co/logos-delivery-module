@@ -4,64 +4,6 @@ Wrap LogosMessaging API (liblogosdelivery) and make it available as a Logos Core
 
 This module provides high-level message delivery capabilities through the liblogosdelivery interface from [logos-delivery](https://github.com/logos-messaging/logos-delivery), packaged as a Logos module plugin compatible with logos-core.
 
-## Documentation
-
-The module's documentation is published at
-**<https://logos-co.github.io/logos-delivery-module/>** — API reference,
-configuration, events, and the guides for running and querying a node.
-
-The API reference is generated from the doc comments in
-[`src/delivery_module_plugin.h`](src/delivery_module_plugin.h), so it is the
-one place the API surface is described. Update the doc comments and the site
-follows.
-
-### Building the documentation
-
-The site is Doxygen (API extraction) → Breathe → Sphinx (rendering), with the
-Markdown guides in `docs/` pulled in via myst-parser.
-
-`doxygen` is not in the dev shell, so install it once:
-
-```bash
-sudo apt-get install -y doxygen     # macOS: brew install doxygen
-```
-
-Then:
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r docs/requirements.txt
-./docs/preview.sh                    # build and serve on http://localhost:8000
-```
-
-While writing, `--watch` rebuilds and reloads the browser on every save,
-including changes to the doc comments in `src/`:
-
-```bash
-pip install -r docs/requirements-dev.txt
-./docs/preview.sh --watch
-```
-
-Set `PORT` to serve somewhere other than 8000. `--watch` serves the bare HTML,
-so the version dropdown stays empty — use the one-shot build to check that.
-
-To build without serving:
-
-```bash
-doxygen ./docs/Doxyfile              # writes docs/xml
-make -C docs html                    # writes docs/_build/html
-```
-
-`make html` runs with `-W`, so a broken link or reference fails the build.
-`--watch` does not, so a half-written link doesn't kill the server.
-
-Publishing is automatic: `.github/workflows/docs.yml` deploys to the
-`gh-pages` branch when a release is published, under `latest/` and the release
-tag. Pushing to a branch builds the site and uploads it as a `docs-preview`
-artifact instead, so a docs change can be previewed before it ships. Adding a
-new release to the version dropdown means editing
-[`docs/_root/switcher.json`](docs/_root/switcher.json).
-
 ## How to Build
 
 ### Using Nix (Recommended)
@@ -155,3 +97,57 @@ cmake -B build -S . -GNinja
 # Build
 ninja -C build
 ```
+
+## Documentation
+
+The module's documentation is published at
+**<https://logos-co.github.io/logos-delivery-module/>** — API reference,
+configuration, events, and the guides for running and querying a node.
+
+The API reference is generated from the doc comments in
+[`src/delivery_module_plugin.h`](src/delivery_module_plugin.h), so it is the
+one place the API surface is described. Update the doc comments and the site
+follows.
+
+### Building the documentation
+
+The site is Doxygen (API extraction) → Breathe → Sphinx (rendering), with the
+Markdown guides in `docs/` pulled in via myst-parser.
+
+`doxygen` is not in the dev shell, so install it once:
+
+```bash
+sudo apt-get install -y doxygen     # macOS: brew install doxygen
+```
+
+Then:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r docs/requirements-dev.txt
+
+make docs            # build into docs/_build/html
+make docs-preview    # rebuild and reload the browser as you edit
+```
+
+`make docs-preview` watches `src/` too, so editing the doc comments updates the
+API reference page. Set `PORT` to serve somewhere other than 8000.
+
+`docs/requirements.txt` is enough to build; the `-dev` file adds the watcher.
+
+For the full gh-pages layout, including the version dropdown, run the one-shot
+preview instead:
+
+```bash
+./docs/preview.sh                    # build and serve on http://localhost:8000
+```
+
+`make html` runs with `-W`, so a broken link or reference fails the build.
+`--watch` does not, so a half-written link doesn't kill the server.
+
+Publishing is automatic: `.github/workflows/docs.yml` deploys to the
+`gh-pages` branch when a release is published, under `latest/` and the release
+tag. Pushing to a branch builds the site and uploads it as a `docs-preview`
+artifact instead, so a docs change can be previewed before it ships. Adding a
+new release to the version dropdown means editing
+[`docs/_root/switcher.json`](docs/_root/switcher.json).

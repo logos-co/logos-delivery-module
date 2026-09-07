@@ -34,7 +34,25 @@ Calls return as soon as the request is dispatched. What actually happened on
 the network arrives later as an **event** — subscribe to those rather than
 reading a return value.
 
+API Reference
+-------------
+
+- :doc:`Methods <pages/api_reference>`
+- :doc:`Events <pages/events>`
+
+Internal docs
+-------------
+
+- :doc:`Architecture <pages/architecture>`
+- :doc:`Running a node <pages/run-node>`
+- :doc:`Querying a node <pages/query-node>`
+- :doc:`Versioning <pages/versioning>`
+
+.. Hidden: the lists above are the visible index; these only build the sidebar
+   nav and the page hierarchy.
+
 .. toctree::
+   :hidden:
    :maxdepth: 1
    :caption: API reference
 
@@ -42,6 +60,7 @@ reading a return value.
    pages/events
 
 .. toctree::
+   :hidden:
    :maxdepth: 1
    :caption: Internal docs
 
