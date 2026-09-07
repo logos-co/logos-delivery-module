@@ -172,14 +172,14 @@ logoscore stop
 
 > For a fully pinned, build-from-this-commit walkthrough — plus notes on the
 > blocking Kademlia bootstrap in headless runs — see the
-> [runtime doc-test](../doctests/outputs/delivery-module-runtime.md).
+> [runtime doc-test](https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md).
 
 ## Configuration
 
 The config uses the layered `createNode` shape: `preset` picks the network,
 `mode` defaults to `"Core"` (`"Edge"` for a light node), per-layer settings
 go in `messagingOverrides`. The repo ships it as
-[`conf/logos-test.json`](../conf/logos-test.json): Docker mounts it into the
+[`conf/logos-test.json`](../../conf/logos-test.json): Docker mounts it into the
 container at `/conf` (`@/conf/logos-test.json`); with the Nix build, pass the
 path directly (`@conf/logos-test.json`). The prebuilt-binaries path above
 writes the same config inline. Edit it and re-run the boot steps to change
@@ -190,10 +190,10 @@ Keep extra keys inside `messagingOverrides` / `channelsOverrides` /
 legacy flat shape. Unpinned listening ports are OS-assigned; the config pins
 the p2p ports to match the Docker port mappings.
 
-For the dev network, use [`conf/logos-dev.json`](../conf/logos-dev.json)
+For the dev network, use [`conf/logos-dev.json`](../../conf/logos-dev.json)
 (preset `logos.dev`). The full config grammar, including kernel-only nodes
 (`"entryLayer": "kernel"`), is documented in the
-[README](../README.md#node-configuration-createnode).
+[API reference](api_reference.rst).
 
 The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.

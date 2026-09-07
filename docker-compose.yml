@@ -11,4 +11,4 @@ services:
       - "9000:9000/udp"     # discv5
     # The image starts the logoscore daemon (`logoscore -D -m ./modules`).
     # Loading the module and starting the node is a one-shot step run from
-    # the host after `compose up` — see docs/run-node.md.
+    # the host after `compose up` — see docs/pages/run-node.md.
