@@ -20,13 +20,21 @@ follows.
 The site is Doxygen (API extraction) → Breathe → Sphinx (rendering), with the
 Markdown guides in `docs/` pulled in via myst-parser.
 
+`doxygen` is not in the dev shell, so install it once:
+
 ```bash
+sudo apt-get install -y doxygen     # macOS: brew install doxygen
+```
+
+Then:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r docs/requirements.txt
 ./docs/preview.sh                  # build and serve on http://localhost:8000
 ```
 
-`preview.sh` needs `doxygen` on PATH; it is not in the dev shell, so
-`nix shell nixpkgs#doxygen` if you don't have it. To build without serving:
+To build without serving:
 
 ```bash
 doxygen ./docs/Doxyfile            # writes docs/xml
