@@ -271,19 +271,64 @@ public:
 
     std::string name() const { return "delivery_module"; }
 
+/**
+ * @defgroup events Events
+ *
+ * Asynchronous notifications the module emits. These are never invoked by a
+ * caller: the codegen turns each declaration into an emitter, and a request id
+ * ties an event back to the call that caused it. Timestamps are nanoseconds
+ * since the Unix epoch.
+ *
+ * @{
+ */
+
 logos_events:
+    /**
+     * @brief Emitted when the network has validated a sent message.
+     *
+     * The success terminal state for @ref send, usually preceded by
+     * @ref messagePropagated.
+     */
     void messageSent(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+
+    /** @brief Emitted when the module could not send a message; `error` carries the reason. */
     void messageError(const std::string& requestId, const std::string& messageHash, const std::string& error, int64_t timestamp);
+
+    /** @brief Emitted when a message has reached the network but is not yet validated. */
     void messagePropagated(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+
+    /**
+     * @brief Emitted when a message arrives on a subscribed content topic.
+     *
+     * `payload` is delivered as raw bytes, already decoded from the wire
+     * encoding.
+     */
     void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
+
+    /** @brief Emitted when the node's connectivity changes. */
     void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
 
+    /**
+     * @brief Emitted when a message arrives on an open reliable channel.
+     *
+     * `senderId` is the sending participant's SDS identifier. `payload` is
+     * delivered as raw bytes, already decoded from the wire encoding.
+     */
     void channelMessageReceived(const std::string& channelId, const std::string& senderId, const std::vector<uint8_t>& payload, int64_t timestamp);
+
+    /** @brief Emitted once every segment of a @ref channelSend is confirmed. */
     void channelMessageSent(const std::string& channelId, const std::string& requestId, int64_t timestamp);
+
+    /** @brief Emitted when a @ref channelSend finalises with a failed segment. */
     void channelMessageError(const std::string& channelId, const std::string& requestId, const std::string& error, int64_t timestamp);
 
+    /** @brief Emitted when @ref start finishes; `message` carries the reason when `success` is false. */
     void nodeStarted(bool success, const std::string& message, int64_t timestamp);
+
+    /** @brief Emitted when @ref stop finishes; `message` carries the reason when `success` is false. */
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
+
+/** @} */
 
 private:
     // Raw FFI context: what every call and the event registry take.
