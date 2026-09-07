@@ -31,17 +31,29 @@ Then:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r docs/requirements.txt
-./docs/preview.sh                  # build and serve on http://localhost:8000
+./docs/preview.sh                    # build and serve on http://localhost:8000
 ```
+
+While writing, `--watch` rebuilds and reloads the browser on every save,
+including changes to the doc comments in `src/`:
+
+```bash
+pip install -r docs/requirements-dev.txt
+./docs/preview.sh --watch
+```
+
+Set `PORT` to serve somewhere other than 8000. `--watch` serves the bare HTML,
+so the version dropdown stays empty — use the one-shot build to check that.
 
 To build without serving:
 
 ```bash
-doxygen ./docs/Doxyfile            # writes docs/xml
-make -C docs html                  # writes docs/_build/html
+doxygen ./docs/Doxyfile              # writes docs/xml
+make -C docs html                    # writes docs/_build/html
 ```
 
-Sphinx runs with `-W`, so a broken link or reference fails the build.
+`make html` runs with `-W`, so a broken link or reference fails the build.
+`--watch` does not, so a half-written link doesn't kill the server.
 
 Publishing is automatic: `.github/workflows/docs.yml` deploys to the
 `gh-pages` branch when a release is published, under `latest/` and the release
