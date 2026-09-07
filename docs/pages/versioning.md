@@ -39,5 +39,8 @@ Example: `0.2.3` is the fourth release of the module targeting Logos Testnet 2.
 ## Releasing
 
 1. Update `"version"` in [`metadata.json`](../../metadata.json).
-2. Tag the commit: `git tag v<version>`.
-3. Push the tag: `git push origin v<version>`.
+2. Add the new version to [`docs/_root/switcher.json`](../_root/switcher.json)
+   and mark it `"preferred"` — the docs version dropdown is not generated, so a
+   release missing from that file is missing from the dropdown.
+3. Tag the commit: `git tag v<version>`.
+4. Push the tag: `git push origin v<version>`.

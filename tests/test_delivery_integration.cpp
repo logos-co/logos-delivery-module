@@ -151,11 +151,10 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
     std::string nodeInfoIDs = idsResult.value.get<std::string>();
     LOGOS_ASSERT_FALSE(nodeInfoIDs.empty());
 
-    // IDs are returned as "@[ID1,ID2,...]" - strip the "@[" prefix and "]" suffix.
-    if (nodeInfoIDs.size() > 3 &&
-        nodeInfoIDs[0] == '@' && nodeInfoIDs[1] == '[' &&
-        nodeInfoIDs.back() == ']') {
-        nodeInfoIDs = nodeInfoIDs.substr(2, nodeInfoIDs.size() - 3);
+    // IDs are returned as a JSON array of strings: ["ID1","ID2",...].
+    if (nodeInfoIDs.size() > 1 &&
+        nodeInfoIDs.front() == '[' && nodeInfoIDs.back() == ']') {
+        nodeInfoIDs = nodeInfoIDs.substr(1, nodeInfoIDs.size() - 2);
     }
 
     // Split on comma
@@ -165,7 +164,7 @@ LOGOS_TEST(integration_getNodeInfo_returns_value_for_each_id) {
         if (c == ',') {
             if (!current.empty()) ids.push_back(current);
             current.clear();
-        } else if (c != ' ') {
+        } else if (c != ' ' && c != '"') {
             current.push_back(c);
         }
     }

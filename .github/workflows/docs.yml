@@ -9,9 +9,9 @@ name: Docs
 #   https://logos-co.github.io/logos-delivery-module/<tag>/
 #
 # doctests.yml publishes its reports to the same branch under main/ and pr-<N>/,
-# so every push here uses keep_files: true and shares that job's concurrency
-# group — otherwise a docs deploy would delete the report links, and two
-# concurrent pushes would race on the branch.
+# so every push here uses keep_files: true and the deploying runs share that
+# job's concurrency group — otherwise a docs deploy would delete the report
+# links, and two concurrent pushes would race on the branch.
 #
 # Pushes to a non-master branch build the site and upload it as an artifact
 # instead of deploying, so a docs change can be reviewed before it is released.
@@ -31,9 +31,14 @@ on:
 permissions:
   contents: write
 
-# Shared with doctests.yml's publish job so the two never push gh-pages at once.
+# Deploying runs share doctests.yml's publish group so the two never push
+# gh-pages at once. Build-only runs use a per-ref group instead: a shared group
+# keeps a single pending run, so an unrelated push would evict a queued build.
 concurrency:
-  group: gh-pages-publish
+  group: >-
+    ${{ (github.event_name == 'release' || inputs.deploy)
+        && 'gh-pages-publish'
+        || format('docs-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:
@@ -56,7 +61,9 @@ jobs:
           fetch-depth: 0
 
       - name: Install Doxygen
-        run: sudo apt-get install -y doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -87,7 +94,25 @@ jobs:
         id: ver
         if: steps.gate.outputs.publish == 'true'
         shell: bash
-        run: echo "tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          if [ -z "$tag" ]; then
+            # Manual deploy: refuse anything but a tagged commit, so branch docs
+            # cannot land in a released version's directory.
+            if ! tag="$(git describe --tags --exact-match 2>/dev/null)"; then
+              echo "::error::Force deploy needs a tagged commit; $(git rev-parse --short HEAD) has no tag." >&2
+              exit 1
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          newest="$(git tag --list --sort=-v:refname | head -n1)"
+          if [ "${{ github.event.release.prerelease }}" = "true" ] || [ "$tag" != "$newest" ]; then
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Publish this version
         if: steps.gate.outputs.publish == 'true'
@@ -99,7 +124,7 @@ jobs:
           keep_files: true
 
       - name: Publish this version as latest
-        if: steps.gate.outputs.publish == 'true'
+        if: steps.gate.outputs.publish == 'true' && steps.ver.outputs.is_latest == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

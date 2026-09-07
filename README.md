@@ -107,7 +107,7 @@ configuration, events, and the guides for running and querying a node.
 ### Building the documentation
 
 The site is Doxygen (API extraction) → Breathe → Sphinx (rendering), with the
-Markdown guides in `docs/` pulled in via myst-parser.
+Markdown guides in `docs/pages/` pulled in via myst-parser.
 
 `doxygen` is not in the dev shell, so install it once:
 
