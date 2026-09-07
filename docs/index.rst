@@ -17,14 +17,14 @@ A message goes through four layers on its way out:
 
 .. code-block:: text
 
-   your module / UI
+   Logos Core  ·  your module or UI
         │  calls delivery_module methods
         ▼
-   delivery_module            ← this repository
+   delivery_module            ← this repository, a Qt plugin
         │  C FFI
         ▼
    liblogosdelivery
-        │
+        │  Nim API
         ▼
    logos-delivery             ← the node implementation
 
@@ -39,7 +39,8 @@ Calls return as soon as the request is dispatched. What actually happened on
 the network arrives later as an **event** — ``messageSent``,
 ``messagePropagated``, ``messageError``, ``messageReceived``,
 ``connectionStateChanged``. Subscribe to those rather than reading a return
-value; see the :doc:`API Reference <api_reference>` for every method and event.
+value — see :doc:`Events <events>` for the full set, and the
+:doc:`API Reference <api_reference>` for every method signature.
 
 To watch this run end-to-end against a real ``logoscore`` daemon, see the
 `Tutorial
@@ -126,5 +127,6 @@ rather than inventing one — for example ``/myapp/1/chat/proto``.
    :maxdepth: 2
    :caption: Reference
 
+   events
    api_reference
    versioning
