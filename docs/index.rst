@@ -37,6 +37,7 @@ reading a return value.
 API Reference
 -------------
 
+- :doc:`API layers <pages/api-layers>`
 - :doc:`Methods <pages/api_reference>`
 - :doc:`Events <pages/events>`
 

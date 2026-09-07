@@ -235,6 +235,25 @@ public:
      */
     StdLogosResult channelClose(const std::string& channelId);
 
+    /**
+     * @brief Lists the node info items this node advertises, for use with
+     *        @ref getNodeInfo.
+     *
+     * The list comes back as a Nim sequence rendering rather than JSON, so a
+     * caller strips the wrapper and splits on commas:
+     *
+     * @code
+     * @[Version, Metrics, MyMultiaddresses, MyENR, MyPeerId]
+     * @endcode
+     *
+     * Which items a node advertises depends on how it was built and
+     * configured, so treat the set as discovered rather than fixed. An
+     * advertised item may still return an empty value from @ref getNodeInfo
+     * when the feature behind it is unconfigured.
+     *
+     * @return Success with the list above, or error details. Fails before
+     *         @ref createNode has run.
+     */
     StdLogosResult getAvailableNodeInfoIDs();
 
     /**
