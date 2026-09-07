@@ -48,23 +48,13 @@ Internal docs
 - :doc:`Querying a node <pages/query-node>`
 - :doc:`Versioning <pages/versioning>`
 
-.. Hidden: the lists above are the visible index; these only build the sidebar
-   nav and the page hierarchy.
+.. Hidden: the lists above are the visible index. This only builds the page
+   hierarchy; the two entries are what the top bar shows, and each one owns the
+   pages listed above it.
 
 .. toctree::
    :hidden:
-   :maxdepth: 1
-   :caption: API reference
+   :maxdepth: 2
 
-   pages/api_reference
-   pages/events
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: Internal docs
-
-   pages/architecture
-   pages/run-node
-   pages/query-node
-   pages/versioning
+   pages/api
+   pages/internal
