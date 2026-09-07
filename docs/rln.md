@@ -29,7 +29,7 @@ RLN rides `createNode`'s flat config:
 }
 ```
 
-- `rln-relay-lez: true` is the switch: the library outsources RLN, and this
+- `rln-lez: true` is the switch: the library outsources RLN, and this
   module enables its bridge to answer (a bridge setup failure fails
   `createNode`). The `rlnBridgeEnable` method does the same without config —
   mainly for tests.
