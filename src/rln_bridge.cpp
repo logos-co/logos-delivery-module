@@ -24,6 +24,14 @@ constexpr const char* kOrigin = "delivery_module";
 constexpr int kReadMs = 70'000;
 constexpr int kRegisterMs = 190'000;
 
+// Queue discipline (stopgap until the ABI carries deadlines): a full lane
+// sheds new work immediately, and a dequeued job past its library budget is
+// answered without serving. The margin sheds a job whose remaining budget
+// could not cover a serve anyway.
+constexpr size_t kFastQueueCap = 64;
+constexpr size_t kSlowQueueCap = 8;
+constexpr int kExpiryMarginMs = 500;
+
 // One in-flight raw lp call: the trampoline fills the box and releases the
 // semaphore from the lp client's owner thread. shared_ptr keeps the box alive
 // for a reply that lands after the wait already timed out.
@@ -116,6 +124,42 @@ bool RlnBridge::isTstrOp(Op op)
     return op == Op::Register || op == Op::GetState;
 }
 
+// Mirrors the library's budgets (rln_api.nim: RlnLocalTimeout 10 s,
+// RlnRegistryReadTimeout 80 s, RlnRegisterTimeout 200 s).
+int RlnBridge::budgetMsFor(Op op)
+{
+    switch (op) {
+    case Op::Register:
+        return 200'000;
+    case Op::GetState:
+    case Op::Generate:
+        return 80'000;
+    default:
+        return 10'000; // start, stop, get_epoch_quota, validate_proof
+    }
+}
+
+const char* RlnBridge::opName(Op op)
+{
+    switch (op) {
+    case Op::Start:
+        return "start";
+    case Op::Stop:
+        return "stop";
+    case Op::Register:
+        return "register_membership";
+    case Op::GetState:
+        return "get_membership_state";
+    case Op::GetQuota:
+        return "get_epoch_quota";
+    case Op::Generate:
+        return "generate_proof";
+    case Op::Validate:
+        return "validate_proof";
+    }
+    return "unknown";
+}
+
 std::string RlnBridge::transportFail(Op op, const std::string& cls,
                                      const std::string& kind, const std::string& msg)
 {
@@ -130,9 +174,31 @@ std::string RlnBridge::transportFail(Op op, const std::string& cls,
 void RlnBridge::enqueue(Job job)
 {
     Lane& lane = isSlowOp(job.op) ? m_slow : m_fast;
+    job.enqueuedAt = std::chrono::steady_clock::now();
+    // start/stop are rare lifecycle ops and always accepted.
+    const bool lifecycleOp = job.op == Op::Start || job.op == Op::Stop;
+    const size_t cap = isSlowOp(job.op) ? kSlowQueueCap : kFastQueueCap;
+    bool shed = false;
+    size_t depth = 0;
     {
         std::lock_guard<std::mutex> lock(m_lock);
-        lane.queue.push_back(std::move(job));
+        depth = lane.queue.size();
+        shed = !lifecycleOp && depth >= cap;
+        if (!shed) {
+            lane.queue.push_back(std::move(job));
+        }
+    }
+    if (shed) {
+        // Immediate failure instead of letting the library's clock expire in
+        // queue. Responding from the callback thread is safe: the library
+        // fires callbacks outside its lock.
+        const std::string out = transportFail(job.op, "transient",
+            "rln_bridge_overloaded",
+            std::string(opName(job.op)) + ": shed at enqueue, " +
+                (isSlowOp(job.op) ? "slow" : "fast") + " lane full at depth " +
+                std::to_string(depth));
+        (void)logosdelivery_rln_response(job.reqId, out.c_str());
+        return;
     }
     lane.cv.notify_one();
 }
@@ -235,12 +301,25 @@ void RlnBridge::laneLoop(Lane* lane)
             job = std::move(lane->queue.front());
             lane->queue.pop_front();
         }
+        const auto waitedMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - job.enqueuedAt)
+                .count();
         std::string out;
-        try {
-            out = serveOp(job);
-        } catch (const std::exception& e) {
-            out = transportFail(job.op, "permanent", "bridge_exception",
-                std::string("rln bridge exception: ") + e.what());
+        if (waitedMs + kExpiryMarginMs > budgetMsFor(job.op)) {
+            // The library's clock ran out while the job sat in queue: serving
+            // now would be wasted work ahead of jobs still awaited.
+            out = transportFail(job.op, "transient", "rln_bridge_expired",
+                std::string(opName(job.op)) + ": expired in queue after " +
+                    std::to_string(waitedMs) + "ms of a " +
+                    std::to_string(budgetMsFor(job.op)) + "ms budget");
+        } else {
+            try {
+                out = serveOp(job);
+            } catch (const std::exception& e) {
+                out = transportFail(job.op, "permanent", "bridge_exception",
+                    std::string("rln bridge exception: ") + e.what());
+            }
         }
         // Non-zero: the library already timed out this reqId — nothing to do.
         (void)logosdelivery_rln_response(job.reqId, out.c_str());

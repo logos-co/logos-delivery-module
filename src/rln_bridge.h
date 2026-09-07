@@ -15,6 +15,12 @@
 //     typed client. These answer in milliseconds; the delivery library's own
 //     10 s budget for them expires before the client's default would.
 //
+// Lanes are bounded and deadline-aware: a full lane sheds new work with an
+// immediate transient failure (start/stop always accepted), and a job whose
+// library budget ran out while queued is answered without serving — so a
+// burst degrades into fast failures instead of a queue of expired jobs
+// blocking the still-awaited ones.
+//
 // Threading: init() is the second-phase constructor. It cannot run during
 // construction, because the module context is not ready yet. Instead it runs
 // lazily on the first enable call — enable is a module method, and methods
@@ -24,6 +30,7 @@
 // its callbacks on foreign threads).
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -80,6 +87,7 @@ private:
         std::string optionsJson;
         std::string proofJson;
         uint64_t timestamp = 0;
+        std::chrono::steady_clock::time_point enqueuedAt;
     };
 
     struct Lane {
@@ -90,6 +98,10 @@ private:
 
     static bool isSlowOp(Op op);
     static bool isTstrOp(Op op);
+    // The delivery library's per-op response budget, running since its
+    // callback fired — queue wait spends the same clock the serve does.
+    static int budgetMsFor(Op op);
+    static const char* opName(Op op);
     // The only reply this bridge ever fabricates: a transport failure in the
     // error shape of the op's own method family (docs/rln.md).
     static std::string transportFail(Op op, const std::string& cls,
