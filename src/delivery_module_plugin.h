@@ -29,25 +29,21 @@
  * Asynchronous events are emitted via typed `logos_events:` declarations.
  * The codegen generates method bodies that route through
  * LogosModuleContext::emitEventImpl_.
- *
- * The raw FFI `eventType` values mapped into these typed events are:
- * - `message_sent` -> `messageSent`
- * - `message_error` -> `messageError`
- * - `message_propagated` -> `messagePropagated`
- * - `message_received` -> `messageReceived`
- * - `connection_status_change` -> `connectionStateChanged`
- * - `channel_message_received` -> `channelMessageReceived`
- * - `channel_message_sent` -> `channelMessageSent`
- * - `channel_message_error` -> `channelMessageError`
- *
- * As a general concept consider using proper content_topic format for your purpose.
- * --> https://lip.logos.co/messaging/informational/23/topics.html#content-topics
  */
 class DeliveryModuleImpl : public LogosModuleContext
 {
 public:
     DeliveryModuleImpl();
     ~DeliveryModuleImpl();
+
+/**
+ * @name Methods
+ *
+ * Every call returns as soon as its request is dispatched. Where the outcome
+ * only becomes known later, it is reported through the events below.
+ *
+ * @{
+ */
 
     /**
      * @brief Creates a liblogosdelivery node from a JSON configuration.
@@ -235,6 +231,24 @@ public:
      */
     StdLogosResult channelClose(const std::string& channelId);
 
+    /**
+     * @brief Lists the node info items this node advertises, for use with
+     *        @ref getNodeInfo.
+     *
+     * The list comes back as a JSON array of strings:
+     *
+     * @code{.json}
+     * ["Version", "Metrics", "MyMultiaddresses", "MyENR", "MyPeerId"]
+     * @endcode
+     *
+     * Which items a node advertises depends on how it was built and
+     * configured, so treat the set as discovered rather than fixed. An
+     * advertised item may still return an empty value from @ref getNodeInfo
+     * when the feature behind it is unconfigured.
+     *
+     * @return Success with the list above, or error details. Fails before
+     *         @ref createNode has run.
+     */
     StdLogosResult getAvailableNodeInfoIDs();
 
     /**
@@ -271,19 +285,65 @@ public:
 
     std::string name() const { return "delivery_module"; }
 
+/** @} */
+
+/**
+ * @defgroup events Events
+ *
+ * Asynchronous notifications the module emits. Never invoked by a caller: the
+ * codegen turns each declaration into an emitter. The rendered docs carry the
+ * request-id and timestamp conventions that apply across all of them.
+ *
+ * @{
+ */
+
 logos_events:
+    /**
+     * @brief Emitted when the network has validated a sent message.
+     *
+     * The success terminal state for @ref send, usually preceded by
+     * @ref messagePropagated.
+     */
     void messageSent(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+
+    /** @brief Emitted when the module could not send a message; `error` carries the reason. */
     void messageError(const std::string& requestId, const std::string& messageHash, const std::string& error, int64_t timestamp);
+
+    /** @brief Emitted when a message has reached the network but is not yet validated. */
     void messagePropagated(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+
+    /**
+     * @brief Emitted when a message arrives on a subscribed content topic.
+     *
+     * `payload` is delivered as raw bytes, already decoded from the wire
+     * encoding.
+     */
     void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
+
+    /** @brief Emitted when the node's connectivity changes. */
     void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
 
+    /**
+     * @brief Emitted when a message arrives on an open reliable channel.
+     *
+     * `senderId` is the sending participant's SDS identifier. `payload` is
+     * delivered as raw bytes, already decoded from the wire encoding.
+     */
     void channelMessageReceived(const std::string& channelId, const std::string& senderId, const std::vector<uint8_t>& payload, int64_t timestamp);
+
+    /** @brief Emitted once every segment of a @ref channelSend is confirmed. */
     void channelMessageSent(const std::string& channelId, const std::string& requestId, int64_t timestamp);
+
+    /** @brief Emitted when a @ref channelSend finalises with a failed segment. */
     void channelMessageError(const std::string& channelId, const std::string& requestId, const std::string& error, int64_t timestamp);
 
+    /** @brief Emitted when @ref start finishes; `message` carries the reason when `success` is false. */
     void nodeStarted(bool success, const std::string& message, int64_t timestamp);
+
+    /** @brief Emitted when @ref stop finishes; `message` carries the reason when `success` is false. */
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
+
+/** @} */
 
 private:
     // Raw FFI context: what every call and the event registry take.

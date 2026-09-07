@@ -20,7 +20,7 @@ logoscore call delivery_module getAvailableNodeInfoIDs --json | jq
   "result": {
     "error": null,
     "success": true,
-    "value": "@[Version, Metrics, MyMultiaddresses, MyENR, MyPeerId]"
+    "value": "[\"Version\",\"Metrics\",\"MyMultiaddresses\",\"MyENR\",\"MyPeerId\"]"
   },
   "status": "ok"
 }
