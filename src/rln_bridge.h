@@ -3,7 +3,7 @@
 // In-process RLN responder: serves the delivery library's rln* callbacks by
 // calling the co-loaded liblogos_rln_module and feeding each reply into
 // logosdelivery_rln_response. createNode enables it whenever the node config
-// runs lez RLN ("rln-relay-lez"); the rln*Request events keep emitting
+// runs lez RLN ("rln-lez"); the rln*Request events keep emitting
 // either way, for observability (docs/rln.md).
 //
 // Two worker lanes, so a slow registry operation never delays proof

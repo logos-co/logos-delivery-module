@@ -333,7 +333,7 @@ public:
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
      * call any time before @ref start. @ref createNode does this
-     * automatically when the config's `rln-relay-lez` is true. Calling it
+     * automatically when the config's `rln-lez` is true. Calling it
      * directly is mainly for test purposes.
      */
     StdLogosResult rlnBridgeEnable();
@@ -430,7 +430,7 @@ logos_events:
 private:
     // Wires the bridge to the co-loaded RLN module on first use — modules()
     // is only valid once the framework has handed the context over — then
-    // starts it. Both enable doors (rlnBridgeEnable, the rln-relay-lez config
+    // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
     // path) funnel through here. Returns an error string, or empty.
     std::string enableRlnBridge();
 

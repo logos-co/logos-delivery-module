@@ -353,7 +353,7 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
     return delivery_test_events::g_lastRlnRequest.op == op;
 }
 
-// The full start chain, served in-process: createNode sniffs "rln-relay-lez"
+// The full start chain, served in-process: createNode sniffs "rln-lez"
 // from the config and enables the bridge, so the library's RLN callbacks are
 // answered by the co-loaded RLN module — or, when none is reachable, by the
 // bridge's own transport-failure replies. Either way every request completes
@@ -370,9 +370,9 @@ static const char* kRlnConfig = R"({
   "relay": true,
   "numShardsInNetwork": 8,
   "rln-relay": true,
-  "rln-relay-lez": true,
-  "rln-relay-registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
-  "rln-relay-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "rln-lez": true,
+  "rln-registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
+  "rln-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
   "rln-relay-epoch-sec": 600,
   "rln-relay-dynamic": false,
   "rln-relay-chain-id": 1
