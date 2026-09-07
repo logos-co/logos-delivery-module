@@ -17,8 +17,5 @@ Timestamps are ``int64`` nanoseconds since the Unix epoch. ``messageReceived``
 reports the timestamp carried by the message itself; every other event is
 stamped by the module host when the event is emitted.
 
-Reference
----------
-
 .. doxygengroup:: events
    :content-only:

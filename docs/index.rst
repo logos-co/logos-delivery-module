@@ -49,12 +49,13 @@ Internal docs
 - :doc:`Versioning <pages/versioning>`
 
 .. Hidden: the lists above are the visible index. This only builds the page
-   hierarchy; the two entries are what the top bar shows, and each one owns the
-   pages listed above it.
+   hierarchy; these entries are what the top bar shows, and the last two own
+   the pages listed above it.
 
 .. toctree::
    :hidden:
    :maxdepth: 2
 
+   pages/api-layers
    pages/api
    pages/internal
