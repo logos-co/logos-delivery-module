@@ -208,10 +208,10 @@ std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
         return {};
     }
     const std::string k(key);
-    constexpr const char* kSvcPrefix = "svc:";
-    constexpr size_t kSvcPrefixLen = 4;
-    if (k.rfind(kSvcPrefix, 0) == 0) {
-        return k.substr(kSvcPrefixLen);
+    constexpr const char* kServicePrefix = "service:";
+    constexpr size_t kServicePrefixLen = 8;
+    if (k.rfind(kServicePrefix, 0) == 0) {
+        return k.substr(kServicePrefixLen);
     }
     return k;
 }

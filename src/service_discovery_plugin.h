@@ -94,8 +94,8 @@ private:
      */
     std::string ensureBackend();
 
-    /// Criteria keys arrive as "svc:<id>" / "shard:<c>/<s>" / "cap:<x>".
-    /// libp2p wants a bare service id, so the "svc:" prefix is stripped; other
+    /// Criteria keys arrive as "service:<id>" / "topic:<pubsubTopic>" / "cap:<x>".
+    /// libp2p wants a bare service id, so the "service:" prefix is stripped; other
     /// kinds pass through verbatim, which keeps advertise and lookup agreeing
     /// on one string without inventing a mapping libp2p could not honour.
     static std::string toServiceId(const char* key);
