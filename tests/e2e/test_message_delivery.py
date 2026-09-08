@@ -17,6 +17,7 @@ from libs.constants import CONTENT_TOPIC
 from libs.helpers import (
     SUBSCRIBE_GRACE_S,
     event_content_topic,
+    event_payload,
     event_request_id,
     parse_event,
     wait_for_event,
@@ -81,3 +82,8 @@ def test_two_nodes_message_received(node_a, node_b):
     topic = event_content_topic(event)
     if topic is not None:
         assert topic == CONTENT_TOPIC, f"messageReceived contentTopic {topic!r} != {CONTENT_TOPIC!r}"
+
+    # A decoder that disagrees with the library's wire format yields empty bytes
+    # rather than an error, so assert the payload survived the trip.
+    payload = event_payload(event)
+    assert payload, f"messageReceived carried an empty payload: {parse_event(event)!r}"

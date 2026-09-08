@@ -66,6 +66,17 @@ public:
      * { "mode": "Core", "preset": "logos.test" }
      * @endcode
      *
+     * One such override is `anonymityLevel` — `"None"` (default), `"Preferred"`
+     * or `"Required"`. Anything above `"None"` mounts mix and routes sends
+     * through it, so it conflicts with an explicit `"mix": false`:
+     * @code{.json}
+     * {
+     *   "mode": "Core",
+     *   "preset": "logos.test",
+     *   "messagingOverrides": { "anonymityLevel": "Required" }
+     * }
+     * @endcode
+     *
      * **Node operator** — kernel-only service node on a public network. `mode`
      * is not applied on this layer, so protocol flags are set explicitly in
      * `kernelConf`:

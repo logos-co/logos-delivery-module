@@ -48,27 +48,7 @@ int64_t currentTimestampNs() {
     return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
 }
 
-// message_received: JSON array of byte values.
-std::vector<uint8_t> decodeByteArrayPayload(const nlohmann::json& payloadValue) {
-    if (!payloadValue.is_array()) {
-        return {};
-    }
-    std::vector<uint8_t> payloadBytes;
-    payloadBytes.reserve(payloadValue.size());
-    for (const auto& val : payloadValue) {
-        if (!val.is_number_integer()) {
-            return {};
-        }
-        auto byte = val.get<int64_t>();
-        if (byte < 0 || byte > 255) {
-            return {};
-        }
-        payloadBytes.push_back(static_cast<uint8_t>(byte));
-    }
-    return payloadBytes;
-}
-
-// channel_message_received: base64 string.
+// message_received and channel_message_received: base64 string.
 std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
     if (!payloadValue.is_string()) {
         return {};
@@ -193,7 +173,7 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
 
                 std::vector<uint8_t> payloadBytes;
                 if (msgObj.contains("payload")) {
-                    payloadBytes = decodeByteArrayPayload(msgObj["payload"]);
+                    payloadBytes = decodeBase64Payload(msgObj["payload"]);
                 }
 
                 int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));

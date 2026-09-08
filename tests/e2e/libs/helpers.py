@@ -205,3 +205,8 @@ def event_content_topic(event: dict) -> Optional[str]:
     """contentTopic of a messageReceived event (arg 1)."""
     ct = event_arg(event, 1)
     return str(ct) if ct is not None else None
+
+
+def event_payload(event: dict) -> Any:
+    """payload of a messageReceived event (arg 2)."""
+    return event_arg(event, 2)
