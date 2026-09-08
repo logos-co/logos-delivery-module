@@ -75,7 +75,39 @@
               "$out/lib/liblogosdelivery.dylib"
           fi
         fi
-        
+
+        # librln.dylib is copied out of zerokit's output, so everything it loads
+        # by absolute store path is a dependency of zerokit and not of this
+        # module. A module travels to an app inside an LGX archive, which nix
+        # cannot scan for store paths, so nothing installs those alongside the
+        # module and the plugin fails to dlopen wherever they do not already
+        # exist. Bundle them next to librln and load them through @loader_path,
+        # the way librln and libpq already travel with the module. Transitively:
+        # the libiconv librln loads re-exports libcharset from the same path.
+        pending="$out/lib/librln.dylib"
+        while [ -n "$pending" ]; do
+          next=""
+          for macho in $pending; do
+            [ -f "$macho" ] || continue
+            chmod u+w "$macho"
+            for dep in $(otool -l "$macho" | awk '
+              $1 == "cmd" { load = ($2 ~ /^LC_(LOAD_DYLIB|LOAD_WEAK_DYLIB|REEXPORT_DYLIB)$/) }
+              load && $1 == "name" && $2 ~ "^/nix/store/" { print $2 }
+            '); do
+              name=$(basename "$dep")
+              if [ ! -f "$out/lib/$name" ]; then
+                echo "Bundling $dep as @loader_path/$name"
+                cp -L "$dep" "$out/lib/$name"
+                chmod u+w "$out/lib/$name"
+                install_name_tool -id "@loader_path/$name" "$out/lib/$name"
+                next="$next $out/lib/$name"
+              fi
+              install_name_tool -change "$dep" "@loader_path/$name" "$macho"
+            done
+          done
+          pending="$next"
+        done
+
         # Use pkg-config to locate the exact libpq from the build environment
         LIBPQ_LIBDIR=$(pkg-config --variable=libdir libpq 2>/dev/null || true)
         if [ -n "$LIBPQ_LIBDIR" ] && [ -d "$LIBPQ_LIBDIR" ]; then
