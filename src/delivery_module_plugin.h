@@ -12,6 +12,16 @@
 
 class RlnBridge;
 
+// Everything the delivery library no longer knows about RLN. Read out of
+// createNode's config and stripped from it before the config reaches the
+// library, which rejects these keys.
+struct DeliveryRlnConfig {
+    bool enabled = false;
+    std::string registryId;
+    std::string rlnIdentifier;
+    uint64_t epochSizeSec = 0;
+};
+
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
  *
@@ -407,11 +417,6 @@ logos_events:
      * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
      * local emission time, as on every other event.
      */
-    void rlnStartRequest(int64_t reqId, const std::string& configJson, int64_t timestamp);
-    void rlnStopRequest(int64_t reqId, int64_t timestamp);
-    void rlnRegisterRequest(int64_t reqId, const std::string& registryId,
-                            const std::string& rlnIdentifier,
-                            const std::string& optionsJson, int64_t timestamp);
     void rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
                                       const std::string& rlnIdentifier, int64_t timestamp);
     void rlnGetEpochQuotaRequest(int64_t reqId, const std::string& registryId,
@@ -437,6 +442,10 @@ private:
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
     // and started by enableRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
+
+    // Everything the delivery library no longer knows about RLN (see
+    // DeliveryRlnConfig).
+    DeliveryRlnConfig rlnConfig;
 
     // Raw FFI context: what every call and the event registry take.
     void* deliveryCtx;
@@ -465,25 +474,19 @@ private:
     static void start_callback(int callerRet, char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
 
-    // RLN callback slots registered in createNode, one per ABI function
+    // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
     // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
     // for the duration of the call. userData is the DeliveryModuleImpl*.
-    static void rln_start_callback(uint64_t reqId, const char* configJson, void* userData);
-    static void rln_stop_callback(uint64_t reqId, void* userData);
-    static void rln_register_callback(uint64_t reqId, const char* registryId,
-                                      const char* rlnIdentifier,
-                                      const char* optionsJson, void* userData);
-    static void rln_get_membership_state_callback(uint64_t reqId, const char* registryId,
-                                                  const char* rlnIdentifier, void* userData);
-    static void rln_get_epoch_quota_callback(uint64_t reqId, const char* registryId,
-                                             const char* rlnIdentifier,
-                                             uint64_t timestamp, void* userData);
-    static void rln_generate_proof_callback(uint64_t reqId, const char* registryId,
-                                            const char* rlnIdentifier, const char* signalHex,
+    //
+    // The library's plugin carries no registry or membership, so each
+    // trampoline adds this module's own rlnConfig before forwarding.
+    static void rln_get_membership_state_callback(uint64_t reqId, void* userData);
+    static void rln_get_epoch_quota_callback(uint64_t reqId, uint64_t timestamp,
+                                             void* userData);
+    static void rln_generate_proof_callback(uint64_t reqId, const char* signalHex,
                                             uint64_t timestamp, void* userData);
-    static void rln_validate_proof_callback(uint64_t reqId, const char* registryId,
-                                            const char* rlnIdentifier, const char* signalHex,
+    static void rln_validate_proof_callback(uint64_t reqId, const char* signalHex,
                                             uint64_t timestamp, const char* proofJson,
                                             void* userData);
 };

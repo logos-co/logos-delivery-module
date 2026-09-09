@@ -26,7 +26,7 @@
 #include "mock_rln_state.h"
 
 namespace delivery_test_rln {
-LogosDeliveryRlnCallbacks g_callbacks{};
+LogosDeliveryRlnPlugin g_callbacks{};
 void* g_userData = nullptr;
 bool g_callbacksSet = false;
 int g_setCallbacksCalls = 0;
@@ -191,10 +191,10 @@ int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_scalar cb, 
     return RET_OK;
 }
 
-// RLN surface (liblogosdelivery_rln.h). Registration is recorded so tests can
+// RLN surface (liblogosdelivery_rln.h). The install is recorded so tests can
 // fire the stored callback slots, simulating the library requesting an RLN op.
-int logosdelivery_rln_set_callbacks(const LogosDeliveryRlnCallbacks* cbs, void* user_data) {
-    LOGOS_CMOCK_RECORD("logosdelivery_rln_set_callbacks");
+int logosdelivery_rln_set_plugin(const LogosDeliveryRlnPlugin* cbs, void* user_data) {
+    LOGOS_CMOCK_RECORD("logosdelivery_rln_set_plugin");
     delivery_test_rln::g_setCallbacksCalls++;
     if (cbs) {
         delivery_test_rln::g_callbacks = *cbs;
@@ -203,7 +203,7 @@ int logosdelivery_rln_set_callbacks(const LogosDeliveryRlnCallbacks* cbs, void* 
     } else {
         // NULL clears the surface (and, in the real library, fails all
         // in-flight requests).
-        delivery_test_rln::g_callbacks = LogosDeliveryRlnCallbacks{};
+        delivery_test_rln::g_callbacks = LogosDeliveryRlnPlugin{};
         delivery_test_rln::g_userData = nullptr;
         delivery_test_rln::g_callbacksSet = false;
     }

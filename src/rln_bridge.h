@@ -6,9 +6,14 @@
 // runs lez RLN ("rln-lez"); the rln*Request events keep emitting
 // either way, for observability (docs/rln.md).
 //
+// The delivery library's RLN plugin is implementation-agnostic: it never names
+// a registry or a membership and never starts the backend. This module holds
+// that knowledge — it starts and stops liblogos_rln_module itself and adds the
+// registry id and rln identifier to every call it forwards.
+//
 // Two worker lanes, so a slow registry operation never delays proof
 // validation on the message hot path:
-//   slow lane — register_membership, get_membership_state, generate_proof:
+//   slow lane — get_membership_state, generate_proof:
 //     raw lp calls with explicit timeouts, because the generated typed client
 //     has no per-call timeout and these ops can legitimately take minutes.
 //   fast lane — start, stop, get_epoch_quota, validate_proof: the generated
@@ -34,6 +39,8 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -58,11 +65,15 @@ public:
     std::string enable();
     bool enabled() const { return m_enabled.load(std::memory_order_acquire); }
 
-    // Op entry points (any thread; copy + enqueue, return immediately).
-    void start(uint64_t reqId, std::string configJson);
-    void stop(uint64_t reqId);
-    void registerMembership(uint64_t reqId, std::string registryId,
-                            std::string rlnIdentifier, std::string optionsJson);
+    // Backend lifecycle, driven by this module — the delivery library neither
+    // starts nor stops the RLN module. Both block until the lane answers and
+    // return the module's reply text (empty on success, error text otherwise).
+    std::string startBackend(std::string configJson);
+    std::string stopBackend();
+
+    // Op entry points (any thread; copy + enqueue, return immediately). The
+    // registry and identifier are this module's own configuration: they do not
+    // come from the delivery library, which is agnostic of them.
     void getMembershipState(uint64_t reqId, std::string registryId,
                             std::string rlnIdentifier);
     void getEpochQuota(uint64_t reqId, std::string registryId,
@@ -75,7 +86,7 @@ public:
                        uint64_t timestamp, std::string proofJson);
 
 private:
-    enum class Op { Start, Stop, Register, GetState, GetQuota, Generate, Validate };
+    enum class Op { Start, Stop, GetState, GetQuota, Generate, Validate };
 
     struct Job {
         uint64_t reqId = 0;
@@ -84,10 +95,12 @@ private:
         std::string registryId;
         std::string rlnIdentifier;
         std::string signalHex;
-        std::string optionsJson;
         std::string proofJson;
         uint64_t timestamp = 0;
         std::chrono::steady_clock::time_point enqueuedAt;
+        // Set for module-driven lifecycle ops: the reply goes here instead of
+        // into logosdelivery_rln_response, which has no reqId to answer.
+        std::shared_ptr<std::promise<std::string>> reply;
     };
 
     struct Lane {
@@ -108,6 +121,8 @@ private:
                                      const std::string& kind, const std::string& msg);
 
     void enqueue(Job job);
+    // Runs a lifecycle op through the fast lane and waits for its reply.
+    std::string runLifecycle(Op op, std::string configJson);
     void laneLoop(Lane* lane);
     std::string serveOp(const Job& job);
     std::string serveFast(const Job& job);

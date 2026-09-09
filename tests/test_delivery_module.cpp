@@ -18,6 +18,20 @@ static DeliveryModuleImpl* createInitializedImpl(LogosTestContext& t) {
     return impl;
 }
 
+// RLN config: the module keeps these keys and strips them before the config
+// reaches the library. Without a framework context the bridge cannot come up,
+// which is not fatal — the plugin is still installed.
+static constexpr const char* kRlnCfg =
+    R"({"logLevel":"INFO","rln-lez":true,"rln-registry-id":"reg",)"
+    R"("rln-identifier":"rln-id","rln-relay-epoch-sec":600})";
+
+static DeliveryModuleImpl* createRlnImpl(LogosTestContext& t) {
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+    auto* impl = new DeliveryModuleImpl();
+    LOGOS_ASSERT_TRUE(impl->createNode(kRlnCfg).success);
+    return impl;
+}
+
 // createNode
 
 LOGOS_TEST(createNode_succeeds_when_ffi_returns_non_null_context) {
@@ -477,19 +491,16 @@ LOGOS_TEST(collectOpenMetricsText_returns_metrics_text_verbatim) {
 
 // RLN bridge (liblogosdelivery_rln.h)
 
-LOGOS_TEST(createNode_registers_rln_callbacks) {
+LOGOS_TEST(createNode_installs_rln_plugin) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    auto* impl = createInitializedImpl(t);
+    auto* impl = createRlnImpl(t);
 
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_rln_set_callbacks"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_rln_set_plugin"));
     LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
     // userData must be the module instance so the trampolines can emit events.
     LOGOS_ASSERT(delivery_test_rln::g_userData == static_cast<void*>(impl));
-    // All seven slots populated.
-    LOGOS_ASSERT(delivery_test_rln::g_callbacks.start != nullptr);
-    LOGOS_ASSERT(delivery_test_rln::g_callbacks.stop != nullptr);
-    LOGOS_ASSERT(delivery_test_rln::g_callbacks.register_membership != nullptr);
+    // All four slots populated.
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_membership_state != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_epoch_quota != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.generate_proof != nullptr);
@@ -502,16 +513,17 @@ LOGOS_TEST(rln_generate_proof_callback_emits_typed_event_with_verbatim_args) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     delivery_test_events::resetRlnRequestEvent();
-    auto* impl = createInitializedImpl(t);
+    auto* impl = createRlnImpl(t);
 
-    delivery_test_rln::g_callbacks.generate_proof(7, "eip155:59144:0xb9cd", "0xdead", "ab01",
-                                                  1700000000, delivery_test_rln::g_userData);
+    delivery_test_rln::g_callbacks.generate_proof(7, "ab01", 1700000000,
+                                                  delivery_test_rln::g_userData);
 
     const auto& e = delivery_test_events::g_lastRlnRequest;
     LOGOS_ASSERT_EQ(e.op, std::string("generate_proof"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(7));
-    LOGOS_ASSERT_EQ(e.registryId, std::string("eip155:59144:0xb9cd"));
-    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("0xdead"));
+    // Supplied by this module, not by the library.
+    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
+    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
     LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
     LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000000));
 
@@ -521,65 +533,70 @@ LOGOS_TEST(rln_generate_proof_callback_emits_typed_event_with_verbatim_args) {
 LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    auto* impl = createInitializedImpl(t);
+    auto* impl = createRlnImpl(t);
     void* ud = delivery_test_rln::g_userData;
 
-    // Slot/arg mix-ups within a signature are invisible to the compiler for
-    // same-typed string params, so each slot is fired once and its routing
-    // asserted. The opaque JSON args (options/proof) must pass through
+    // The library's plugin carries no registry or membership, so each slot is
+    // fired with only its own arguments and the module's own configuration is
+    // asserted on the emitted event. The opaque proof JSON must pass through
     // untouched.
     const auto& e = delivery_test_events::g_lastRlnRequest;
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.start(1, R"({"epoch_size_sec":600})", ud);
-    LOGOS_ASSERT_EQ(e.op, std::string("start"));
-    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(1));
-    LOGOS_ASSERT_EQ(e.configJson, std::string(R"({"epoch_size_sec":600})"));
-
-    delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.stop(2, ud);
-    LOGOS_ASSERT_EQ(e.op, std::string("stop"));
-    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(2));
-
-    delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.register_membership(
-        3, "reg", "rln-id", R"([{"key":"rate_limit","value":"10"}])", ud);
-    LOGOS_ASSERT_EQ(e.op, std::string("register_membership"));
-    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(3));
-    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
-    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
-    LOGOS_ASSERT_EQ(e.optionsJson, std::string(R"([{"key":"rate_limit","value":"10"}])"));
-
-    delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.get_membership_state(4, "reg", "rln-id", ud);
+    delivery_test_rln::g_callbacks.get_membership_state(4, ud);
     LOGOS_ASSERT_EQ(e.op, std::string("get_membership_state"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(4));
     LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
     LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.get_epoch_quota(5, "reg", "rln-id", 1700000001, ud);
+    delivery_test_rln::g_callbacks.get_epoch_quota(5, 1700000001, ud);
     LOGOS_ASSERT_EQ(e.op, std::string("get_epoch_quota"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(5));
+    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
+    LOGOS_ASSERT_EQ(e.rlnIdentifier, std::string("rln-id"));
     LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000001));
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.generate_proof(6, "reg", "rln-id", "ab01", 1700000002, ud);
+    delivery_test_rln::g_callbacks.generate_proof(6, "ab01", 1700000002, ud);
     LOGOS_ASSERT_EQ(e.op, std::string("generate_proof"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(6));
+    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
     LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
     LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000002));
 
     delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.validate_proof(8, "reg", "rln-id", "ab01", 1700000003,
+    delivery_test_rln::g_callbacks.validate_proof(8, "ab01", 1700000003,
                                                   R"({"proof":"00ff"})", ud);
     LOGOS_ASSERT_EQ(e.op, std::string("validate_proof"));
     LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(8));
+    LOGOS_ASSERT_EQ(e.registryId, std::string("reg"));
     LOGOS_ASSERT_EQ(e.signalHex, std::string("ab01"));
     LOGOS_ASSERT_EQ(e.epochTimestamp, static_cast<int64_t>(1700000003));
     LOGOS_ASSERT_EQ(e.proofJson, std::string(R"({"proof":"00ff"})"));
 
     delete impl;
+}
+
+LOGOS_TEST(createNode_without_rln_lez_installs_no_plugin) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_rln_set_plugin"));
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
+
+    delete impl;
+}
+
+LOGOS_TEST(createNode_rejects_rln_lez_without_registry_id) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.createNode(R"({"logLevel":"INFO","rln-lez":true})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
 }
 
 LOGOS_TEST(rlnRespond_fails_without_createNode) {
