@@ -194,11 +194,7 @@ void RlnBridge::enqueue(Job job)
             std::string(opName(job.op)) + ": shed at enqueue, " +
                 (isSlowOp(job.op) ? "slow" : "fast") + " lane full at depth " +
                 std::to_string(depth));
-        if (job.reply) {
-            job.reply->set_value(out);
-        } else {
-            (void)logosdelivery_rln_response(job.reqId, out.c_str());
-        }
+        (void)logosdelivery_rln_response(job.reqId, out.c_str());
         return;
     }
     lane.cv.notify_one();
@@ -211,16 +207,12 @@ std::string RlnBridge::runLifecycle(Op op, std::string configJson)
     if (!m_enabled.load(std::memory_order_acquire)) {
         return "rln bridge is not enabled";
     }
-    auto promise = std::make_shared<std::promise<std::string>>();
-    auto future = promise->get_future();
-
+    // lp calls marshal onto this thread; queueing and waiting here deadlocks.
     Job j;
     j.op = op;
     j.configJson = std::move(configJson);
-    j.reply = promise;
-    enqueue(std::move(j));
 
-    const std::string out = future.get();
+    const std::string out = serveFast(j);
     // The module's own reply is a LogosResult envelope; a false success is the
     // caller's failure to report. Parsing it here is the one place this bridge
     // looks inside a reply, because nothing downstream will.
@@ -327,10 +319,6 @@ void RlnBridge::laneLoop(Lane* lane)
                 out = transportFail(job.op, "permanent", "bridge_exception",
                     std::string("rln bridge exception: ") + e.what());
             }
-        }
-        if (job.reply) {
-            job.reply->set_value(out);
-            continue;
         }
         // Non-zero: the library already timed out this reqId — nothing to do.
         (void)logosdelivery_rln_response(job.reqId, out.c_str());
