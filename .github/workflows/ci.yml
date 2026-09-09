@@ -19,7 +19,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
 
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'ubuntu-24.04-arm' && 90 || 45 }}
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
