@@ -12,7 +12,7 @@
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.5";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     # TODO: repoint at master once impl-plugable-rln-api-module (RLN C ABI) merges.
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=impl-plugable-rln-api-module&rev=a8f7ecaf1eca3c216fc2ccc48c41c716d7ac715f";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=rln-plugin-config-over-ffi&rev=12c5219179117fd61601a0698e4263872d1e235b";
     # The RLN API module. The input name is load-bearing and cannot be chosen
     # freely: logos-module-builder resolves each metadata.json#dependencies
     # entry as the flake input of the SAME name and generates bindings from
