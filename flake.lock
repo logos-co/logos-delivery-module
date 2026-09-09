@@ -4959,6 +4959,7 @@
       },
       "original": {
         "ref": "master",
+        "rev": "03946c68fc44d466277ce878b2471ee3d77b8893",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
