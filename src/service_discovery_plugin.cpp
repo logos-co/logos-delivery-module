@@ -143,7 +143,6 @@ int settle(const char* method, const StdLogosResult& r, const logos::CallError& 
     if (!err.ok()) {
         const std::string msg =
             std::string(method) + ": " + err.code + ": " + err.message;
-        fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s\n", msg.c_str());
         trace("%-22s TRANSPORT-ERR  %s", method, msg.c_str());
         writeErr(errBuf, errBufLen, msg);
         return LD_DISCO_ERROR;
@@ -151,7 +150,6 @@ int settle(const char* method, const StdLogosResult& r, const logos::CallError& 
     if (!r.success) {
         const std::string msg =
             r.error.empty() ? std::string(method) + " failed" : r.error;
-        fprintf(stderr, "DeliveryServiceDiscoveryPlugin: %s -> %s\n", method, msg.c_str());
         trace("%-22s REFUSED        %s", method, msg.c_str());
         writeErr(errBuf, errBufLen, msg);
         return LD_DISCO_ERROR;

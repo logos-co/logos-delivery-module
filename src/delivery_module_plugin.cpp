@@ -90,8 +90,6 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
 
 DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHandle(nullptr)
 {
-    fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
-    fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
 }
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
@@ -107,7 +105,6 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
 
 void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
-    fprintf(stderr, "DeliveryModuleImpl::event_callback called with ret: %d\n", callerRet);
 
     DeliveryModuleImpl* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
@@ -117,7 +114,6 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
 
     if (msg && len > 0) {
         std::string message(msg, len);
-        fprintf(stderr, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
 
         // This function is a C callback invoked from the Nim runtime: a C++
         // exception escaping here would unwind into Nim frames and terminate
@@ -376,7 +372,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
 
     // Don't log cfg: it can carry sensitive config.
-    fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
     DiscoveryPluginRequest discovery;
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), discovery);
@@ -412,7 +407,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
 
     auto callback = +[](int errCode, LogosDeliveryCtx* ctx, const char* errMsg, void* userData) {
-        fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", errCode);
 
         std::shared_ptr<CreateContext> callbackCtx;
         {
@@ -438,7 +432,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         callbackCtx->ctx = ctx;
         if (errCode != RET_OK && errMsg) {
             callbackCtx->message = errMsg;
-            fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", errMsg);
         }
 
         callbackCtx->sem.release();
@@ -452,7 +445,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return {false, {}, "Failed to initiate createNode"};
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
 
     if (!callbackCtx->sem.try_acquire_for(CALLBACK_TIMEOUT)) {
         std::lock_guard<std::mutex> lock(pendingMutex);
@@ -479,7 +471,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     deliveryCtxHandle = callbackCtx->ctx;
     deliveryCtx = callbackCtx->ctx->ptr;
 
-    fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
     for (const char* eventName : kEventNames) {
         if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
@@ -534,13 +525,11 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
         return installed.error;
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: service discovery plugin installed\n");
     return {};
 }
 
 StdLogosResult DeliveryModuleImpl::start()
 {
-    fprintf(stderr, "DeliveryModuleImpl::start called\n");
 
     if (!deliveryCtx) {
         return {false, {}, "Context not initialized"};
@@ -556,7 +545,6 @@ StdLogosResult DeliveryModuleImpl::start()
 
 StdLogosResult DeliveryModuleImpl::stop()
 {
-    fprintf(stderr, "DeliveryModuleImpl::stop called\n");
 
     if (!deliveryCtx) {
         return {false, {}, "Context not initialized"};
@@ -570,7 +558,6 @@ StdLogosResult DeliveryModuleImpl::stop()
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)
 {
-    fprintf(stderr, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
@@ -595,16 +582,11 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
                 contentTopic.c_str(), outcome.error.c_str());
     }
 
-    if (outcome.success && outcome.value.is_string()) {
-        fprintf(stderr, "DeliveryModuleImpl: Send initiated for topic: %s, with success, requestId: %s\n",
-                contentTopic.c_str(), outcome.value.get<std::string>().c_str());
-    }
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
 {
-    fprintf(stderr, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
@@ -622,13 +604,11 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
                 contentTopic.c_str(), outcome.error.c_str());
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: Subscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
 {
-    fprintf(stderr, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
@@ -646,7 +626,6 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
                 contentTopic.c_str(), outcome.error.c_str());
     }
 
-    fprintf(stderr, "DeliveryModuleImpl: Unsubscribe completed for topic: %s with success\n", contentTopic.c_str());
     return outcome;
 }
 
@@ -654,7 +633,6 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
                                               const std::string& peerAddr,
                                               int64_t timeoutMs)
 {
-    fprintf(stderr, "DeliveryModuleImpl::storeQuery called with peerAddr: %s\n", peerAddr.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot run store query - context not initialized. Call createNode first.\n");
@@ -686,8 +664,6 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
                                                  const std::string& contentTopic,
                                                  const std::string& senderId)
 {
-    fprintf(stderr, "DeliveryModuleImpl::channelCreate called with channelId: %s, contentTopic: %s\n",
-            channelId.c_str(), contentTopic.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot create channel - context not initialized. Call createNode first.\n");
@@ -711,7 +687,6 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
 
 StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
 {
-    fprintf(stderr, "DeliveryModuleImpl::channelExists called with channelId: %s\n", channelId.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot query channel - context not initialized. Call createNode first.\n");
@@ -733,7 +708,6 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
 
 StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, const std::vector<uint8_t>& payload)
 {
-    fprintf(stderr, "DeliveryModuleImpl::channelSend called with channelId: %s\n", channelId.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send channel message - context not initialized. Call createNode first.\n");
@@ -758,16 +732,11 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
                 channelId.c_str(), outcome.error.c_str());
     }
 
-    if (outcome.success && outcome.value.is_string()) {
-        fprintf(stderr, "DeliveryModuleImpl: Channel send initiated for id: %s, with success, requestId: %s\n",
-                channelId.c_str(), outcome.value.get<std::string>().c_str());
-    }
     return outcome;
 }
 
 StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
 {
-    fprintf(stderr, "DeliveryModuleImpl::channelClose called with channelId: %s\n", channelId.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot close channel - context not initialized.\n");
@@ -788,7 +757,6 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
 }
 
 StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
-    fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
@@ -806,7 +774,6 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
 }
 
 StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
-    fprintf(stderr, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
@@ -827,7 +794,6 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
 }
 
 StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
-    fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
 
     if (!deliveryCtx) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
