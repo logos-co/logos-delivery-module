@@ -10,6 +10,8 @@ How the module is put together, and how to operate a node built from it.
   off a running node.
 - :doc:`Versioning <versioning>` -- what a version bump means and how a
   release is cut.
+- :doc:`RLN bridge <rln>` -- how RLN requests from the delivery library are
+  answered in-process, and how a node is configured for them.
 
 .. toctree::
    :hidden:
@@ -19,3 +21,4 @@ How the module is put together, and how to operate a node built from it.
    run-node
    query-node
    versioning
+   rln

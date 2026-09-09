@@ -4,7 +4,7 @@
 // calling the co-loaded liblogos_rln_module and feeding each reply into
 // logosdelivery_rln_response. createNode enables it whenever the node config
 // runs lez RLN ("rln-lez"); the rln*Request events keep emitting
-// either way, for observability (docs/rln.md).
+// either way, for observability (docs/pages/rln.md).
 //
 // The delivery library's RLN plugin is implementation-agnostic: it never names
 // a registry or a membership and never starts the backend. This module holds
@@ -116,7 +116,7 @@ private:
     static int budgetMsFor(Op op);
     static const char* opName(Op op);
     // The only reply this bridge ever fabricates: a transport failure in the
-    // error shape of the op's own method family (docs/rln.md).
+    // error shape of the op's own method family (docs/pages/rln.md).
     static std::string transportFail(Op op, const std::string& cls,
                                      const std::string& kind, const std::string& msg);
 
