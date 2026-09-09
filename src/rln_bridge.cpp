@@ -17,12 +17,10 @@ namespace {
 constexpr const char* kTarget = "liblogos_rln_module";
 constexpr const char* kOrigin = "delivery_module";
 
-// The RLN module's documented internal worst cases: registry reads up to 70 s,
-// a register submission up to 190 s. The delivery library's own per-op budget
-// usually expires first; a late completion is dropped by
-// logosdelivery_rln_response (non-zero return).
+// The RLN module's documented internal worst case for a registry read: 70 s.
+// The delivery library's own per-op budget usually expires first; a late
+// completion is dropped by logosdelivery_rln_response (non-zero return).
 constexpr int kReadMs = 70'000;
-constexpr int kRegisterMs = 190'000;
 
 // Queue discipline (stopgap until the ABI carries deadlines): a full lane
 // sheds new work immediately, and a dequeued job past its library budget is
@@ -116,26 +114,27 @@ std::string RlnBridge::enable()
 
 bool RlnBridge::isSlowOp(Op op)
 {
-    return op == Op::Register || op == Op::GetState || op == Op::Generate;
+    return op == Op::GetState || op == Op::Generate;
 }
 
 bool RlnBridge::isTstrOp(Op op)
 {
-    return op == Op::Register || op == Op::GetState;
+    return op == Op::GetState;
 }
 
-// Mirrors the library's budgets (rln_api.nim: RlnLocalTimeout 10 s,
-// RlnRegistryReadTimeout 80 s, RlnRegisterTimeout 200 s).
+// Mirrors the library's budgets (transport.nim: RlnLocalTimeout 10 s,
+// RlnRegistryReadTimeout 80 s). Module-driven lifecycle ops have no library
+// clock; they borrow the registry-read budget.
 int RlnBridge::budgetMsFor(Op op)
 {
     switch (op) {
-    case Op::Register:
-        return 200'000;
+    case Op::Start:
+    case Op::Stop:
     case Op::GetState:
     case Op::Generate:
         return 80'000;
     default:
-        return 10'000; // start, stop, get_epoch_quota, validate_proof
+        return 10'000; // get_epoch_quota, validate_proof
     }
 }
 
@@ -146,8 +145,6 @@ const char* RlnBridge::opName(Op op)
         return "start";
     case Op::Stop:
         return "stop";
-    case Op::Register:
-        return "register_membership";
     case Op::GetState:
         return "get_membership_state";
     case Op::GetQuota:
@@ -197,7 +194,11 @@ void RlnBridge::enqueue(Job job)
             std::string(opName(job.op)) + ": shed at enqueue, " +
                 (isSlowOp(job.op) ? "slow" : "fast") + " lane full at depth " +
                 std::to_string(depth));
-        (void)logosdelivery_rln_response(job.reqId, out.c_str());
+        if (job.reply) {
+            job.reply->set_value(out);
+        } else {
+            (void)logosdelivery_rln_response(job.reqId, out.c_str());
+        }
         return;
     }
     lane.cv.notify_one();
@@ -205,33 +206,39 @@ void RlnBridge::enqueue(Job job)
 
 // --- op entry points ---------------------------------------------------------
 
-void RlnBridge::start(uint64_t reqId, std::string configJson)
+std::string RlnBridge::runLifecycle(Op op, std::string configJson)
 {
+    if (!m_enabled.load(std::memory_order_acquire)) {
+        return "rln bridge is not enabled";
+    }
+    auto promise = std::make_shared<std::promise<std::string>>();
+    auto future = promise->get_future();
+
     Job j;
-    j.reqId = reqId;
-    j.op = Op::Start;
+    j.op = op;
     j.configJson = std::move(configJson);
+    j.reply = promise;
     enqueue(std::move(j));
+
+    const std::string out = future.get();
+    // The module's own reply is a LogosResult envelope; a false success is the
+    // caller's failure to report. Parsing it here is the one place this bridge
+    // looks inside a reply, because nothing downstream will.
+    json parsed = json::parse(out, nullptr, /*allow_exceptions=*/false);
+    if (parsed.is_object() && parsed.value("success", false)) {
+        return {};
+    }
+    return out;
 }
 
-void RlnBridge::stop(uint64_t reqId)
+std::string RlnBridge::startBackend(std::string configJson)
 {
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::Stop;
-    enqueue(std::move(j));
+    return runLifecycle(Op::Start, std::move(configJson));
 }
 
-void RlnBridge::registerMembership(uint64_t reqId, std::string registryId,
-                                   std::string rlnIdentifier, std::string optionsJson)
+std::string RlnBridge::stopBackend()
 {
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::Register;
-    j.registryId = std::move(registryId);
-    j.rlnIdentifier = std::move(rlnIdentifier);
-    j.optionsJson = std::move(optionsJson);
-    enqueue(std::move(j));
+    return runLifecycle(Op::Stop, {});
 }
 
 void RlnBridge::getMembershipState(uint64_t reqId, std::string registryId,
@@ -321,6 +328,10 @@ void RlnBridge::laneLoop(Lane* lane)
                     std::string("rln bridge exception: ") + e.what());
             }
         }
+        if (job.reply) {
+            job.reply->set_value(out);
+            continue;
+        }
         // Non-zero: the library already timed out this reqId — nothing to do.
         (void)logosdelivery_rln_response(job.reqId, out.c_str());
     }
@@ -377,11 +388,6 @@ std::string RlnBridge::serveOp(const Job& job)
     json args = json::array();
     int timeoutMs = kReadMs;
     switch (job.op) {
-    case Op::Register:
-        method = "register_membership";
-        args = json::array({job.registryId, job.rlnIdentifier, job.optionsJson});
-        timeoutMs = kRegisterMs;
-        break;
     case Op::GetState:
         method = "get_membership_state";
         args = json::array({job.registryId, job.rlnIdentifier});

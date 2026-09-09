@@ -305,7 +305,7 @@ LOGOS_TEST(integration_channel_send_fails_on_unknown_channel) {
 // The full request round trip (library fires a callback -> rln*Request event ->
 // rlnRespond completes it) cannot be exercised yet: nothing in the library
 // calls its internal rlnInvoke, and no trigger entry point is exported. These
-// tests cover what IS reachable: the real logosdelivery_rln_set_callbacks /
+// tests cover what IS reachable: the real logosdelivery_rln_set_plugin /
 // logosdelivery_rln_response symbols resolve, registration and clearing
 // survive against the real library, and the response path rejects unknown
 // request ids through the real in-flight list.
@@ -353,29 +353,27 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
     return delivery_test_events::g_lastRlnRequest.op == op;
 }
 
-// The full start chain, served in-process: createNode sniffs "rln-lez"
-// from the config and enables the bridge, so the library's RLN callbacks are
-// answered by the co-loaded RLN module — or, when none is reachable, by the
-// bridge's own transport-failure replies. Either way every request completes
-// library-side, so this test observes the chain through the rln*Request
-// events (which keep emitting for observability) and verifies an external
-// response is rejected as a duplicate; it must not answer requests itself.
-// register_membership only fires when a live RLN module answered start with
-// success, so it is not asserted here.
+// The full start chain, served in-process: createNode consumes the "rln-"
+// keys, installs the plugin, enables the bridge and starts the RLN module
+// itself. The library then drives only what the node performs — the first of
+// which is the get_membership_state gate at node start. Requests are answered
+// by the co-loaded RLN module, or by the bridge's own transport-failure
+// replies when none is reachable; either way they complete library-side, so
+// this test observes the chain through the rln*Request events and verifies an
+// external response is rejected as a duplicate.
 //
-// node_factory.nim drives this chain from startNode, but only when
-// conf.rlnRelayConf.isSome().
-static const char* kRlnConfig = R"({
+// The node config carries no RLN keys at all: RLN is configured through the
+// module's own configureRln, and createNode stays a pass-through.
+static const char* kRlnNodeConfig = R"({
   "logLevel": "DEBUG",
   "relay": true,
-  "numShardsInNetwork": 8,
-  "rln-relay": true,
-  "rln-lez": true,
-  "rln-registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
+  "numShardsInNetwork": 8
+})";
+
+static const char* kRlnModuleConfig = R"({
+  "registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
   "rln-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
-  "rln-relay-epoch-sec": 600,
-  "rln-relay-dynamic": false,
-  "rln-relay-chain-id": 1
+  "epoch-size-sec": 600
 })";
 
 LOGOS_TEST(integration_rln_start_chain_round_trip) {
@@ -398,14 +396,18 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
     const bool live = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
 
     DeliveryModuleImpl impl;
-    // The lez config also enables the in-process bridge; a bridge setup
-    // failure fails createNode, so this covers the auto-enable wiring.
-    LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnConfig : kMinimalConfig).success);
+    // configureRln installs the plugin, enables the in-process bridge and
+    // starts the RLN module; a module start failure fails the call, so this
+    // covers the auto-enable and self-start wiring.
+    if (live) {
+        LOGOS_ASSERT_TRUE(impl.configureRln(kRlnModuleConfig).success);
+    }
+    LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnNodeConfig : kMinimalConfig).success);
     LOGOS_ASSERT_TRUE(impl.start().success);
 
-    if (!waitForRlnRequestOp("start")) {
+    if (!waitForRlnRequestOp("get_membership_state")) {
         fprintf(stderr,
-                "SKIP integration_rln_start_chain_round_trip: no RLN start "
+                "SKIP integration_rln_start_chain_round_trip: no RLN membership "
                 "request (set LOGOS_DELIVERY_RLN_LIVE against a native-mount-skip "
                 "build to exercise the live chain)\n");
         impl.stop();
@@ -413,14 +415,11 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
         return;
     }
 
-    // The start request carries the module's start() config, built from this
-    // node's RLN conf: epoch_size_sec is the value every proof generator and
-    // validator must share.
-    const auto& startReq = delivery_test_events::g_lastRlnRequest;
-    LOGOS_ASSERT_TRUE(startReq.configJson.find("\"epoch_size_sec\":600") !=
-                      std::string::npos);
-    LOGOS_ASSERT_TRUE(startReq.configJson.find("logos:testnet:") != std::string::npos);
-    const int64_t startReqId = startReq.reqId;
+    // The scope on the request is this module's own configuration: the library
+    // does not know it and never sent it.
+    const auto& stateReq = delivery_test_events::g_lastRlnRequest;
+    LOGOS_ASSERT_TRUE(stateReq.registryId.find("logos:testnet:") != std::string::npos);
+    const int64_t startReqId = stateReq.reqId;
 
     // Give the request time to complete library-side: the bridge answers it
     // (with a transport failure when no RLN module is reachable), and the

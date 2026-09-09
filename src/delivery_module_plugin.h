@@ -12,6 +12,16 @@
 
 class RlnBridge;
 
+// Everything the delivery library no longer knows about RLN. Read out of
+// createNode's config and stripped from it before the config reaches the
+// library, which rejects these keys.
+struct DeliveryRlnConfig {
+    bool enabled = false;
+    std::string registryId;
+    std::string rlnIdentifier;
+    uint64_t epochSizeSec = 0;
+};
+
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
  *
@@ -332,11 +342,35 @@ public:
      * pass its reply back unchanged. The events keep emitting for
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
-     * call any time before @ref start. @ref createNode does this
-     * automatically when the config's `rln-lez` is true. Calling it
-     * directly is mainly for test purposes.
+     * call any time before @ref start. @ref configureRln does this
+     * automatically. Calling it directly is mainly for test purposes.
      */
     StdLogosResult rlnBridgeEnable();
+
+    /**
+     * @brief Configures RLN for this module and installs the delivery
+     *        library's RLN plugin.
+     *
+     * RLN is this module's business, not the delivery library's: the
+     * library's plugin is implementation-agnostic — it carries no
+     * configuration, names no registry or membership, and does not start the
+     * backend. Everything it lacks is supplied from here.
+     *
+     * Call before @ref createNode: an installed plugin is what makes the
+     * library mount RLN over it, and it reads that at node creation. Without
+     * this call the node comes up with RLN off, and @ref createNode stays a
+     * plain pass-through to the library.
+     *
+     * Enables the in-process bridge (see @ref rlnBridgeEnable) and starts the
+     * co-loaded `liblogos_rln_module`; a start failure fails this call. A
+     * bridge that cannot come up is not fatal — the `rln*Request` events and
+     * @ref rlnRespond remain — but nothing starts the backend on that path.
+     *
+     * @param cfgJson Object with `registry-id` (CAIP-10 account id of the
+     *        registry deployment), `rln-identifier` (32-byte hex, per
+     *        application) and optional `epoch-size-sec`.
+     */
+    StdLogosResult configureRln(const std::string& cfgJson);
 
     std::string name() const { return "delivery_module"; }
 
@@ -407,11 +441,6 @@ logos_events:
      * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
      * local emission time, as on every other event.
      */
-    void rlnStartRequest(int64_t reqId, const std::string& configJson, int64_t timestamp);
-    void rlnStopRequest(int64_t reqId, int64_t timestamp);
-    void rlnRegisterRequest(int64_t reqId, const std::string& registryId,
-                            const std::string& rlnIdentifier,
-                            const std::string& optionsJson, int64_t timestamp);
     void rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
                                       const std::string& rlnIdentifier, int64_t timestamp);
     void rlnGetEpochQuotaRequest(int64_t reqId, const std::string& registryId,
@@ -437,6 +466,10 @@ private:
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
     // and started by enableRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
+
+    // Everything the delivery library no longer knows about RLN (see
+    // DeliveryRlnConfig).
+    DeliveryRlnConfig rlnConfig;
 
     // Raw FFI context: what every call and the event registry take.
     void* deliveryCtx;
@@ -465,25 +498,19 @@ private:
     static void start_callback(int callerRet, char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
 
-    // RLN callback slots registered in createNode, one per ABI function
+    // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
     // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
     // for the duration of the call. userData is the DeliveryModuleImpl*.
-    static void rln_start_callback(uint64_t reqId, const char* configJson, void* userData);
-    static void rln_stop_callback(uint64_t reqId, void* userData);
-    static void rln_register_callback(uint64_t reqId, const char* registryId,
-                                      const char* rlnIdentifier,
-                                      const char* optionsJson, void* userData);
-    static void rln_get_membership_state_callback(uint64_t reqId, const char* registryId,
-                                                  const char* rlnIdentifier, void* userData);
-    static void rln_get_epoch_quota_callback(uint64_t reqId, const char* registryId,
-                                             const char* rlnIdentifier,
-                                             uint64_t timestamp, void* userData);
-    static void rln_generate_proof_callback(uint64_t reqId, const char* registryId,
-                                            const char* rlnIdentifier, const char* signalHex,
+    //
+    // The library's plugin carries no registry or membership, so each
+    // trampoline adds this module's own rlnConfig before forwarding.
+    static void rln_get_membership_state_callback(uint64_t reqId, void* userData);
+    static void rln_get_epoch_quota_callback(uint64_t reqId, uint64_t timestamp,
+                                             void* userData);
+    static void rln_generate_proof_callback(uint64_t reqId, const char* signalHex,
                                             uint64_t timestamp, void* userData);
-    static void rln_validate_proof_callback(uint64_t reqId, const char* registryId,
-                                            const char* rlnIdentifier, const char* signalHex,
+    static void rln_validate_proof_callback(uint64_t reqId, const char* signalHex,
                                             uint64_t timestamp, const char* proofJson,
                                             void* userData);
 };

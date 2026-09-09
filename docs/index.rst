@@ -48,6 +48,7 @@ Internal docs
 - :doc:`Running a node <pages/run-node>`
 - :doc:`Querying a node <pages/query-node>`
 - :doc:`Versioning <pages/versioning>`
+- :doc:`RLN bridge <pages/rln>`
 
 .. Hidden: the lists above are the visible index. This only builds the page
    hierarchy; these entries are what the top bar shows, and pages/internal owns

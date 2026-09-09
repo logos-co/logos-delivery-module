@@ -10,11 +10,11 @@
 
 namespace delivery_test_rln {
 
-// Last struct registered via logosdelivery_rln_set_callbacks. All slots are
-// nullptr after a NULL (clear) registration.
-extern LogosDeliveryRlnCallbacks g_callbacks;
+// Last struct installed via logosdelivery_rln_set_plugin. All slots are
+// nullptr after a NULL (clear) install.
+extern LogosDeliveryRlnPlugin g_callbacks;
 extern void* g_userData;
-extern bool g_callbacksSet;    // true once set_callbacks was called at least once
+extern bool g_callbacksSet;    // true once set_plugin was called at least once
 extern int g_setCallbacksCalls;
 
 // Last logosdelivery_rln_response arguments.
@@ -23,7 +23,7 @@ extern std::string g_lastResponseJson;
 extern bool g_responseFired;
 
 inline void resetRlnMockState() {
-    g_callbacks = LogosDeliveryRlnCallbacks{};
+    g_callbacks = LogosDeliveryRlnPlugin{};
     g_userData = nullptr;
     g_callbacksSet = false;
     g_setCallbacksCalls = 0;
