@@ -38,8 +38,10 @@ The two are separate clusters, so nodes on one do not see nodes on the other.
 | Kademlia discovery | on | on |
 
 Cluster ID and entry nodes are the only differences. Both names also accept a
-dotless spelling (`logosdev`, `logostest`); `twn` and `status.prod` are
-separate networks, out of scope here.
+dotless spelling (`logosdev`, `logostest`).
+
+The live node list and status for both fleets is at
+[fleets.logos.co](https://fleets.logos.co/).
 
 > `logos.dev` moved from cluster 2 to cluster 3 in logos-delivery
 > [#4113](https://github.com/logos-messaging/logos-delivery/pull/4113). A build
