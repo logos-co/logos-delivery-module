@@ -17,10 +17,9 @@ namespace {
 constexpr const char* kTarget = "liblogos_rln_module";
 constexpr const char* kOrigin = "delivery_module";
 
-// The RLN module's documented internal worst cases: registry reads up to 70 s,
-// a register submission up to 190 s. The delivery library's own per-op budget
-// usually expires first; a late completion is dropped by
-// logosdelivery_rln_response (non-zero return).
+// The RLN module's documented internal worst case for a registry read: 70 s.
+// The delivery library's own per-op budget usually expires first; a late
+// completion is dropped by logosdelivery_rln_response (non-zero return).
 constexpr int kReadMs = 70'000;
 
 // Queue discipline (stopgap until the ABI carries deadlines): a full lane
@@ -131,12 +130,11 @@ int RlnBridge::budgetMsFor(Op op)
     switch (op) {
     case Op::Start:
     case Op::Stop:
-        return 80'000;
     case Op::GetState:
     case Op::Generate:
         return 80'000;
     default:
-        return 10'000; // start, stop, get_epoch_quota, validate_proof
+        return 10'000; // get_epoch_quota, validate_proof
     }
 }
 

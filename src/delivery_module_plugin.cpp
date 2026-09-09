@@ -985,6 +985,11 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
     }
     const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
     if (!startFailure.empty()) {
+        // An installed plugin is what makes the library mount RLN, so leaving
+        // it behind would give the next createNode a node whose backend never
+        // started: every inbound RLN message Ignored, every send failing.
+        logosdelivery_rln_set_plugin(nullptr, nullptr);
+        rlnConfig = DeliveryRlnConfig{};
         return {false, {}, "rln module start failed: " + startFailure};
     }
     fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
