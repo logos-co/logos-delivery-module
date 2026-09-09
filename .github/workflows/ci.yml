@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -38,7 +38,7 @@ jobs:
         run: nix build .#unit-tests -L
 
       - name: Pre-warm cache for install-portable
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu')
         run: nix build -L .#install-portable
 
   e2e-tests:
