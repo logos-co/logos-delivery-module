@@ -6,10 +6,6 @@
 #include <cstring>
 #include <ctime>
 
-#include <chrono>
-#include <iterator>
-#include <thread>
-
 #include <nlohmann/json.hpp>
 
 // Generated at build time from metadata.json#dependencies.
@@ -18,59 +14,14 @@
 
 namespace {
 
-// libp2p needs peers before its kademlia can store a provider record or answer
-// a lookup, and it takes them only as `bootstrapNodes` in its own options --
-// there is no call to add them later. These are the logos.dev preset's entry
-// nodes, copied from logos-delivery's networks_config.nim (cluster 3).
-//
-// Note the shape: libp2p wants the peer id SEPARATE from the transport
-// addresses ({peerId, addrs[]}, not a /p2p/-suffixed multiaddr string), because
-// nim-libp2p's FFI takes a Libp2pBootstrapNode of exactly that shape and parses
-// the two independently. Getting this wrong is worth avoiding carefully: the
-// Nim side raiseAsserts on an unparseable peer id rather than returning an
-// error.
-//
-// Hardcoded rather than derived: this module cannot read the preset the node
-// was configured with (logos-delivery resolves it internally and exposes no
-// getter), and libp2p wants the list before anything else happens. Revisit when
-// either side grows a way to pass the resolved entry nodes through.
-struct BootstrapPeer {
-    const char* peerId;
-    const char* addr;
-};
-
-const BootstrapPeer kLogosDevBootstrapNodes[] = {
-    {"16Uiu2HAmTUbnxLGT9JvV6mu9oPyDjqHK4Phs1VDJNUgESgNSkuby",
-     "/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303"},
-    {"16Uiu2HAmMK7PYygBtKUQ8EHp7EfaD3bCEsJrkFooK8RQ2PVpJprH",
-     "/dns4/delivery-02.do-ams3.logos.dev.status.im/tcp/30303"},
-    {"16Uiu2HAm4S1JYkuzDKLKQvwgAhZKs9otxXqt8SCGtB4hoJP1S397",
-     "/dns4/delivery-01.gc-us-central1-a.logos.dev.status.im/tcp/30303"},
-    {"16Uiu2HAm8Y9kgBNtjxvCnf1X6gnZJW5EGE4UwwCL3CCm55TwqBiH",
-     "/dns4/delivery-02.gc-us-central1-a.logos.dev.status.im/tcp/30303"},
-    {"16Uiu2HAm8YokiNun9BkeA1ZRmhLbtNUvcwRr64F69tYj9fkGyuEP",
-     "/dns4/delivery-01.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303"},
-    {"16Uiu2HAkvwhGHKNry6LACrB8TmEFoCJKEX29XR5dDUzk3UT3UNSE",
-     "/dns4/delivery-02.ac-cn-hongkong-c.logos.dev.status.im/tcp/30303"},
-};
-
-// How long to wait for libp2p_module to start serving calls after it loads.
-// Generous because it has been observed taking longer than 20s, and because
-// giving up early is expensive: see the bail-out in ensureBackend.
-// How many of the above to actually hand over.
+// How many of the configured bootstrap peers to hand to libp2p at createNode.
 //
 // One, because libp2p's own calls are capped at a fixed 10s (its callSync
 // deadline) and `libp2p_ctx_start` dials the bootstrap set within that budget:
 // measured here, one DNS-resolved peer takes ~8s and fits, two time out at
 // exactly 10s and the whole start fails. Raise this the moment that cap becomes
-// configurable -- one bootstrap peer is a single point of failure, and the only
-// reason to accept it is that two do not work at all.
-//
-// An operator who needs a different set can pass `libp2pConfig.bootstrapNodes`
-// in the node config, which replaces this wholesale.
+// configurable.
 constexpr size_t kMaxBootstrapNodes = 1;
-
-constexpr std::chrono::seconds kBackendReadyTimeout{90};
 
 // Handed to logos-delivery in the vtable. It caps how long the node waits for
 // one verb; the value is only an upper bound, since nim-brokers' cross-thread
@@ -247,70 +198,47 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     // probes over 90s, all rejected, while `start` and every disco verb answered
     // fine in the same session), so probing with it says nothing about whether
     // the module will serve the call we actually care about.
-    const bool alreadyHasNode = false;
 
-    // Bootstrap peers first, then whatever the operator passed on top, so a
-    // node config can override the defaults (including with an empty list).
-    nlohmann::json cfg = nlohmann::json::object();
-    cfg["bootstrapNodes"] = nlohmann::json::array();
-    for (size_t i = 0; i < std::size(kLogosDevBootstrapNodes) && i < kMaxBootstrapNodes; ++i) {
-        cfg["bootstrapNodes"].push_back(nlohmann::json{
-            {"peerId", kLogosDevBootstrapNodes[i].peerId},
-            {"addrs", nlohmann::json::array({kLogosDevBootstrapNodes[i].addr})},
-        });
+    // The config was resolved and validated from the node config at createNode;
+    // see discovery_config.h.
+    nlohmann::json cfg = nlohmann::json::parse(libp2pConfig_, nullptr, false);
+    if (!cfg.is_object()) {
+        return "libp2p config is not a JSON object";
     }
-    cfg["mountKad"] = true;
-    cfg["mountServiceDiscovery"] = true;
-
-    if (!libp2pConfig_.empty()) {
-        nlohmann::json overrides = nlohmann::json::parse(libp2pConfig_, nullptr, false);
-        if (overrides.is_object()) {
-            cfg.update(overrides);
-        } else {
-            trace("libp2pConfig is not a JSON object; ignoring it");
+    size_t bootstrapCount = 0;
+    if (const auto nodes = cfg.find("bootstrapNodes");
+        nodes != cfg.end() && nodes->is_array()) {
+        if (nodes->size() > kMaxBootstrapNodes) {
+            trace("libp2p bootstrapNodes    %zu configured, handing over the first %zu",
+                  nodes->size(), kMaxBootstrapNodes);
+            nlohmann::json kept = nlohmann::json::array();
+            for (size_t i = 0; i < kMaxBootstrapNodes; ++i) {
+                kept.push_back((*nodes)[i]);
+            }
+            *nodes = kept;
         }
+        bootstrapCount = nodes->size();
     }
 
     if (nodeCreated_) {
         // A previous attempt already built it with our config; only `start`
         // failed. Re-running createNode would be refused and would wrongly
         // report the bootstrap peers as lost.
-        trace("libp2p createNode        ALREADY DONE  bootstrapNodes=%zu",
-              cfg["bootstrapNodes"].size());
-    } else if (alreadyHasNode) {
-        // Someone else built it (or a previous attempt of ours did). Its options
-        // are already fixed, so our bootstrap peers cannot land -- say so
-        // plainly rather than letting discovery look configured when it is not.
-        trace("libp2p createNode        SKIPPED  node already exists; "
-              "bootstrap peers NOT applied");
+        trace("libp2p createNode        ALREADY DONE  bootstrapNodes=%zu", bootstrapCount);
     } else {
-        const std::string cfgText = cfg.dump();
         logos::CallError err;
-        const StdLogosResult r = libp2p_->createNode(cfgText, &err);
+        const StdLogosResult r = libp2p_->createNode(cfg.dump(), &err);
         trace("libp2p createNode        %s  bootstrapNodes=%zu",
               (!err.ok() ? "TRANSPORT-ERR" : (r.success ? "OK" : "REFUSED")),
-              cfg["bootstrapNodes"].size());
+              bootstrapCount);
         nodeCreated_ = err.ok() && r.success;
         if (!err.ok()) {
             diagnostics += "createNode: " + err.code + ": " + err.message + "; ";
         } else if (!r.success) {
-            // Not fatal, and not currently reachable either. libp2p rejects this
-            // call from this module -- always, immediately, with no message --
-            // as it does `status` and `discoStartAdvertising`, while `start` and
-            // the other six disco verbs answer normally on the same client and
-            // thread. Until that is resolved, bootstrap peers cannot be handed
-            // over this way; set them through libp2p's own LIBP2P_MODULE_CONFIG
-            // (its metadata documents that as the load-time config channel).
-            //
-            // Discovery still starts, so the node runs and the lookup loops are
-            // driven -- they simply have an empty DHT to work against.
-            trace("libp2p createNode        `-> %s",
-                  r.error.empty() ? "(no message)" : r.error.c_str());
-            trace("libp2p bootstrap peers   NOT APPLIED  "
-                  "(set LIBP2P_MODULE_CONFIG to configure libp2p)");
-            fprintf(stderr,
-                    "DeliveryServiceDiscoveryPlugin: libp2p createNode refused; "
-                    "bootstrap peers not applied\n");
+            // Fatal: a node libp2p built on its own defaults has none of the
+            // configured bootstrap peers, and discovery on it would quietly
+            // find nothing.
+            diagnostics += "createNode: " + (r.error.empty() ? std::string("refused") : r.error) + "; ";
         }
     }
 
@@ -355,7 +283,6 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
           diagnostics.c_str());
     backendReady_ = diagnostics.empty();
-    backendFailure_ = diagnostics;
     return diagnostics;
 }
 

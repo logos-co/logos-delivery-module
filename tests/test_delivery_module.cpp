@@ -7,6 +7,7 @@
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
 #include "base64.h"
+#include "discovery_config.h"
 #include "mocks/delivery_module_events_stub.h"
 
 // ---------------------------------------------------------------------------
@@ -488,3 +489,120 @@ LOGOS_TEST(base64_encode_matches_rfc4648_vectors) {
     LOGOS_ASSERT(delivery_base64::encode(nullptr, 0).empty());
     LOGOS_ASSERT(delivery_base64::decode("Zm9vYmFy") == std::vector<uint8_t>({'f', 'o', 'o', 'b', 'a', 'r'}));
 }
+
+// discovery config: plugin request + libp2pConfig strip (discovery_config.h)
+
+static nlohmann::json parseJson(const char* text) { return nlohmann::json::parse(text); }
+
+LOGOS_TEST(discovery_resolve_is_disabled_without_the_switch) {
+    auto cfg = parseJson(R"({"preset":"logos.test","messagingOverrides":{"relay":true}})");
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::resolve(cfg, req).empty());
+    LOGOS_ASSERT_FALSE(req.enabled);
+    LOGOS_ASSERT_TRUE(req.libp2pConfig.empty());
+    LOGOS_ASSERT_EQ(cfg.dump(), std::string(R"({"messagingOverrides":{"relay":true},"preset":"logos.test"})"));
+}
+
+LOGOS_TEST(discovery_resolve_strips_libp2p_config_even_when_disabled) {
+    auto cfg = parseJson(R"({"preset":"logos.test","libp2pConfig":{"addrs":["/ip4/127.0.0.1/tcp/1"]}})");
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::resolve(cfg, req).empty());
+    LOGOS_ASSERT_FALSE(req.enabled);
+    LOGOS_ASSERT_FALSE(cfg.contains("libp2pConfig"));
+}
+
+LOGOS_TEST(discovery_resolve_enabled_by_messaging_overrides) {
+    auto cfg = parseJson(R"({"preset":"logos.dev",
+        "messagingOverrides":{"pluginKadDiscovery":true},
+        "libp2pConfig":{"bootstrapNodes":[{"peerId":"16Uiu2HAmT","addrs":["/dns4/a/tcp/1"]}]}})");
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::resolve(cfg, req).empty());
+    LOGOS_ASSERT_TRUE(req.enabled);
+    LOGOS_ASSERT_FALSE(cfg.contains("libp2pConfig"));
+    // The delivery config itself is not rewritten.
+    LOGOS_ASSERT_FALSE(cfg["messagingOverrides"].contains("enableKadDiscovery"));
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_TRUE(libp2p["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{1});
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmT"));
+}
+
+LOGOS_TEST(discovery_resolve_enabled_by_kernel_conf_dashed_key) {
+    auto cfg = parseJson(R"({"entryLayer":"kernel",
+        "kernelConf":{"plugin-kad-discovery":true,"enable-kad-discovery":false},
+        "libp2pConfig":{"bootstrapNodes":[]}})");
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::resolve(cfg, req).empty());
+    LOGOS_ASSERT_TRUE(req.enabled);
+    LOGOS_ASSERT_EQ(nlohmann::json::parse(req.libp2pConfig)["bootstrapNodes"].size(), size_t{0});
+}
+
+LOGOS_TEST(discovery_resolve_keeps_operator_overrides) {
+    auto cfg = parseJson(R"({"messagingOverrides":{"pluginKadDiscovery":true},
+        "libp2pConfig":{"bootstrapNodes":[],"mountKad":false,"addrs":["/ip4/127.0.0.1/tcp/7"]}})");
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::resolve(cfg, req).empty());
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_FALSE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["addrs"][0].get<std::string>(), std::string("/ip4/127.0.0.1/tcp/7"));
+}
+
+LOGOS_TEST(discovery_resolve_requires_bootstrap_nodes_when_enabled) {
+    auto cfg = parseJson(R"({"messagingOverrides":{"pluginKadDiscovery":true}})");
+    delivery_discovery::PluginRequest req;
+    const std::string err = delivery_discovery::resolve(cfg, req);
+    LOGOS_ASSERT_FALSE(err.empty());
+    LOGOS_ASSERT_FALSE(req.enabled);
+    LOGOS_ASSERT_TRUE(err.find("bootstrapNodes") != std::string::npos);
+}
+
+LOGOS_TEST(discovery_resolve_rejects_malformed_bootstrap_entries) {
+    for (const char* bad : {
+             R"({"messagingOverrides":{"pluginKadDiscovery":true},"libp2pConfig":{"bootstrapNodes":"x"}})",
+             R"({"messagingOverrides":{"pluginKadDiscovery":true},"libp2pConfig":{"bootstrapNodes":[{"addrs":["/ip4/1.2.3.4/tcp/1"]}]}})",
+             R"({"messagingOverrides":{"pluginKadDiscovery":true},"libp2pConfig":{"bootstrapNodes":[{"peerId":"16U","addrs":[]}]}})",
+             R"({"messagingOverrides":{"pluginKadDiscovery":true},"libp2pConfig":{"bootstrapNodes":[{"peerId":"16U","addrs":[""]}]}})",
+             R"({"messagingOverrides":{"pluginKadDiscovery":true},"libp2pConfig":"not an object"})",
+         }) {
+        auto cfg = parseJson(bad);
+        delivery_discovery::PluginRequest req;
+        LOGOS_ASSERT_FALSE(delivery_discovery::resolve(cfg, req).empty());
+        LOGOS_ASSERT_FALSE(req.enabled);
+    }
+}
+
+// createNode: plugin path
+
+LOGOS_TEST(createNode_installs_plugin_when_config_asks_for_it) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test",
+        "messagingOverrides":{"pluginKadDiscovery":true},
+        "libp2pConfig":{"bootstrapNodes":[]}})").success);
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_create_node"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_service_discovery_plugin"));
+}
+
+LOGOS_TEST(createNode_skips_plugin_without_the_switch) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test","libp2pConfig":{"bootstrapNodes":[]}})").success);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_service_discovery_plugin"));
+}
+
+LOGOS_TEST(createNode_rejects_plugin_request_without_bootstrap_nodes_before_ffi) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    const auto r = impl.createNode(R"({"preset":"logos.test","messagingOverrides":{"pluginKadDiscovery":true}})");
+    LOGOS_ASSERT_FALSE(r.success);
+    LOGOS_ASSERT_TRUE(r.error.find("bootstrapNodes") != std::string::npos);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_create_node"));
+}
+

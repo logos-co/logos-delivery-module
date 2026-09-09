@@ -57,8 +57,8 @@ public:
     /**
      * @param libp2p Borrowed from `modules().libp2p_module`; owned by the
      *        `LogosModules` aggregate, which outlives this object.
-     * @param libp2pConfig Optional JSON object merged over the default libp2p
-     *        options; see @ref ensureBackend.
+     * @param libp2pConfig JSON object text for libp2p_module's createNode, as
+     *        resolved from the node config (see discovery_config.h).
      */
     DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p, std::string libp2pConfig);
 
@@ -85,10 +85,8 @@ private:
      * Calls libp2p's `createNode`, because that is the only point at which its
      * kademlia can be given bootstrap peers: there is no call to add them
      * afterwards, and without peers it can neither store a provider record nor
-     * answer a lookup. The config is the hardcoded logos.dev entry nodes with
-     * `libp2pConfig` merged over the top, so a node config can override or clear
-     * them. An already-created node is left alone -- libp2p reports "node
-     * already created" and another module may legitimately own it.
+     * answer a lookup. The config comes from the node config's `libp2pConfig`
+     * section; only the first kMaxBootstrapNodes peers are handed over.
      *
      * @return empty on success, otherwise a human-readable diagnostic.
      */
@@ -103,7 +101,6 @@ private:
     std::string libp2pConfig_;
     bool backendReady_;
     bool nodeCreated_;
-    std::string backendFailure_;
     LdServiceDiscoveryPlugin vtable_;
 
     // --- vtable trampolines; pluginCtx is always `this` ---------------------

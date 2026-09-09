@@ -16,6 +16,7 @@
 #include "base64.h"
 
 #include "api_call_handler.h"
+#include "discovery_config.h"
 #include "service_discovery_plugin.h"
 
 // Generated at build time from metadata.json#dependencies; defines the
@@ -241,98 +242,30 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // path goes where each config shape accepts it: kernelConf when present,
 // messagingOverrides (created if needed) for the layered shapes, top level
 // for the legacy flat shape.
-// What createNode learned about discovery from the config it was handed.
-struct DiscoveryPluginRequest {
-    bool enabled{false};
-    // Optional JSON forwarded to libp2p_module's own createNode. Ours, not
-    // logos-delivery's, so it is stripped from the config before the node
-    // parser -- which rejects keys it does not recognise -- ever sees it.
-    std::string libp2pConfig;
-};
-
-// Locates the object that carries kernel/messaging settings for this config
-// shape. Mirrors applyConfigDefaults: kernelConf when present, messagingOverrides
-// for the layered shapes, top level for the legacy flat shape.
-static nlohmann::json* discoveryTarget(nlohmann::json& cfgObj)
-{
-    const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
-    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
-        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
-        return &cfgObj[*kernelConfKey];
-    }
-    if (kernelEntry) {
-        return nullptr;
-    }
-    if (isFlatShape(cfgObj)) {
-        return &cfgObj;
-    }
-    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
-    if (!overridesKey) {
-        return nullptr;
-    }
-    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
-}
-
-// Reads the plugin-discovery request out of the config and normalises it.
-//
-// Turning `pluginKadDiscovery` on also turns `enableKadDiscovery` off: the two
-// hosts of the same kademlia protocol are mutually exclusive, and a node would
-// otherwise be refused with an exclusivity error whenever a network preset had
-// quietly enabled the in-process one. logos-delivery's messaging-layer merge
-// already does this, but a kernelConf goes straight to the conf builder with no
-// merge step, so it is done here for every shape.
-static DiscoveryPluginRequest resolveDiscoveryPlugin(nlohmann::json& cfgObj)
-{
-    DiscoveryPluginRequest request;
-
-    if (auto libp2pKey = findKey(cfgObj, {"libp2pconfig"})) {
-        const nlohmann::json& node = cfgObj[*libp2pKey];
-        request.libp2pConfig = node.is_string() ? node.get<std::string>() : node.dump();
-        cfgObj.erase(*libp2pKey);
-    }
-
-    nlohmann::json* target = discoveryTarget(cfgObj);
-    if (!target) {
-        return request;
-    }
-
-    auto pluginKey = findKey(*target, {"pluginkaddiscovery", "plugin-kad-discovery"});
-    if (!pluginKey || !(*target)[*pluginKey].is_boolean()
-        || !(*target)[*pluginKey].get<bool>()) {
-        return request;
-    }
-
-    request.enabled = true;
-    if (auto enableKey = findKey(*target, {"enablekaddiscovery", "enable-kad-discovery"})) {
-        (*target)[*enableKey] = false;
-    } else {
-        (*target)["enableKadDiscovery"] = false;
-    }
-    return request;
-}
-
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      DiscoveryPluginRequest& discovery)
+                                                      delivery_discovery::PluginRequest& discovery,
+                                                      std::string& error)
 {
     nlohmann::json cfgObj;
     try {
         cfgObj = nlohmann::json::parse(cfg);
     } catch (const nlohmann::json::parse_error&) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
     if (!cfgObj.is_object()) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
     // Before anything else: this strips our own `libp2pConfig` key, which the
     // node parser would reject as unrecognised.
-    discovery = resolveDiscoveryPlugin(cfgObj);
+    error = delivery_discovery::resolve(cfgObj, discovery);
+    if (!error.empty()) {
+        return std::nullopt;
+    }
 
     if (!persistencePath.empty()) {
         nlohmann::json* target = &cfgObj;
@@ -373,10 +306,14 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // Don't log cfg: it can carry sensitive config.
 
-    DiscoveryPluginRequest discovery;
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), discovery);
+    delivery_discovery::PluginRequest discovery;
+    std::string configError;
+    auto cfgWithDefaults =
+        applyConfigDefaults(cfg, instancePersistencePath(), discovery, configError);
     if (!cfgWithDefaults) {
-        return {false, {}, "Invalid JSON config"};
+        fprintf(stderr, "DeliveryModuleImpl: createNode config rejected: %s\n",
+                configError.c_str());
+        return {false, {}, configError};
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
