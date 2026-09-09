@@ -39,7 +39,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -66,7 +65,7 @@ public:
     bool enabled() const { return m_enabled.load(std::memory_order_acquire); }
 
     // Backend lifecycle, driven by this module — the delivery library neither
-    // starts nor stops the RLN module. Both block until the lane answers and
+    // starts nor stops the RLN module. Both run on the caller's thread and
     // return the module's reply text (empty on success, error text otherwise).
     std::string startBackend(std::string configJson);
     std::string stopBackend();
@@ -98,9 +97,6 @@ private:
         std::string proofJson;
         uint64_t timestamp = 0;
         std::chrono::steady_clock::time_point enqueuedAt;
-        // Set for module-driven lifecycle ops: the reply goes here instead of
-        // into logosdelivery_rln_response, which has no reqId to answer.
-        std::shared_ptr<std::promise<std::string>> reply;
     };
 
     struct Lane {
@@ -121,7 +117,7 @@ private:
                                      const std::string& kind, const std::string& msg);
 
     void enqueue(Job job);
-    // Runs a lifecycle op through the fast lane and waits for its reply.
+    // Runs a lifecycle op inline on the calling thread (see the .cpp).
     std::string runLifecycle(Op op, std::string configJson);
     void laneLoop(Lane* lane);
     std::string serveOp(const Job& job);

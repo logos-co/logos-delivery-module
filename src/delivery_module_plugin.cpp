@@ -948,10 +948,7 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
     parsed.enabled = true;
     rlnConfig = parsed;
 
-    // Installed before createNode: an installed plugin is what makes the
-    // library mount RLN over it. The setter is process-global (no ctx
-    // argument), so this relies on the host running a single delivery module
-    // instance per process. The struct is static so it outlives the node.
+    // The setter is process-global: one delivery module instance per process.
     static const LogosDeliveryRlnPlugin rlnPlugin = {
         .get_membership_state = rln_get_membership_state_callback,
         .get_epoch_quota = rln_get_epoch_quota_callback,
