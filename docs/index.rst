@@ -44,6 +44,7 @@ Internal docs
 -------------
 
 - :doc:`Architecture <pages/architecture>`
+- :doc:`Networks <pages/networks>`
 - :doc:`Running a node <pages/run-node>`
 - :doc:`Querying a node <pages/query-node>`
 - :doc:`Versioning <pages/versioning>`
