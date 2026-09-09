@@ -665,7 +665,7 @@ LOGOS_TEST(rlnRespond_passes_negative_req_id_bit_exactly) {
 LOGOS_TEST(destructor_clears_rln_callbacks) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    auto* impl = createInitializedImpl(t);
+    auto* impl = createRlnImpl(t);
     LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
 
     delete impl;
