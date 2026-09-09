@@ -96,6 +96,10 @@ extern "C"
                                                    LogosDeliveryScalarRawFn callback,
                                                    void *user_data);
 
+  int logosdelivery_get_discovery_requirements(void *ctx,
+                                               LogosDeliveryScalarRawFn callback,
+                                               void *user_data);
+
   static inline int logosdelivery_install_service_discovery_plugin(
       void *ctx,
       const LdServiceDiscoveryPlugin *plugin,

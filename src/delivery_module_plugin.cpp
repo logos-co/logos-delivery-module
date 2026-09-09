@@ -244,7 +244,7 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      delivery_discovery::PluginRequest& discovery,
+                                                      nlohmann::json& libp2pOverrides,
                                                       std::string& error)
 {
     nlohmann::json cfgObj;
@@ -262,7 +262,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
 
     // Before anything else: this strips our own `libp2pConfig` key, which the
     // node parser would reject as unrecognised.
-    error = delivery_discovery::resolve(cfgObj, discovery);
+    error = delivery_discovery::takeLibp2pConfig(cfgObj, libp2pOverrides);
     if (!error.empty()) {
         return std::nullopt;
     }
@@ -306,10 +306,10 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // Don't log cfg: it can carry sensitive config.
 
-    delivery_discovery::PluginRequest discovery;
+    nlohmann::json libp2pOverrides;
     std::string configError;
     auto cfgWithDefaults =
-        applyConfigDefaults(cfg, instancePersistencePath(), discovery, configError);
+        applyConfigDefaults(cfg, instancePersistencePath(), libp2pOverrides, configError);
     if (!cfgWithDefaults) {
         fprintf(stderr, "DeliveryModuleImpl: createNode config rejected: %s\n",
                 configError.c_str());
@@ -415,18 +415,34 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
     }
 
-    if (discovery.enabled) {
-        const std::string failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
-        if (!failure.empty()) {
-            // A node configured for plugin discovery cannot start without a
-            // registered plugin, so a half-built context is worse than none:
-            // tear it down and report, rather than failing later at start().
-            discoPlugin.reset();
-            logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
-            deliveryCtxHandle = nullptr;
-            deliveryCtx = nullptr;
-            return {false, {}, "service discovery plugin setup failed: " + failure};
-        }
+    // The node, not this module, knows whether discovery is to come from a
+    // plugin and which DHT peers its configuration (presets included)
+    // resolved: ask it, then bring the plugin in when it says so.
+    const StdLogosResult requirements = callApiRetValue(
+        "get_discovery_requirements", CALLBACK_TIMEOUT,
+        bindScalarApiCall(logosdelivery_get_discovery_requirements, deliveryCtx));
+    delivery_discovery::PluginRequest discovery;
+    std::string failure;
+    if (!requirements.success) {
+        failure = "discovery requirements: " + requirements.error;
+    } else {
+        const std::string reply = requirements.value.is_string()
+            ? requirements.value.get<std::string>()
+            : requirements.value.dump();
+        failure = delivery_discovery::fromRequirements(reply, libp2pOverrides, discovery);
+    }
+    if (failure.empty() && discovery.enabled) {
+        failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
+    }
+    if (!failure.empty()) {
+        // A node configured for plugin discovery cannot start without a
+        // registered plugin, so a half-built context is worse than none:
+        // tear it down and report, rather than failing later at start().
+        discoPlugin.reset();
+        logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
+        deliveryCtxHandle = nullptr;
+        deliveryCtx = nullptr;
+        return {false, {}, "service discovery setup failed: " + failure};
     }
 
     return {true, {}};

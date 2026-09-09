@@ -173,6 +173,25 @@ int logosdelivery_get_available_node_info_ids(void* /*ctx*/, logosdelivery_scala
     return RET_OK;
 }
 
+int logosdelivery_get_discovery_requirements(void* /*ctx*/, logosdelivery_scalar cb, void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_get_discovery_requirements");
+    // Unconfigured means a node that wants no plugin, so the many tests that
+    // only need a context keep working without setting a reply.
+    const char* configured =
+        LogosCMockStore::instance().getReturnString("logosdelivery_get_discovery_requirements");
+    if (!configured || !*configured) {
+        if (cb) {
+            const char reply[] = R"({"externalServiceDiscovery":false,"bootstrapNodes":[]})";
+            char buffer[sizeof(reply)];
+            memcpy(buffer, reply, sizeof(reply));
+            cb(RET_OK, buffer, sizeof(reply) - 1, userData);
+        }
+        return RET_OK;
+    }
+    scalarOk("logosdelivery_get_discovery_requirements", cb, userData);
+    return RET_OK;
+}
+
 int logosdelivery_get_available_configs(void* /*ctx*/, logosdelivery_scalar cb, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_get_available_configs");
     scalarOk("logosdelivery_get_available_configs", cb, userData);
