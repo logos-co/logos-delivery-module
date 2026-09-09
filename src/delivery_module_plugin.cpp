@@ -915,15 +915,15 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     return outcome.value.get<std::string>();
 }
 
-StdLogosResult DeliveryModuleImpl::configureRLN(const std::string& cfgJson)
+StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
 {
     if (deliveryCtx) {
-        return {false, {}, "configureRLN must be called before createNode"};
+        return {false, {}, "configureRln must be called before createNode"};
     }
 
     nlohmann::json cfgObj = nlohmann::json::parse(cfgJson, nullptr, /*allow_exceptions=*/false);
     if (!cfgObj.is_object()) {
-        return {false, {}, "configureRLN cfg is not a JSON object"};
+        return {false, {}, "configureRln cfg is not a JSON object"};
     }
 
     DeliveryRlnConfig parsed;
@@ -940,10 +940,10 @@ StdLogosResult DeliveryModuleImpl::configureRLN(const std::string& cfgJson)
         parsed.epochSizeSec = cfgObj[*k].get<uint64_t>();
     }
     if (parsed.registryId.empty()) {
-        return {false, {}, "configureRLN needs registry-id"};
+        return {false, {}, "configureRln needs registry-id"};
     }
     if (parsed.rlnIdentifier.empty()) {
-        return {false, {}, "configureRLN needs rln-identifier"};
+        return {false, {}, "configureRln needs rln-identifier"};
     }
     parsed.enabled = true;
     rlnConfig = parsed;

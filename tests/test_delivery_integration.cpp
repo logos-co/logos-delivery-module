@@ -363,7 +363,7 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
 // external response is rejected as a duplicate.
 //
 // The node config carries no RLN keys at all: RLN is configured through the
-// module's own configureRLN, and createNode stays a pass-through.
+// module's own configureRln, and createNode stays a pass-through.
 static const char* kRlnNodeConfig = R"({
   "logLevel": "DEBUG",
   "relay": true,
@@ -396,11 +396,11 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
     const bool live = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
 
     DeliveryModuleImpl impl;
-    // configureRLN installs the plugin, enables the in-process bridge and
+    // configureRln installs the plugin, enables the in-process bridge and
     // starts the RLN module; a module start failure fails the call, so this
     // covers the auto-enable and self-start wiring.
     if (live) {
-        LOGOS_ASSERT_TRUE(impl.configureRLN(kRlnModuleConfig).success);
+        LOGOS_ASSERT_TRUE(impl.configureRln(kRlnModuleConfig).success);
     }
     LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnNodeConfig : kMinimalConfig).success);
     LOGOS_ASSERT_TRUE(impl.start().success);

@@ -5,7 +5,7 @@ asks an external RLN module for every RLN operation. Its plugin is
 implementation-agnostic: it never names a registry or a membership, carries
 no configuration and never starts the backend. All of that lives here. This
 module answers those requests in-process: `src/rln_bridge.cpp` adds the
-registry id and rln identifier from `configureRLN`, calls the co-loaded
+registry id and rln identifier from `configureRln`, calls the co-loaded
 `liblogos_rln_module` and feeds each reply back unchanged. Every request is
 also emitted as an `rln*Request` event for observability; `rlnRespond`
 exists to answer a request from outside, but on a bridge-enabled node the
@@ -18,7 +18,7 @@ times it out itself and everything non-RLN keeps working.
 
 ## Configuring a node for RLN testing
 
-RLN has its own module method, `configureRLN`, called before `createNode`.
+RLN has its own module method, `configureRln`, called before `createNode`.
 It never rides the node config: `createNode` is a pass-through to the
 library, which knows nothing about RLN beyond an installed plugin.
 
@@ -34,7 +34,7 @@ library, which knows nothing about RLN beyond an installed plugin.
   reads that at node creation — hence the ordering. Without the call the
   node comes up with RLN off.
 - This module starts `liblogos_rln_module` itself; the library no longer
-  does. A start failure fails `configureRLN`. A bridge that cannot come up
+  does. A start failure fails `configureRln`. A bridge that cannot come up
   is not fatal: the `rln*Request` events plus `rlnRespond` remain, but
   nothing starts the backend on that path.
 - `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the

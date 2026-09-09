@@ -27,7 +27,7 @@ static constexpr const char* kRlnCfg =
 static DeliveryModuleImpl* createRlnImpl(LogosTestContext& t) {
     t.mockCFunction("logosdelivery_create_node").returns(1);
     auto* impl = new DeliveryModuleImpl();
-    LOGOS_ASSERT_TRUE(impl->configureRLN(kRlnCfg).success);
+    LOGOS_ASSERT_TRUE(impl->configureRln(kRlnCfg).success);
     LOGOS_ASSERT_TRUE(impl->createNode(R"({"logLevel":"INFO"})").success);
     return impl;
 }
@@ -578,7 +578,7 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     delete impl;
 }
 
-LOGOS_TEST(createNode_without_configureRLN_installs_no_plugin) {
+LOGOS_TEST(createNode_without_configureRln_installs_no_plugin) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
@@ -589,23 +589,23 @@ LOGOS_TEST(createNode_without_configureRLN_installs_no_plugin) {
     delete impl;
 }
 
-LOGOS_TEST(configureRLN_rejects_an_incomplete_config) {
+LOGOS_TEST(configureRln_rejects_an_incomplete_config) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
 
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_FALSE(impl.configureRLN("not json").success);
-    LOGOS_ASSERT_FALSE(impl.configureRLN(R"({"rln-identifier":"rln-id"})").success);
-    LOGOS_ASSERT_FALSE(impl.configureRLN(R"({"registry-id":"reg"})").success);
+    LOGOS_ASSERT_FALSE(impl.configureRln("not json").success);
+    LOGOS_ASSERT_FALSE(impl.configureRln(R"({"rln-identifier":"rln-id"})").success);
+    LOGOS_ASSERT_FALSE(impl.configureRln(R"({"registry-id":"reg"})").success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
 }
 
-LOGOS_TEST(configureRLN_must_precede_createNode) {
+LOGOS_TEST(configureRln_must_precede_createNode) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
 
-    LOGOS_ASSERT_FALSE(impl->configureRLN(kRlnCfg).success);
+    LOGOS_ASSERT_FALSE(impl->configureRln(kRlnCfg).success);
 
     delete impl;
 }

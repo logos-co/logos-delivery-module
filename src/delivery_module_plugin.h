@@ -342,7 +342,7 @@ public:
      * pass its reply back unchanged. The events keep emitting for
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
-     * call any time before @ref start. @ref configureRLN does this
+     * call any time before @ref start. @ref configureRln does this
      * automatically. Calling it directly is mainly for test purposes.
      */
     StdLogosResult rlnBridgeEnable();
@@ -370,7 +370,7 @@ public:
      *        registry deployment), `rln-identifier` (32-byte hex, per
      *        application) and optional `epoch-size-sec`.
      */
-    StdLogosResult configureRLN(const std::string& cfgJson);
+    StdLogosResult configureRln(const std::string& cfgJson);
 
     std::string name() const { return "delivery_module"; }
 
