@@ -27,6 +27,8 @@ public:
     StdLogosResult createNode(const std::string&, logos::CallError* = nullptr)
     { return StdLogosResult{}; }
     StdLogosResult start(logos::CallError* = nullptr) { return StdLogosResult{}; }
+    StdLogosResult getNodeInfo(const std::string&, logos::CallError* = nullptr)
+    { return StdLogosResult{}; }
 
     StdLogosResult discoStart(logos::CallError* = nullptr) { return StdLogosResult{}; }
     StdLogosResult discoStop(logos::CallError* = nullptr) { return StdLogosResult{}; }
