@@ -135,17 +135,13 @@ int RlnBridge::budgetMsFor(Op op)
     case Op::Generate:
         return 80'000;
     default:
-        return 10'000; // start, stop, get_epoch_quota, validate_proof
+        return 10'000; // get_epoch_quota, validate_proof
     }
 }
 
 const char* RlnBridge::opName(Op op)
 {
     switch (op) {
-    case Op::Start:
-        return "start";
-    case Op::Stop:
-        return "stop";
     case Op::Register:
         return "register_membership";
     case Op::GetState:
@@ -175,15 +171,13 @@ void RlnBridge::enqueue(Job job)
 {
     Lane& lane = isSlowOp(job.op) ? m_slow : m_fast;
     job.enqueuedAt = std::chrono::steady_clock::now();
-    // start/stop are rare lifecycle ops and always accepted.
-    const bool lifecycleOp = job.op == Op::Start || job.op == Op::Stop;
     const size_t cap = isSlowOp(job.op) ? kSlowQueueCap : kFastQueueCap;
     bool shed = false;
     size_t depth = 0;
     {
         std::lock_guard<std::mutex> lock(m_lock);
         depth = lane.queue.size();
-        shed = !lifecycleOp && depth >= cap;
+        shed = depth >= cap;
         if (!shed) {
             lane.queue.push_back(std::move(job));
         }
@@ -203,24 +197,43 @@ void RlnBridge::enqueue(Job job)
     lane.cv.notify_one();
 }
 
+// --- module-driven lifecycle -------------------------------------------------
+
+std::string RlnBridge::start(const std::string& configJson)
+{
+    if (!m_typed) {
+        return "rln bridge has no typed client";
+    }
+    logos::CallError err;
+    StdLogosResult r = m_typed->start(configJson, &err);
+    if (!err.ok()) {
+        return "start: " + err.code + ": " + err.message;
+    }
+    if (!r.success) {
+        return r.error.empty() ? "start: dispatch rejected (refusal with no message)"
+                               : r.error;
+    }
+    return {};
+}
+
+std::string RlnBridge::stop()
+{
+    if (!m_typed) {
+        return "rln bridge has no typed client";
+    }
+    logos::CallError err;
+    StdLogosResult r = m_typed->stop(&err);
+    if (!err.ok()) {
+        return "stop: " + err.code + ": " + err.message;
+    }
+    if (!r.success) {
+        return r.error.empty() ? "stop: dispatch rejected (refusal with no message)"
+                               : r.error;
+    }
+    return {};
+}
+
 // --- op entry points ---------------------------------------------------------
-
-void RlnBridge::start(uint64_t reqId, std::string configJson)
-{
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::Start;
-    j.configJson = std::move(configJson);
-    enqueue(std::move(j));
-}
-
-void RlnBridge::stop(uint64_t reqId)
-{
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::Stop;
-    enqueue(std::move(j));
-}
 
 void RlnBridge::registerMembership(uint64_t reqId, std::string registryId,
                                    std::string rlnIdentifier, std::string optionsJson)
@@ -410,14 +423,6 @@ std::string RlnBridge::serveFast(const Job& job)
     StdLogosResult r;
     const char* method = "";
     switch (job.op) {
-    case Op::Start:
-        method = "start";
-        r = m_typed->start(job.configJson, &err);
-        break;
-    case Op::Stop:
-        method = "stop";
-        r = m_typed->stop(&err);
-        break;
     case Op::GetQuota:
         method = "get_epoch_quota";
         r = m_typed->get_epoch_quota(job.registryId, job.rlnIdentifier, ts, &err);

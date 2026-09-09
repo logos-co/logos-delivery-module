@@ -11,12 +11,12 @@
 //   slow lane — register_membership, get_membership_state, generate_proof:
 //     raw lp calls with explicit timeouts, because the generated typed client
 //     has no per-call timeout and these ops can legitimately take minutes.
-//   fast lane — start, stop, get_epoch_quota, validate_proof: the generated
-//     typed client. These answer in milliseconds; the delivery library's own
-//     10 s budget for them expires before the client's default would.
+//   fast lane — get_epoch_quota, validate_proof: the generated typed client.
+//     These answer in milliseconds; the delivery library's own 10 s budget
+//     for them expires before the client's default would.
 //
 // Lanes are bounded and deadline-aware: a full lane sheds new work with an
-// immediate transient failure (start/stop always accepted), and a job whose
+// immediate transient failure, and a job whose
 // library budget ran out while queued is answered without serving — so a
 // burst degrades into fast failures instead of a queue of expired jobs
 // blocking the still-awaited ones.
@@ -58,9 +58,12 @@ public:
     std::string enable();
     bool enabled() const { return m_enabled.load(std::memory_order_acquire); }
 
+    // Module-driven lifecycle, synchronous on the caller's thread — the only
+    // way the RLN module is started or stopped. Empty string = success.
+    std::string start(const std::string& configJson);
+    std::string stop();
+
     // Op entry points (any thread; copy + enqueue, return immediately).
-    void start(uint64_t reqId, std::string configJson);
-    void stop(uint64_t reqId);
     void registerMembership(uint64_t reqId, std::string registryId,
                             std::string rlnIdentifier, std::string optionsJson);
     void getMembershipState(uint64_t reqId, std::string registryId,
@@ -75,11 +78,11 @@ public:
                        uint64_t timestamp, std::string proofJson);
 
 private:
-    enum class Op { Start, Stop, Register, GetState, GetQuota, Generate, Validate };
+    enum class Op { Register, GetState, GetQuota, Generate, Validate };
 
     struct Job {
         uint64_t reqId = 0;
-        Op op = Op::Start;
+        Op op = Op::Register;
         std::string configJson;
         std::string registryId;
         std::string rlnIdentifier;

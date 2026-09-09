@@ -72,6 +72,10 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
 // "eventType" that event_callback dispatches on. Upstream also emits
 // onTopicHealthChange, onConnectionChange and onReceivedMessage, which the
 // module does not surface.
+// Hardcoded until the module derives this from the node config.
+constexpr const char* kRlnStartConfig =
+    R"({"epoch_size_sec":120,"registries":["logos:testnet:0"]})";
+
 constexpr const char* kEventNames[] = {
     "onMessageSent",
     "onMessageError",
@@ -123,9 +127,6 @@ void DeliveryModuleImpl::rln_start_callback(uint64_t reqId, const char* configJs
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    if (impl->rlnBridge->enabled()) {
-        impl->rlnBridge->start(reqId, toStringOrEmpty(configJson));
-    }
     try {
         impl->rlnStartRequest(static_cast<int64_t>(reqId), toStringOrEmpty(configJson),
                               currentTimestampNs());
@@ -138,9 +139,6 @@ void DeliveryModuleImpl::rln_stop_callback(uint64_t reqId, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
-    if (impl->rlnBridge->enabled()) {
-        impl->rlnBridge->stop(reqId);
-    }
     try {
         impl->rlnStopRequest(static_cast<int64_t>(reqId), currentTimestampNs());
     } catch (...) {
@@ -290,6 +288,11 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
         deliveryCtxHandle = nullptr;
         deliveryCtx = nullptr;
+    }
+    // RLN outlives the node: in-flight validations can still arrive while the
+    // node tears down above.
+    if (rlnBridge->enabled()) {
+        rlnBridge->stop();
     }
 }
 
@@ -666,6 +669,15 @@ StdLogosResult DeliveryModuleImpl::start()
 
     if (!deliveryCtx) {
         return {false, {}, "Context not initialized"};
+    }
+
+    // The RLN module must be up before the node: relay validation and sends
+    // need it from the node's first operation.
+    if (rlnBridge->enabled()) {
+        const std::string err = rlnBridge->start(kRlnStartConfig);
+        if (!err.empty()) {
+            return {false, {}, "rln module start failed: " + err};
+        }
     }
 
     // Node start can block for a long time (relay reconnect backoff), so return
