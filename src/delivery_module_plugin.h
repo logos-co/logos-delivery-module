@@ -114,6 +114,11 @@ public:
 
     /**
      * @brief Starts the delivery node.
+     *
+     * On a bridge-enabled node the RLN module is started first, synchronously
+     * and verified — a failure is returned here and node start is never
+     * dispatched.
+     *
      * @return `true` once dispatched; completion is reported via `nodeStarted`.
      */
     StdLogosResult start();
@@ -399,7 +404,7 @@ logos_events:
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
     /**
-     * @brief RLN request events, one per ABI function
+     * @brief RLN request events, one per served ABI function
      * (`liblogosdelivery_rln.h`).
      *
      * Answer each via @ref rlnRespond with the same `reqId`. The JSON args are
@@ -407,8 +412,6 @@ logos_events:
      * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
      * local emission time, as on every other event.
      */
-    void rlnStartRequest(int64_t reqId, const std::string& configJson, int64_t timestamp);
-    void rlnStopRequest(int64_t reqId, int64_t timestamp);
     void rlnRegisterRequest(int64_t reqId, const std::string& registryId,
                             const std::string& rlnIdentifier,
                             const std::string& optionsJson, int64_t timestamp);
@@ -465,12 +468,10 @@ private:
     static void start_callback(int callerRet, char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
 
-    // RLN callback slots registered in createNode, one per ABI function
-    // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
-    // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
-    // for the duration of the call. userData is the DeliveryModuleImpl*.
-    static void rln_start_callback(uint64_t reqId, const char* configJson, void* userData);
-    static void rln_stop_callback(uint64_t reqId, void* userData);
+    // RLN callback slots registered in createNode (liblogosdelivery_rln.h);
+    // each emits its rln*Request event. Fired by liblogosdelivery, possibly on
+    // a foreign thread. All strings are borrowed for the duration of the
+    // call. userData is the DeliveryModuleImpl*.
     static void rln_register_callback(uint64_t reqId, const char* registryId,
                                       const char* rlnIdentifier,
                                       const char* optionsJson, void* userData);

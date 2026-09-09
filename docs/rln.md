@@ -1,12 +1,23 @@
 # RLN bridge
 
 The delivery library (liblogosdelivery) does not implement RLN itself — it
-asks an external RLN module for every RLN operation. This module answers
-those requests in-process: `src/rln_bridge.cpp` calls the co-loaded
+asks an external RLN module for RLN operations. This module answers those
+requests in-process: `src/rln_bridge.cpp` calls the co-loaded
 `liblogos_rln_module` and feeds each reply back unchanged. Every request is
 also emitted as an `rln*Request` event for observability; `rlnRespond`
 exists to answer a request from outside, but on a bridge-enabled node the
 bridge answers first and a second response per reqId is rejected.
+
+The RLN module's lifecycle is the exception: this module drives it directly,
+not through the library's request path. `start` calls the RLN module
+synchronously (config hardcoded for now) and only dispatches node start once
+the RLN module is up — a failure fails `start` itself, before the node is
+touched. Teardown stops the RLN module after the node is destroyed, so
+in-flight validations still have a responder. The library's start/stop
+callback slots are left unregistered (it null-checks each slot), so its own
+bring-up attempt fails instantly with "RLN module not registered" — a notice
+in its log, not a node-start gate — instead of waiting out a 10 s timeout.
+There are no `rlnStartRequest` / `rlnStopRequest` events.
 
 Replies cross verbatim — the wire schema is owned by the RLN module and the
 delivery library, not modelled here. The only replies the bridge fabricates
@@ -36,11 +47,8 @@ RLN rides `createNode`'s flat config:
 - `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the
   host auto-loads it along with its own deps (`liblogos_lez_rln_module`,
   `lez_core`).
-- Bring-up fires `start`, then a `get_membership_state` gate: the node's
-  membership must already be `active` or `grace_period` — registration
-  happens out-of-band, through the RLN module, not through this library.
-  Without one (e.g. no chain), `start` fails with the RLN module's own
-  error carried verbatim into `nodeStarted`.
+- Bring-up: the module starts the RLN module first (synchronous, verified —
+  a failure fails `start` before the node is dispatched).
 
 ## Running the e2e
 
@@ -54,5 +62,7 @@ The library gives each request a budget before synthesizing a TRANSIENT
 failure itself: 200 s for `register_membership`, 80 s for the other registry
 reads (`get_membership_state`, `generate_proof`), 10 s for the rest. The
 bridge's raw-call timeouts (190 s register, 70 s reads) sit just under
-those; the remaining ops go through the generated typed client, whose reply
-arrives well inside the 10 s budget.
+those; `get_epoch_quota` and `validate_proof` go through the generated typed
+client, whose reply arrives well inside the 10 s budget. The module-driven
+`start`/`stop` also use the typed client, blocking the caller until the RLN
+module answers.

@@ -4,7 +4,9 @@
 // calling the co-loaded liblogos_rln_module and feeding each reply into
 // logosdelivery_rln_response. createNode enables it whenever the node config
 // runs lez RLN ("rln-lez"); the rln*Request events keep emitting
-// either way, for observability (docs/rln.md).
+// either way, for observability (docs/rln.md). It also carries the RLN
+// module's lifecycle: start()/stop() are module-driven synchronous calls,
+// not answers to library requests.
 //
 // Two worker lanes, so a slow registry operation never delays proof
 // validation on the message hot path:
@@ -27,7 +29,8 @@
 // are only dispatched after the context is ready. The thread that runs
 // init() becomes the lp client's owner. The op entry points only copy
 // arguments and enqueue — safe from any thread (the delivery library fires
-// its callbacks on foreign threads).
+// its callbacks on foreign threads). start()/stop() are the exception: they
+// call the typed client on the caller's thread and block until it answers.
 
 #include <atomic>
 #include <chrono>
@@ -83,7 +86,6 @@ private:
     struct Job {
         uint64_t reqId = 0;
         Op op = Op::Register;
-        std::string configJson;
         std::string registryId;
         std::string rlnIdentifier;
         std::string signalHex;

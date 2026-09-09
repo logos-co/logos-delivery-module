@@ -19,15 +19,14 @@ extern NodeLifecycleEvent g_lastNodeStarted;
 extern NodeLifecycleEvent g_lastNodeStopped;
 
 // Last rln*Request event, whichever fired. `op` carries the ABI function name
-// ("start", ..., "validate_proof"); empty means no RLN event fired. Only the
-// fields the firing event carries are set.
+// ("register_membership", ..., "validate_proof"); empty means no RLN event
+// fired. Only the fields the firing event carries are set.
 struct RlnRequestEvent {
     std::string op;
     int64_t reqId = 0;
     std::string registryId;
     std::string rlnIdentifier;
     std::string signalHex;
-    std::string configJson;
     std::string optionsJson;
     std::string proofJson;
     int64_t epochTimestamp = 0;

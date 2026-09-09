@@ -122,30 +122,6 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
 // verbatim, never parsed here. Responses come back later via rlnRespond;
 // response timeouts are the library's job.
 
-void DeliveryModuleImpl::rln_start_callback(uint64_t reqId, const char* configJson,
-                                            void* userData)
-{
-    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
-    try {
-        impl->rlnStartRequest(static_cast<int64_t>(reqId), toStringOrEmpty(configJson),
-                              currentTimestampNs());
-    } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN start request\n");
-    }
-}
-
-void DeliveryModuleImpl::rln_stop_callback(uint64_t reqId, void* userData)
-{
-    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
-    try {
-        impl->rlnStopRequest(static_cast<int64_t>(reqId), currentTimestampNs());
-    } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN stop request\n");
-    }
-}
-
 void DeliveryModuleImpl::rln_register_callback(uint64_t reqId, const char* registryId,
                                                const char* rlnIdentifier,
                                                const char* optionsJson, void* userData)
@@ -646,9 +622,9 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // registration would clobber the first, so this relies on the host running
     // a single delivery module instance per process. The struct is static so
     // it outlives the node.
+    // No start/stop slots: this module drives the RLN lifecycle itself (see
+    // start()).
     static const LogosDeliveryRlnCallbacks rlnCallbacks = {
-        .start = rln_start_callback,
-        .stop = rln_stop_callback,
         .register_membership = rln_register_callback,
         .get_membership_state = rln_get_membership_state_callback,
         .get_epoch_quota = rln_get_epoch_quota_callback,

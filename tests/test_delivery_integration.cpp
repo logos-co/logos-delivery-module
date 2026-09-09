@@ -353,17 +353,17 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
     return delivery_test_events::g_lastRlnRequest.op == op;
 }
 
-// The full start chain, served in-process: createNode sniffs "rln-lez"
-// from the config and enables the bridge, so the library's RLN callbacks are
-// answered by the co-loaded RLN module — or, when none is reachable, by the
-// bridge's own transport-failure replies. Either way every request completes
-// library-side, so this test observes the chain through the rln*Request
-// events (which keep emitting for observability) and verifies an external
-// response is rejected as a duplicate; it must not answer requests itself.
-// register_membership only fires when a live RLN module answered start with
-// success, so it is not asserted here.
+// The full bring-up chain: createNode sniffs "rln-lez" from the config and
+// enables the bridge, start() then starts the co-loaded RLN module
+// synchronously (hardcoded config) before dispatching node start — so
+// start() succeeding already verifies the module-driven RLN start. The
+// library's request path (answered in-process by the bridge, or by its own
+// transport-failure replies when no RLN module is reachable) is observed
+// through the startup membership probe's rln*Request event, and an external
+// response is verified to be rejected as a duplicate; the test must not
+// answer requests itself.
 //
-// node_factory.nim drives this chain from startNode, but only when
+// node_factory.nim drives the probe from startNode, but only when
 // conf.rlnRelayConf.isSome().
 static const char* kRlnConfig = R"({
   "logLevel": "DEBUG",
@@ -399,36 +399,34 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
 
     DeliveryModuleImpl impl;
     // The lez config also enables the in-process bridge; a bridge setup
-    // failure fails createNode, so this covers the auto-enable wiring.
+    // failure fails createNode, so this covers the auto-enable wiring. On the
+    // lez config, start() succeeding means the RLN module actually started —
+    // a failure would have failed the call before node start was dispatched.
     LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnConfig : kMinimalConfig).success);
     LOGOS_ASSERT_TRUE(impl.start().success);
 
-    if (!waitForRlnRequestOp("start")) {
+    if (!live) {
         fprintf(stderr,
-                "SKIP integration_rln_start_chain_round_trip: no RLN start "
-                "request (set LOGOS_DELIVERY_RLN_LIVE against a native-mount-skip "
+                "SKIP integration_rln_start_chain_round_trip: RLN-off config "
+                "(set LOGOS_DELIVERY_RLN_LIVE against a native-mount-skip "
                 "build to exercise the live chain)\n");
         impl.stop();
         waitForNodeStopped();
         return;
     }
 
-    // The start request carries the module's start() config, built from this
-    // node's RLN conf: epoch_size_sec is the value every proof generator and
-    // validator must share.
-    const auto& startReq = delivery_test_events::g_lastRlnRequest;
-    LOGOS_ASSERT_TRUE(startReq.configJson.find("\"epoch_size_sec\":600") !=
-                      std::string::npos);
-    LOGOS_ASSERT_TRUE(startReq.configJson.find("logos:testnet:") != std::string::npos);
-    const int64_t startReqId = startReq.reqId;
+    // start/stop no longer travel the request path; the library's chain is
+    // observed through the startup membership probe startNode fires.
+    LOGOS_ASSERT_TRUE(waitForRlnRequestOp("get_membership_state", 15000));
+    const int64_t probeReqId = delivery_test_events::g_lastRlnRequest.reqId;
 
     // Give the request time to complete library-side: the bridge answers it
-    // (with a transport failure when no RLN module is reachable), and the
-    // library's 10 s budget for local ops backstops even that. Afterwards an
-    // external response must be rejected through the real in-flight list.
+    // (a live module replies within seconds; chainless, its own error comes
+    // back just as fast). Afterwards an external response must be rejected
+    // through the real in-flight list.
     std::this_thread::sleep_for(std::chrono::seconds(11));
     LOGOS_ASSERT_FALSE(
-        impl.rlnRespond(startReqId, R"({"success":true,"value":{}})").success);
+        impl.rlnRespond(probeReqId, R"({"success":true,"value":{}})").success);
 
     LOGOS_ASSERT_TRUE(impl.stop().success);
     LOGOS_ASSERT_TRUE(waitForNodeStopped());

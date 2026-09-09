@@ -486,9 +486,6 @@ LOGOS_TEST(createNode_registers_rln_callbacks) {
     LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
     // userData must be the module instance so the trampolines can emit events.
     LOGOS_ASSERT(delivery_test_rln::g_userData == static_cast<void*>(impl));
-    // All seven slots populated.
-    LOGOS_ASSERT(delivery_test_rln::g_callbacks.start != nullptr);
-    LOGOS_ASSERT(delivery_test_rln::g_callbacks.stop != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.register_membership != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_membership_state != nullptr);
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.get_epoch_quota != nullptr);
@@ -529,17 +526,6 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     // asserted. The opaque JSON args (options/proof) must pass through
     // untouched.
     const auto& e = delivery_test_events::g_lastRlnRequest;
-
-    delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.start(1, R"({"epoch_size_sec":600})", ud);
-    LOGOS_ASSERT_EQ(e.op, std::string("start"));
-    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(1));
-    LOGOS_ASSERT_EQ(e.configJson, std::string(R"({"epoch_size_sec":600})"));
-
-    delivery_test_events::resetRlnRequestEvent();
-    delivery_test_rln::g_callbacks.stop(2, ud);
-    LOGOS_ASSERT_EQ(e.op, std::string("stop"));
-    LOGOS_ASSERT_EQ(e.reqId, static_cast<int64_t>(2));
 
     delivery_test_events::resetRlnRequestEvent();
     delivery_test_rln::g_callbacks.register_membership(
