@@ -3,6 +3,7 @@
 // Mocks invoke callbacks synchronously so the semaphore inside api_call_handler.h
 // is released before try_acquire_for starts waiting.
 
+#include <cstdlib>
 #include <cstring>
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
@@ -490,7 +491,7 @@ LOGOS_TEST(base64_encode_matches_rfc4648_vectors) {
     LOGOS_ASSERT(delivery_base64::decode("Zm9vYmFy") == std::vector<uint8_t>({'f', 'o', 'o', 'b', 'a', 'r'}));
 }
 
-// discovery config (discovery_config.h): libp2pConfig strip + requirements reply
+// discovery config (discovery_config.h): the node's requirements reply
 
 static nlohmann::json parseJson(const char* text) { return nlohmann::json::parse(text); }
 
@@ -500,25 +501,23 @@ static const char* kEnabledReply =
         "/ip4/10.0.0.2/tcp/30303/p2p/16Uiu2HAmB"]})";
 static const char* kDisabledReply = R"({"externalServiceDiscovery":false,"bootstrapNodes":[]})";
 
-LOGOS_TEST(discovery_take_libp2p_config_strips_the_object) {
-    auto cfg = parseJson(R"({"preset":"logos.test","libp2pConfig":{"addrs":["/ip4/127.0.0.1/tcp/1"]}})");
-    nlohmann::json overrides;
-    LOGOS_ASSERT_TRUE(delivery_discovery::takeLibp2pConfig(cfg, overrides).empty());
-    LOGOS_ASSERT_FALSE(cfg.contains("libp2pConfig"));
-    LOGOS_ASSERT_EQ(cfg.dump(), std::string(R"({"preset":"logos.test"})"));
-    LOGOS_ASSERT_EQ(overrides["addrs"][0].get<std::string>(), std::string("/ip4/127.0.0.1/tcp/1"));
-}
-
-LOGOS_TEST(discovery_take_libp2p_config_is_empty_when_absent_and_rejects_non_objects) {
-    auto cfg = parseJson(R"({"preset":"logos.test"})");
-    nlohmann::json overrides;
-    LOGOS_ASSERT_TRUE(delivery_discovery::takeLibp2pConfig(cfg, overrides).empty());
-    LOGOS_ASSERT_TRUE(overrides.is_object());
-    LOGOS_ASSERT_TRUE(overrides.empty());
-
-    auto bad = parseJson(R"({"libp2pConfig":"not an object"})");
-    LOGOS_ASSERT_FALSE(delivery_discovery::takeLibp2pConfig(bad, overrides).empty());
-}
+// Sets LIBP2P_MODULE_CONFIG for a test body and restores it afterwards.
+struct ScopedLibp2pEnv {
+    std::string saved;
+    bool had;
+    explicit ScopedLibp2pEnv(const char* value)
+    {
+        const char* old = getenv("LIBP2P_MODULE_CONFIG");
+        had = old != nullptr;
+        if (had) saved = old;
+        setenv("LIBP2P_MODULE_CONFIG", value, 1);
+    }
+    ~ScopedLibp2pEnv()
+    {
+        if (had) setenv("LIBP2P_MODULE_CONFIG", saved.c_str(), 1);
+        else unsetenv("LIBP2P_MODULE_CONFIG");
+    }
+};
 
 LOGOS_TEST(discovery_split_bootstrap_address) {
     nlohmann::json node;
@@ -549,14 +548,35 @@ LOGOS_TEST(discovery_from_requirements_builds_the_libp2p_config) {
     LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["addrs"][0].get<std::string>(), std::string("/ip4/10.0.0.2/tcp/30303"));
 }
 
-LOGOS_TEST(discovery_from_requirements_applies_overrides) {
+LOGOS_TEST(discovery_from_requirements_keeps_libp2p_own_config_underneath) {
+    // The node decides the DHT peers and the mounts; everything else in
+    // libp2p's own config survives.
     delivery_discovery::PluginRequest req;
-    const auto overrides = parseJson(R"({"bootstrapNodes":[],"mountKad":false,"addrs":["/ip4/127.0.0.1/tcp/7"]})");
-    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, overrides, req).empty());
+    const auto base = parseJson(R"({"addrs":["/ip4/0.0.0.0/tcp/9000"],"transport":"tcp",
+        "mountKad":false,"bootstrapNodes":[{"peerId":"stale","addrs":["/ip4/1.1.1.1/tcp/1"]}]})");
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, base, req).empty());
     const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
-    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{0});  // seed mode wins over the node's list
-    LOGOS_ASSERT_FALSE(libp2p["mountKad"].get<bool>());
-    LOGOS_ASSERT_EQ(libp2p["addrs"][0].get<std::string>(), std::string("/ip4/127.0.0.1/tcp/7"));
+    LOGOS_ASSERT_EQ(libp2p["addrs"][0].get<std::string>(), std::string("/ip4/0.0.0.0/tcp/9000"));
+    LOGOS_ASSERT_EQ(libp2p["transport"].get<std::string>(), std::string("tcp"));
+    LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{2});
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+}
+
+LOGOS_TEST(discovery_libp2p_env_config_is_read_like_libp2p_module_does) {
+    {
+        ScopedLibp2pEnv env(R"({"addrs":["/ip4/127.0.0.1/tcp/7"]})");
+        const auto cfg = delivery_discovery::libp2pEnvConfig();
+        LOGOS_ASSERT_EQ(cfg["addrs"][0].get<std::string>(), std::string("/ip4/127.0.0.1/tcp/7"));
+    }
+    {
+        ScopedLibp2pEnv env("not json");
+        LOGOS_ASSERT_TRUE(delivery_discovery::libp2pEnvConfig().empty());
+    }
+    {
+        ScopedLibp2pEnv env("");
+        LOGOS_ASSERT_TRUE(delivery_discovery::libp2pEnvConfig().empty());
+    }
 }
 
 LOGOS_TEST(discovery_from_requirements_rejects_bad_input) {
@@ -570,9 +590,6 @@ LOGOS_TEST(discovery_from_requirements_rejects_bad_input) {
         LOGOS_ASSERT_FALSE(delivery_discovery::fromRequirements(reply, nlohmann::json::object(), req).empty());
         LOGOS_ASSERT_FALSE(req.enabled);
     }
-    delivery_discovery::PluginRequest req;
-    const auto badOverride = parseJson(R"({"bootstrapNodes":[{"addrs":["/ip4/1.2.3.4/tcp/1"]}]})");
-    LOGOS_ASSERT_FALSE(delivery_discovery::fromRequirements(kEnabledReply, badOverride, req).empty());
 }
 
 // createNode: plugin path, driven by the node's answer
@@ -594,7 +611,7 @@ LOGOS_TEST(createNode_skips_plugin_when_the_node_wants_none) {
     t.mockCFunction("logosdelivery_get_discovery_requirements").returns(kDisabledReply);
 
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test","libp2pConfig":{"bootstrapNodes":[]}})").success);
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_discovery_requirements"));
     LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_service_discovery_plugin"));
 }

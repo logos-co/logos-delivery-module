@@ -2,21 +2,23 @@
 
 // Plugin-discovery setup from the node's own answer.
 //
-// The config file is one document for both libraries. Everything in it
-// belongs to logos-delivery except the top-level `libp2pConfig` object, this
-// module's overrides for libp2p_module's createNode; logos-delivery's parser
-// rejects keys it does not know, so that object is taken out before the
-// config is forwarded.
+// The createNode config is logos-delivery's alone; this module forwards it and
+// reads nothing discovery-related out of it. After createNode the node is
+// asked (logosdelivery_get_discovery_requirements) whether service discovery
+// is to come from a plugin and which DHT peers its configuration, presets
+// included, resolved. This header turns that reply into the options the
+// plugin hands to libp2p_module's createNode.
 //
-// Whether a plugin is wanted, and which DHT peers to bootstrap from, is not
-// read from the config here: after createNode the node is asked
-// (logosdelivery_get_discovery_requirements), so presets and every config
-// shape resolve on the side that owns them. This header turns that reply plus
-// the overrides into the libp2p config the plugin hands over.
+// libp2p_module keeps its own configuration channel, the LIBP2P_MODULE_CONFIG
+// environment variable (inline JSON or a file path; see its README). A
+// call-time createNode replaces those options wholesale on the libp2p side, so
+// the plugin overlays the node's answer on that config rather than discarding
+// it: listen addresses, transport and key stay the operator's.
 
-#include <cctype>
-#include <initializer_list>
-#include <optional>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -32,50 +34,23 @@ struct PluginRequest {
 
 namespace detail {
 
-inline std::string lower(std::string s)
-{
-    for (auto& c : s) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return s;
-}
-
-/// Case-insensitive key lookup; returns the key as spelled in the config.
-inline std::optional<std::string> findKey(const nlohmann::json& obj,
-                                          std::initializer_list<const char*> names)
-{
-    if (!obj.is_object()) {
-        return std::nullopt;
-    }
-    for (const auto& entry : obj.items()) {
-        const std::string key = lower(entry.key());
-        for (const char* name : names) {
-            if (key == name) {
-                return entry.key();
-            }
-        }
-    }
-    return std::nullopt;
-}
-
 /// libp2p wants the peer id separate from the transport addresses
 /// ({peerId, addrs[]}); nim-libp2p raiseAsserts on an unparseable entry rather
 /// than returning an error, so the shape is checked before anything is sent.
 inline std::string checkBootstrapNodes(const nlohmann::json& nodes)
 {
     if (!nodes.is_array()) {
-        return "libp2pConfig.bootstrapNodes must be an array";
+        return "bootstrapNodes must be an array";
     }
     for (const auto& node : nodes) {
         if (!node.is_object() || !node.contains("peerId") || !node["peerId"].is_string()
             || node["peerId"].get<std::string>().empty() || !node.contains("addrs")
             || !node["addrs"].is_array() || node["addrs"].empty()) {
-            return "each libp2pConfig.bootstrapNodes entry needs a peerId string and a "
-                   "non-empty addrs array";
+            return "each bootstrapNodes entry needs a peerId string and a non-empty addrs array";
         }
         for (const auto& addr : node["addrs"]) {
             if (!addr.is_string() || addr.get<std::string>().empty()) {
-                return "libp2pConfig.bootstrapNodes addrs must be non-empty strings";
+                return "bootstrapNodes addrs must be non-empty strings";
             }
         }
     }
@@ -84,20 +59,34 @@ inline std::string checkBootstrapNodes(const nlohmann::json& nodes)
 
 } // namespace detail
 
-/// Takes the top-level `libp2pConfig` object out of `cfg` into `overrides`
-/// (an empty object when absent). Returns the failure reason, empty on
-/// success.
-inline std::string takeLibp2pConfig(nlohmann::json& cfg, nlohmann::json& overrides)
+/// libp2p_module's own configuration, read the way the module reads it
+/// (LIBP2P_MODULE_CONFIG: inline JSON when it starts with '{', otherwise a
+/// file path). An empty object when unset, unreadable or not a JSON object.
+inline nlohmann::json libp2pEnvConfig()
 {
-    overrides = nlohmann::json::object();
-    if (const auto key = detail::findKey(cfg, {"libp2pconfig"})) {
-        if (!cfg[*key].is_object()) {
-            return "libp2pConfig must be a JSON object";
-        }
-        overrides = cfg[*key];
-        cfg.erase(*key);
+    const char* cfg = std::getenv("LIBP2P_MODULE_CONFIG");
+    if (!cfg || !*cfg) {
+        return nlohmann::json::object();
     }
-    return {};
+    std::string raw(cfg);
+    const auto first = raw.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos || raw[first] != '{') {
+        std::ifstream f(raw);
+        if (!f) {
+            fprintf(stderr, "DeliveryModuleImpl: cannot read LIBP2P_MODULE_CONFIG file %s\n",
+                    raw.c_str());
+            return nlohmann::json::object();
+        }
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        raw = ss.str();
+    }
+    const auto parsed = nlohmann::json::parse(raw, nullptr, false);
+    if (!parsed.is_object()) {
+        fprintf(stderr, "DeliveryModuleImpl: ignoring invalid LIBP2P_MODULE_CONFIG\n");
+        return nlohmann::json::object();
+    }
+    return parsed;
 }
 
 /// Splits a "/.../p2p/<peerId>" multiaddr into libp2p's {peerId, addrs[]}
@@ -120,12 +109,10 @@ inline bool splitBootstrapAddress(const std::string& multiaddr, nlohmann::json& 
 
 /// Turns the node's requirements reply
 ///   {"externalServiceDiscovery": bool, "bootstrapNodes": ["/dns4/.../p2p/..."]}
-/// plus the operator's `libp2pConfig` overrides into the plugin request: the
-/// defaults (`mountKad`, `mountServiceDiscovery`) and the node's bootstrap
-/// peers, with every override applied on top -- an explicit `bootstrapNodes`
-/// there replaces the node's list, an empty one makes a seed. Returns the
-/// failure reason, empty on success.
-inline std::string fromRequirements(const std::string& reply, const nlohmann::json& overrides,
+/// into the plugin request: `base` (libp2p_module's own config, see
+/// libp2pEnvConfig) with the node's bootstrap peers and the two mount flags
+/// set on top. Returns the failure reason, empty on success.
+inline std::string fromRequirements(const std::string& reply, const nlohmann::json& base,
                                     PluginRequest& out)
 {
     out = PluginRequest{};
@@ -153,16 +140,15 @@ inline std::string fromRequirements(const std::string& reply, const nlohmann::js
             nodes.push_back(node);
         }
     }
-
-    nlohmann::json full = {
-        {"mountKad", true}, {"mountServiceDiscovery", true}, {"bootstrapNodes", nodes}};
-    if (overrides.is_object()) {
-        full.update(overrides);
-    }
-    const std::string bad = detail::checkBootstrapNodes(full["bootstrapNodes"]);
+    const std::string bad = detail::checkBootstrapNodes(nodes);
     if (!bad.empty()) {
         return bad;
     }
+
+    nlohmann::json full = base.is_object() ? base : nlohmann::json::object();
+    full["bootstrapNodes"] = nodes;
+    full["mountKad"] = true;
+    full["mountServiceDiscovery"] = true;
 
     out.enabled = true;
     out.libp2pConfig = full.dump();

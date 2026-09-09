@@ -244,7 +244,6 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      nlohmann::json& libp2pOverrides,
                                                       std::string& error)
 {
     nlohmann::json cfgObj;
@@ -257,13 +256,6 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
 
     if (!cfgObj.is_object()) {
         error = "Invalid JSON config";
-        return std::nullopt;
-    }
-
-    // Before anything else: this strips our own `libp2pConfig` key, which the
-    // node parser would reject as unrecognised.
-    error = delivery_discovery::takeLibp2pConfig(cfgObj, libp2pOverrides);
-    if (!error.empty()) {
         return std::nullopt;
     }
 
@@ -306,10 +298,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // Don't log cfg: it can carry sensitive config.
 
-    nlohmann::json libp2pOverrides;
     std::string configError;
-    auto cfgWithDefaults =
-        applyConfigDefaults(cfg, instancePersistencePath(), libp2pOverrides, configError);
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), configError);
     if (!cfgWithDefaults) {
         fprintf(stderr, "DeliveryModuleImpl: createNode config rejected: %s\n",
                 configError.c_str());
@@ -417,7 +407,9 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // The node, not this module, knows whether discovery is to come from a
     // plugin and which DHT peers its configuration (presets included)
-    // resolved: ask it, then bring the plugin in when it says so.
+    // resolved: ask it, then bring the plugin in when it says so. libp2p's own
+    // options come from its own channel (LIBP2P_MODULE_CONFIG), preserved
+    // underneath the node's answer.
     const StdLogosResult requirements = callApiRetValue(
         "get_discovery_requirements", CALLBACK_TIMEOUT,
         bindScalarApiCall(logosdelivery_get_discovery_requirements, deliveryCtx));
@@ -429,7 +421,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         const std::string reply = requirements.value.is_string()
             ? requirements.value.get<std::string>()
             : requirements.value.dump();
-        failure = delivery_discovery::fromRequirements(reply, libp2pOverrides, discovery);
+        failure = delivery_discovery::fromRequirements(
+            reply, delivery_discovery::libp2pEnvConfig(), discovery);
     }
     if (failure.empty() && discovery.enabled) {
         failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);

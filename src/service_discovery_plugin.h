@@ -85,8 +85,9 @@ private:
      * Calls libp2p's `createNode`, because that is the only point at which its
      * kademlia can be given bootstrap peers: there is no call to add them
      * afterwards, and without peers it can neither store a provider record nor
-     * answer a lookup. The config comes from the node config's `libp2pConfig`
-     * section; only the first kMaxBootstrapNodes peers are handed over.
+     * answer a lookup. The config is the node's discovery requirements laid
+     * over libp2p_module's own LIBP2P_MODULE_CONFIG (see discovery_config.h);
+     * only the first kMaxBootstrapNodes peers are handed over.
      *
      * @return empty on success, otherwise a human-readable diagnostic.
      */

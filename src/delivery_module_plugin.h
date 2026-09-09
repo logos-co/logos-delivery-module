@@ -388,7 +388,8 @@ private:
      * stopped, and refuses to start a node configured for plugin discovery
      * without one.
      *
-     * @param libp2pConfig Optional JSON handed to libp2p's own createNode.
+     * @param libp2pConfig JSON for libp2p's own createNode, built from the
+     *        node's discovery requirements (see discovery_config.h).
      * @return the failure reason, or empty on success.
      */
     std::string installServiceDiscoveryPlugin(const std::string& libp2pConfig);
