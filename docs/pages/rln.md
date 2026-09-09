@@ -37,9 +37,10 @@ library, which knows nothing about RLN beyond an installed plugin.
   does. A start failure fails `configureRln`. A bridge that cannot come up
   is not fatal: the `rln*Request` events plus `rlnRespond` remain, but
   nothing starts the backend on that path.
-- `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the
-  host auto-loads it along with its own deps (`liblogos_lez_rln_module`,
-  `lez_core`).
+- `liblogos_rln_module` is an `optional_dependency`, so the host neither
+  loads it nor requires it: a node that never calls `configureRln` runs
+  without the RLN stack installed at all. An RLN node loads it — and its own
+  deps, `liblogos_lez_rln_module` and `lez_core` — before `configureRln`.
 - Bring-up fires `start` from this module, then the library's
   `get_membership_state` gate: the node's membership must already be
   `active` or `grace_period` — registration happens out-of-band, through the
