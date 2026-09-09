@@ -5,7 +5,7 @@ asks an external RLN module for every RLN operation. Its plugin is
 implementation-agnostic: it never names a registry or a membership, carries
 no configuration and never starts the backend. All of that lives here. This
 module answers those requests in-process: `src/rln_bridge.cpp` adds the
-configured registry id and rln identifier, calls the co-loaded
+registry id and rln identifier from `configureRLN`, calls the co-loaded
 `liblogos_rln_module` and feeds each reply back unchanged. Every request is
 also emitted as an `rln*Request` event for observability; `rlnRespond`
 exists to answer a request from outside, but on a bridge-enabled node the
@@ -18,29 +18,25 @@ times it out itself and everything non-RLN keeps working.
 
 ## Configuring a node for RLN testing
 
-RLN rides `createNode`'s flat config:
+RLN has its own module method, `configureRLN`, called before `createNode`.
+It never rides the node config: `createNode` is a pass-through to the
+library, which knows nothing about RLN beyond an installed plugin.
 
 ```json
 {
-  "relay": true,
-  "rln-relay": true,
-  "rln-lez": true,
-  "rln-registry-id": "logos:testnet:0",
+  "registry-id": "logos:testnet:0",
   "rln-identifier": "<exactly 64 hex chars — validated as 32 bytes>",
-  "rln-relay-user-message-limit": 100,
-  "rln-relay-epoch-sec": 120
+  "epoch-size-sec": 120
 }
 ```
 
-- `rln-lez: true` is the switch. These keys are consumed here and stripped
-  from the config before it reaches the library, which rejects them —
-  `rln-relay` goes too, since with a plugin installed it would ask the
-  library for its embedded EVM backend instead. Installing the plugin is
-  what makes the library mount RLN over it.
-- This module starts `liblogos_rln_module` itself, before `createNode`
-  returns; the library no longer does. A start failure fails `createNode`.
-  A bridge that cannot come up is not fatal: the `rln*Request` events plus
-  `rlnRespond` remain, but nothing starts the backend on that path.
+- Installing the plugin is what makes the library mount RLN over it, and it
+  reads that at node creation — hence the ordering. Without the call the
+  node comes up with RLN off.
+- This module starts `liblogos_rln_module` itself; the library no longer
+  does. A start failure fails `configureRLN`. A bridge that cannot come up
+  is not fatal: the `rln*Request` events plus `rlnRespond` remain, but
+  nothing starts the backend on that path.
 - `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the
   host auto-loads it along with its own deps (`liblogos_lez_rln_module`,
   `lez_core`).

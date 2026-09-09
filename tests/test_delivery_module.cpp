@@ -18,17 +18,17 @@ static DeliveryModuleImpl* createInitializedImpl(LogosTestContext& t) {
     return impl;
 }
 
-// RLN config: the module keeps these keys and strips them before the config
-// reaches the library. Without a framework context the bridge cannot come up,
-// which is not fatal — the plugin is still installed.
+// RLN lives behind its own method, never in the node config. Without a
+// framework context the bridge cannot come up, which is not fatal — the plugin
+// is still installed.
 static constexpr const char* kRlnCfg =
-    R"({"logLevel":"INFO","rln-lez":true,"rln-registry-id":"reg",)"
-    R"("rln-identifier":"rln-id","rln-relay-epoch-sec":600})";
+    R"({"registry-id":"reg","rln-identifier":"rln-id","epoch-size-sec":600})";
 
 static DeliveryModuleImpl* createRlnImpl(LogosTestContext& t) {
     t.mockCFunction("logosdelivery_create_node").returns(1);
     auto* impl = new DeliveryModuleImpl();
-    LOGOS_ASSERT_TRUE(impl->createNode(kRlnCfg).success);
+    LOGOS_ASSERT_TRUE(impl->configureRLN(kRlnCfg).success);
+    LOGOS_ASSERT_TRUE(impl->createNode(R"({"logLevel":"INFO"})").success);
     return impl;
 }
 
@@ -578,7 +578,7 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     delete impl;
 }
 
-LOGOS_TEST(createNode_without_rln_lez_installs_no_plugin) {
+LOGOS_TEST(createNode_without_configureRLN_installs_no_plugin) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
@@ -589,14 +589,25 @@ LOGOS_TEST(createNode_without_rln_lez_installs_no_plugin) {
     delete impl;
 }
 
-LOGOS_TEST(createNode_rejects_rln_lez_without_registry_id) {
+LOGOS_TEST(configureRLN_rejects_an_incomplete_config) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    t.mockCFunction("logosdelivery_create_node").returns(1);
 
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_FALSE(impl.createNode(R"({"logLevel":"INFO","rln-lez":true})").success);
+    LOGOS_ASSERT_FALSE(impl.configureRLN("not json").success);
+    LOGOS_ASSERT_FALSE(impl.configureRLN(R"({"rln-identifier":"rln-id"})").success);
+    LOGOS_ASSERT_FALSE(impl.configureRLN(R"({"registry-id":"reg"})").success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
+}
+
+LOGOS_TEST(configureRLN_must_precede_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_FALSE(impl->configureRLN(kRlnCfg).success);
+
+    delete impl;
 }
 
 LOGOS_TEST(rlnRespond_fails_without_createNode) {

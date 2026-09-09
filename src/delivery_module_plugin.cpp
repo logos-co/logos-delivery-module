@@ -408,9 +408,7 @@ static nlohmann::json* configTarget(nlohmann::json& cfgObj)
 // messagingOverrides (created if needed) for the layered shapes, top level
 // for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
-                                                      const std::string& persistencePath,
-                                                      bool& rlnInProcess,
-                                                      DeliveryRlnConfig& rlnCfg)
+                                                      const std::string& persistencePath)
 {
     nlohmann::json cfgObj;
     try {
@@ -424,47 +422,6 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
         return std::nullopt;
     }
-
-    // RLN keys are this module's own configuration: the delivery library is
-    // agnostic of the backend and rejects them, so they are read out here and
-    // erased before the config travels on. "rln-relay" goes with them: with a
-    // plugin installed it would ask the library for its embedded EVM backend
-    // instead, which it refuses to mount alongside one.
-    rlnCfg = DeliveryRlnConfig{};
-    if (nlohmann::json* target = configTarget(cfgObj)) {
-        if (auto lezKey = findKey(*target, {"rlnlez", "rln-lez"})) {
-            rlnCfg.enabled = (*target)[*lezKey].is_boolean()
-                && (*target)[*lezKey].get<bool>();
-            target->erase(*lezKey);
-        }
-        if (rlnCfg.enabled) {
-            if (auto k = findKey(*target, {"rlnregistryid", "rln-registry-id"})) {
-                if ((*target)[*k].is_string()) {
-                    rlnCfg.registryId = (*target)[*k].get<std::string>();
-                }
-                target->erase(*k);
-            }
-            if (auto k = findKey(*target, {"rlnidentifier", "rln-identifier"})) {
-                if ((*target)[*k].is_string()) {
-                    rlnCfg.rlnIdentifier = (*target)[*k].get<std::string>();
-                }
-                target->erase(*k);
-            }
-            if (auto k = findKey(*target, {"rlnrelayepochsec", "rln-relay-epoch-sec"})) {
-                if ((*target)[*k].is_number_unsigned()) {
-                    rlnCfg.epochSizeSec = (*target)[*k].get<uint64_t>();
-                }
-                target->erase(*k);
-            }
-            if (auto k = findKey(*target, {"rlnregistryoptions", "rln-registry-options"})) {
-                target->erase(*k);
-            }
-            if (auto k = findKey(*target, {"rlnrelay", "rln-relay"})) {
-                target->erase(*k);
-            }
-        }
-    }
-    rlnInProcess = rlnCfg.enabled;
 
     if (!persistencePath.empty()) {
         nlohmann::json* target = &cfgObj;
@@ -506,59 +463,10 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
-    bool rlnInProcess = false;
-    auto cfgWithDefaults =
-        applyConfigDefaults(cfg, instancePersistencePath(), rlnInProcess, rlnConfig);
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
     if (!cfgWithDefaults) {
         return {false, {}, "Invalid JSON config"};
     }
-    if (rlnInProcess) {
-        if (rlnConfig.registryId.empty() || rlnConfig.rlnIdentifier.empty()) {
-            return {false, {}, "rln-lez needs rln-registry-id and rln-identifier"};
-        }
-
-        // Installed before createNode: an installed plugin is what makes the
-        // library mount RLN over it. The setter is process-global (no ctx
-        // argument), so this relies on the host running a single delivery
-        // module instance per process. The struct is static so it outlives the
-        // node.
-        static const LogosDeliveryRlnPlugin rlnPlugin = {
-            .get_membership_state = rln_get_membership_state_callback,
-            .get_epoch_quota = rln_get_epoch_quota_callback,
-            .generate_proof = rln_generate_proof_callback,
-            .validate_proof = rln_validate_proof_callback,
-        };
-        if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
-            return {false, {}, "failed to install the RLN plugin"};
-        }
-
-        // The in-process bridge is one way to answer; the rln*Request events
-        // plus rlnRespond are the other, so a bridge that cannot come up is
-        // not fatal. Only a bridge that IS up starts the backend, because only
-        // it can reach the RLN module.
-        const std::string failure = enableRlnBridge();
-        if (!failure.empty()) {
-            fprintf(stderr,
-                    "DeliveryModuleImpl: rln bridge unavailable (%s); "
-                    "answering falls to rlnRespond\n",
-                    failure.c_str());
-        } else {
-            // The library no longer starts the backend, so this module does,
-            // before the node exists: a node that mounts RLN over a stopped
-            // module would Ignore every inbound RLN message.
-            nlohmann::json startCfg{
-                {"registries", nlohmann::json::array({rlnConfig.registryId})}};
-            if (rlnConfig.epochSizeSec != 0) {
-                startCfg["epoch_size_sec"] = rlnConfig.epochSizeSec;
-            }
-            const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
-            if (!startFailure.empty()) {
-                return {false, {}, "rln module start failed: " + startFailure};
-            }
-            fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
-        }
-    }
-
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
     // logosdelivery_ctx_create packs the request struct and turns the decimal
@@ -1005,6 +913,82 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     // Hand the exposition text back verbatim; the openmetrics module parses it,
     // injects the module="delivery_module" label, and merges it with others.
     return outcome.value.get<std::string>();
+}
+
+StdLogosResult DeliveryModuleImpl::configureRLN(const std::string& cfgJson)
+{
+    if (deliveryCtx) {
+        return {false, {}, "configureRLN must be called before createNode"};
+    }
+
+    nlohmann::json cfgObj = nlohmann::json::parse(cfgJson, nullptr, /*allow_exceptions=*/false);
+    if (!cfgObj.is_object()) {
+        return {false, {}, "configureRLN cfg is not a JSON object"};
+    }
+
+    DeliveryRlnConfig parsed;
+    if (auto k = findKey(cfgObj, {"registryid", "registry-id"});
+        k && cfgObj[*k].is_string()) {
+        parsed.registryId = cfgObj[*k].get<std::string>();
+    }
+    if (auto k = findKey(cfgObj, {"rlnidentifier", "rln-identifier"});
+        k && cfgObj[*k].is_string()) {
+        parsed.rlnIdentifier = cfgObj[*k].get<std::string>();
+    }
+    if (auto k = findKey(cfgObj, {"epochsizesec", "epoch-size-sec"});
+        k && cfgObj[*k].is_number_unsigned()) {
+        parsed.epochSizeSec = cfgObj[*k].get<uint64_t>();
+    }
+    if (parsed.registryId.empty()) {
+        return {false, {}, "configureRLN needs registry-id"};
+    }
+    if (parsed.rlnIdentifier.empty()) {
+        return {false, {}, "configureRLN needs rln-identifier"};
+    }
+    parsed.enabled = true;
+    rlnConfig = parsed;
+
+    // Installed before createNode: an installed plugin is what makes the
+    // library mount RLN over it. The setter is process-global (no ctx
+    // argument), so this relies on the host running a single delivery module
+    // instance per process. The struct is static so it outlives the node.
+    static const LogosDeliveryRlnPlugin rlnPlugin = {
+        .get_membership_state = rln_get_membership_state_callback,
+        .get_epoch_quota = rln_get_epoch_quota_callback,
+        .generate_proof = rln_generate_proof_callback,
+        .validate_proof = rln_validate_proof_callback,
+    };
+    if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
+        rlnConfig = DeliveryRlnConfig{};
+        return {false, {}, "failed to install the RLN plugin"};
+    }
+
+    // The in-process bridge is one way to answer; the rln*Request events plus
+    // rlnRespond are the other, so a bridge that cannot come up is not fatal.
+    // Only a bridge that IS up starts the backend, because only it can reach
+    // the RLN module.
+    const std::string failure = enableRlnBridge();
+    if (!failure.empty()) {
+        fprintf(stderr,
+                "DeliveryModuleImpl: rln bridge unavailable (%s); answering falls "
+                "to rlnRespond\n",
+                failure.c_str());
+        return {true, {}};
+    }
+
+    // The delivery library no longer starts the backend, so this module does:
+    // a node that mounts RLN over a stopped module would Ignore every inbound
+    // RLN message.
+    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig.registryId})}};
+    if (rlnConfig.epochSizeSec != 0) {
+        startCfg["epoch_size_sec"] = rlnConfig.epochSizeSec;
+    }
+    const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
+    if (!startFailure.empty()) {
+        return {false, {}, "rln module start failed: " + startFailure};
+    }
+    fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
+    return {true, {}};
 }
 
 StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)

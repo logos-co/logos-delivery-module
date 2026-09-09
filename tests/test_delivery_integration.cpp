@@ -362,19 +362,18 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
 // this test observes the chain through the rln*Request events and verifies an
 // external response is rejected as a duplicate.
 //
-// "rln-relay" is left in the config on purpose: the module must strip it, or
-// the library would refuse to mount an embedded backend alongside the plugin.
-static const char* kRlnConfig = R"({
+// The node config carries no RLN keys at all: RLN is configured through the
+// module's own configureRLN, and createNode stays a pass-through.
+static const char* kRlnNodeConfig = R"({
   "logLevel": "DEBUG",
   "relay": true,
-  "numShardsInNetwork": 8,
-  "rln-relay": true,
-  "rln-lez": true,
-  "rln-registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
+  "numShardsInNetwork": 8
+})";
+
+static const char* kRlnModuleConfig = R"({
+  "registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
   "rln-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
-  "rln-relay-epoch-sec": 600,
-  "rln-relay-dynamic": false,
-  "rln-relay-chain-id": 1
+  "epoch-size-sec": 600
 })";
 
 LOGOS_TEST(integration_rln_start_chain_round_trip) {
@@ -397,10 +396,13 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
     const bool live = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
 
     DeliveryModuleImpl impl;
-    // The lez config installs the plugin, enables the in-process bridge and
-    // starts the RLN module; a module start failure fails createNode, so this
+    // configureRLN installs the plugin, enables the in-process bridge and
+    // starts the RLN module; a module start failure fails the call, so this
     // covers the auto-enable and self-start wiring.
-    LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnConfig : kMinimalConfig).success);
+    if (live) {
+        LOGOS_ASSERT_TRUE(impl.configureRLN(kRlnModuleConfig).success);
+    }
+    LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnNodeConfig : kMinimalConfig).success);
     LOGOS_ASSERT_TRUE(impl.start().success);
 
     if (!waitForRlnRequestOp("get_membership_state")) {

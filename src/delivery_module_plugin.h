@@ -342,11 +342,35 @@ public:
      * pass its reply back unchanged. The events keep emitting for
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
-     * call any time before @ref start. @ref createNode does this
-     * automatically when the config's `rln-lez` is true. Calling it
-     * directly is mainly for test purposes.
+     * call any time before @ref start. @ref configureRLN does this
+     * automatically. Calling it directly is mainly for test purposes.
      */
     StdLogosResult rlnBridgeEnable();
+
+    /**
+     * @brief Configures RLN for this module and installs the delivery
+     *        library's RLN plugin.
+     *
+     * RLN is this module's business, not the delivery library's: the
+     * library's plugin is implementation-agnostic — it carries no
+     * configuration, names no registry or membership, and does not start the
+     * backend. Everything it lacks is supplied from here.
+     *
+     * Call before @ref createNode: an installed plugin is what makes the
+     * library mount RLN over it, and it reads that at node creation. Without
+     * this call the node comes up with RLN off, and @ref createNode stays a
+     * plain pass-through to the library.
+     *
+     * Enables the in-process bridge (see @ref rlnBridgeEnable) and starts the
+     * co-loaded `liblogos_rln_module`; a start failure fails this call. A
+     * bridge that cannot come up is not fatal — the `rln*Request` events and
+     * @ref rlnRespond remain — but nothing starts the backend on that path.
+     *
+     * @param cfgJson Object with `registry-id` (CAIP-10 account id of the
+     *        registry deployment), `rln-identifier` (32-byte hex, per
+     *        application) and optional `epoch-size-sec`.
+     */
+    StdLogosResult configureRLN(const std::string& cfgJson);
 
     std::string name() const { return "delivery_module"; }
 
