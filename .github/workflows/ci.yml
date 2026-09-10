@@ -86,6 +86,10 @@ jobs:
           RLN_REV=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.rev' flake.lock)
 
           LEZ_NODE=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
+          LEZ_URL=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.url' flake.lock)
+          LEZ_REF=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.ref' flake.lock)
+          LEZ_REV=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.rev' flake.lock)
+
           CORE_NODE=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].inputs.lez_core' flake.lock)
           CORE_OWNER=$(jq -r --arg n "$CORE_NODE" '.nodes[$n].locked.owner' flake.lock)
           CORE_REPO=$(jq -r --arg n "$CORE_NODE" '.nodes[$n].locked.repo' flake.lock)
@@ -94,7 +98,7 @@ jobs:
           nix build -L --out-link result-rln \
             "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-rln-module#install-portable"
           nix build -L --out-link result-lez-rln \
-            "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-lez-rln-module#install-portable"
+            "git+$LEZ_URL?ref=$LEZ_REF&rev=$LEZ_REV&dir=logos-lez-rln-module#install-portable"
           nix build -L --out-link result-lez-core \
             "github:$CORE_OWNER/$CORE_REPO/$CORE_REV#install-portable"
 
