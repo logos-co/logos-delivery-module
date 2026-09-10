@@ -721,11 +721,11 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1789064160,
-        "narHash": "sha256-cjqpemhHnMvFwWv5wmFTNZI5NEY7KPyxKU8QnR5hjRE=",
+        "lastModified": 1789064341,
+        "narHash": "sha256-5HKlltnnIANrU3sG89WCthdYQLIqAWkojggFJ92e6Eo=",
         "ref": "fix/module-dep-chain-resolution",
-        "rev": "ecc8bcb6618c8a803a15178843ad3d1e7aa691cd",
-        "revCount": 67,
+        "rev": "c56869db0d477212d8c3937c8fd85fcb6f27909b",
+        "revCount": 61,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
@@ -743,11 +743,11 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1789064169,
-        "narHash": "sha256-g9/jPjs+LESWOF3typDp4fkiMHozhWiFSgumHZjanE0=",
+        "lastModified": 1789064364,
+        "narHash": "sha256-C0OR7PGdLCByMZpDZkYbehOd6wEuqF5jNau+OTtat+k=",
         "ref": "fix/module-dep-chain-resolution",
-        "rev": "1b1fc4935f0c56c12e2c32e54881c9d010c4921e",
-        "revCount": 68,
+        "rev": "baefe92201238a1211a9e52735e6e7fa2448e848",
+        "revCount": 62,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
