@@ -74,24 +74,29 @@ jobs:
 
       # delivery_module declares liblogos_rln_module as dependency in metadata.json, and
       # logoscore refuses to load a module whose dependency chain is absent
-      # from the modules dir. Stage the whole chain (liblogos_rln_module ->
-      # liblogos_lez_rln_module -> lez_core) next to it. The rln-modules pin
-      # is read from flake.lock so it cannot drift from the
-      # liblogos_rln_module flake input; lez_core has no pin reachable from
-      # that input (the lez-rln flake resolves its lidl via a local
-      # dependency_override), so it mirrors the logos-wallet-module pin in
-      # logos-rln-modules' root flake at the locked rev.
+      # from the modules dir. install-portable bundles only the module's own
+      # lib, so stage the whole chain (liblogos_rln_module ->
+      # liblogos_lez_rln_module -> lez_core) next to it. Every pin is walked
+      # out of flake.lock, so none of them can drift from the flake inputs.
       - name: Stage RLN dependency modules
         run: |
-          RLN_URL=$(jq -r '.nodes.liblogos_rln_module.locked.url' flake.lock)
-          RLN_REF=$(jq -r '.nodes.liblogos_rln_module.locked.ref' flake.lock)
-          RLN_REV=$(jq -r '.nodes.liblogos_rln_module.locked.rev' flake.lock)
+          RLN_NODE=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
+          RLN_URL=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.url' flake.lock)
+          RLN_REF=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.ref' flake.lock)
+          RLN_REV=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.rev' flake.lock)
+
+          LEZ_NODE=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
+          CORE_NODE=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].inputs.lez_core' flake.lock)
+          CORE_OWNER=$(jq -r --arg n "$CORE_NODE" '.nodes[$n].locked.owner' flake.lock)
+          CORE_REPO=$(jq -r --arg n "$CORE_NODE" '.nodes[$n].locked.repo' flake.lock)
+          CORE_REV=$(jq -r --arg n "$CORE_NODE" '.nodes[$n].locked.rev' flake.lock)
+
           nix build -L --out-link result-rln \
             "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-rln-module#install-portable"
           nix build -L --out-link result-lez-rln \
             "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-lez-rln-module#install-portable"
           nix build -L --out-link result-lez-core \
-            "github:logos-blockchain/logos-execution-zone-module/549cf1159f20fa0c3fe8e88a5ab71de68a5aa34b#install-portable"
+            "github:$CORE_OWNER/$CORE_REPO/$CORE_REV#install-portable"
 
           mkdir -p merged-modules
           for r in result result-rln result-lez-rln result-lez-core; do

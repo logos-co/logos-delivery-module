@@ -17,7 +17,7 @@
     # entry as the flake input of the SAME name and generates bindings from
     # its published <name>.lidl, and logos-core auto-loads it by that module
     # name at runtime. Pinned to feat/lip-alignment (wire 0.7.x).
-    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=1c1d3965e0b5b0a548f6deb838591b49d2303506&dir=logos-rln-module";
+    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=fix/module-dep-chain-resolution&dir=logos-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
