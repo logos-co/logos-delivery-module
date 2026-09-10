@@ -43,7 +43,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macos-15, not macos-latest: lez_core's wallet-ffi compiles Metal
+        # shaders, and the newer image ships no Metal toolchain.
+        os: [ubuntu-latest, macos-15]
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -146,7 +148,7 @@ jobs:
 
           mkdir -p "site/$BASE"
           found=""
-          for os in ubuntu-latest macos-latest; do
+          for os in ubuntu-latest macos-15; do
             src="artifacts/delivery-doctest-report-$os/index.html"
             if [ -f "$src" ]; then
               mkdir -p "site/$BASE/$os"
@@ -163,7 +165,7 @@ jobs:
             echo "<style>body{font:16px system-ui;margin:40px;max-width:640px}a{color:#2563eb}</style>"
             echo "<h1>delivery-module doc-test reports</h1>"
             echo "<p><strong>$BASE</strong> · commit <code>${GITHUB_SHA::7}</code></p><ul>"
-            for os in ubuntu-latest macos-latest; do
+            for os in ubuntu-latest macos-15; do
               if [ -d "site/$BASE/$os" ]; then
                 echo "<li><a href=\"./$os/\">$os</a></li>"
               fi
