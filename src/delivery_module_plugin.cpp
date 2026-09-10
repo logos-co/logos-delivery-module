@@ -91,7 +91,10 @@ void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, vo
     }
 
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::start_callback: Invalid userData\n");
+        return;
+    }
     impl->nodeStarted(callerRet == RET_OK,
                       (msg && len > 0) ? std::string(msg, len) : std::string(),
                       currentTimestampNs());
@@ -104,7 +107,10 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
     }
 
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::stop_callback: Invalid userData\n");
+        return;
+    }
     impl->nodeStopped(callerRet == RET_OK,
                       (msg && len > 0) ? std::string(msg, len) : std::string(),
                       currentTimestampNs());
@@ -121,7 +127,10 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
 void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_get_membership_state_callback: Invalid userData\n");
+        return;
+    }
     try {
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->getMembershipState(reqId, impl->rlnConfig.registryId,
@@ -140,7 +149,10 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t t
                                                       void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_get_epoch_quota_callback: Invalid userData\n");
+        return;
+    }
     try {
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->getEpochQuota(reqId, impl->rlnConfig.registryId,
@@ -159,7 +171,10 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
                                                      uint64_t timestamp, void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_generate_proof_callback: Invalid userData\n");
+        return;
+    }
     try {
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->generateProof(reqId, impl->rlnConfig.registryId,
@@ -181,7 +196,10 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
                                                      void* userData)
 {
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_validate_proof_callback: Invalid userData\n");
+        return;
+    }
     try {
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->validateProof(reqId, impl->rlnConfig.registryId,
@@ -1002,8 +1020,6 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
         return {false, {}, "Context not initialized"};
     }
 
-    // A negative reqId is the int64 view of a library id >= 2^63; the cast
-    // below restores the original bit pattern.
     // resultJson passes through verbatim (opaque JSON, RLN module's schema).
     // A non-zero return means the reqId is unknown — typically the request
     // already timed out library-side and was answered with a synthetic
