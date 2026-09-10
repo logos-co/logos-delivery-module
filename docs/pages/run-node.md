@@ -199,6 +199,32 @@ documented in the [API reference](api_reference.rst).
 The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.
 
+### Plugin-hosted discovery
+
+With `"pluginKadDiscovery": true` (in `messagingOverrides`, or in `kernelConf`
+for a kernel-only node) logos-delivery delegates kademlia service discovery to
+this module, which hosts it on `libp2p_module`. The config is logos-delivery's
+alone and is forwarded as is. After `createNode` this module asks the node
+(`logosdelivery_get_discovery_requirements`) whether a plugin is expected and
+which DHT bootstrap peers its configuration resolved, presets included, and
+sets `libp2p_module` up from that answer: the node's peers as `bootstrapNodes`,
+`mountKad` and `mountServiceDiscovery` on. Explicit peers go through the
+node's own key (`kad-bootstrap-node`, `/p2p/` multiaddrs);
+[`conf/logos-dev.json`](../../conf/logos-dev.json) needs nothing but the switch.
+
+`libp2p_module`'s remaining options (listen addresses, transport, key) come
+from its own channel, the `LIBP2P_MODULE_CONFIG` environment variable (inline
+JSON or a file path); the plugin overlays the node's answer on it rather than
+replacing it. Unset, libp2p listens on an ephemeral loopback port, which is
+fine for local runs and not reachable from outside.
+
+Only the first bootstrap peer is handed over: `libp2p_module` dials the set
+inside a fixed 10 s call budget, and two DNS-resolved peers exceed it. The
+plugin brings libp2p up on the first discovery call after `start`, so a bad
+bootstrap set surfaces there, not at `createNode`. Set `LD_DISCO_TRACE` to a
+file path to log every call across the plugin boundary; logos-core discards a
+module's stderr, so this file is the only view into it.
+
 ## Metrics
 
 The node already aggregates Prometheus metrics internally (the same set exposed
