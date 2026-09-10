@@ -2,12 +2,25 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+
+class RlnBridge;
+
+// Everything the delivery library no longer knows about RLN. Read out of
+// createNode's config and stripped from it before the config reaches the
+// library, which rejects these keys.
+struct DeliveryRlnConfig {
+    bool enabled = false;
+    std::string registryId;
+    std::string rlnIdentifier;
+    uint64_t epochSizeSec = 0;
+};
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -294,6 +307,74 @@ public:
      */
     std::string collectOpenMetricsText();
 
+    /**
+     * @brief Completes an outstanding RLN request (see the `rln*Request` events).
+     *
+     * The delivery library outsources RLN operations to an external RLN
+     * module; this module facilitates that message passing. When the delivery
+     * library makes an RLN request, this module emits the matching
+     * `rln*Request` event. This method takes the reqId of the original
+     * request along with the response and passes it on to the library
+     * verbatim — the wire schema is owned by the RLN module and the delivery
+     * library, not modelled here.
+     *
+     * On a node running lez RLN the in-process bridge (see
+     * @ref rlnBridgeEnable) answers each request itself; only the first
+     * response per reqId is accepted, so a second caller of this method is
+     * rejected as a duplicate.
+     *
+     * There is no response deadline to manage on this side: if no response
+     * arrives in time, the delivery library synthesizes a TRANSIENT failure
+     * itself. A response for a request that already timed out (or was never
+     * issued) fails with an error.
+     *
+     * @param reqId Request id from the `rln*Request` event. Ids >= 2^63 appear
+     *        negative here (int64 view of the library's uint64 id); they are
+     *        passed through bit-exactly, so echo them back unchanged.
+     */
+    StdLogosResult rlnRespond(int64_t reqId, const std::string& resultJson);
+
+    /**
+     * @brief Enables the in-process RLN bridge.
+     *
+     * Once enabled, each `rln*Request` is answered inside this module: the
+     * bridge's worker threads call the co-loaded `liblogos_rln_module` and
+     * pass its reply back unchanged. The events keep emitting for
+     * observability, but an external responder must not also answer an
+     * enabled node: its second response per reqId is rejected. Idempotent;
+     * call any time before @ref start. @ref configureRln does this
+     * automatically. Calling it directly is mainly for test purposes.
+     */
+    StdLogosResult rlnBridgeEnable();
+
+    /**
+     * @brief Configures RLN for this module and installs the delivery
+     *        library's RLN plugin.
+     *
+     * RLN is this module's business, not the delivery library's: the
+     * library's plugin is implementation-agnostic — it carries no
+     * configuration, names no registry or membership, and does not start the
+     * backend. Everything it lacks is supplied from here.
+     *
+     * Call before @ref createNode: an installed plugin is what makes the
+     * library mount RLN over it, and it reads that at node creation. Without
+     * this call the node comes up with RLN off, and @ref createNode stays a
+     * plain pass-through to the library.
+     *
+     * Enables the in-process bridge (see @ref rlnBridgeEnable) and starts the
+     * co-loaded `liblogos_rln_module`; a start failure fails this call. A
+     * bridge that cannot come up is not fatal — the `rln*Request` events and
+     * @ref rlnRespond remain — but nothing starts the backend on that path.
+     *
+     * @param cfgJson Object with `registry-id` (CAIP-10 account id of the
+     *        registry deployment), `rln-identifier` (32-byte hex, per
+     *        application) and optional `epoch-size-sec`.
+     * @return On success the value carries `{"servedInProcess": bool}` —
+     *         `false` means the bridge is unavailable and an external
+     *         responder must answer via @ref rlnRespond.
+     */
+    StdLogosResult configureRln(const std::string& cfgJson);
+
     std::string name() const { return "delivery_module"; }
 
 /** @} */
@@ -354,9 +435,45 @@ logos_events:
     /** @brief Emitted when @ref stop finishes; `message` carries the reason when `success` is false. */
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
+    /**
+     * @brief RLN request events, one per ABI function
+     * (`liblogosdelivery_rln.h`).
+     *
+     * Answer each via @ref rlnRespond with the same `reqId`. The JSON args are
+     * opaque to this module (RLN module wire schema). `epochTimestamp` is the
+     * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
+     * local emission time, as on every other event.
+     */
+    void dispatchRlnGetMembershipStateRequestEvent(int64_t reqId, const std::string& registryId,
+                                        const std::string& rlnIdentifier, int64_t timestamp);
+    void dispatchRlnGetEpochQuotaRequestEvent(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier,
+                                 int64_t epochTimestamp, int64_t timestamp);
+    void dispatchRlnGenerateProofRequestEvent(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, int64_t timestamp);
+    void dispatchRlnValidateProofRequestEvent(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, const std::string& proofJson,
+                                 int64_t timestamp);
+
 /** @} */
 
 private:
+    // Wires the bridge to the co-loaded RLN module on first use — modules()
+    // is only valid once the framework has handed the context over — then
+    // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
+    // path) funnel through here. Returns an error string, or empty.
+    std::string bringUpRlnBridge();
+
+    // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
+    // and started by bringUpRlnBridge().
+    std::unique_ptr<RlnBridge> rlnBridge;
+
+    // Everything the delivery library no longer knows about RLN (see
+    // DeliveryRlnConfig).
+    DeliveryRlnConfig rlnConfig;
+
     // Raw FFI context: what every call and the event registry take.
     void* deliveryCtx;
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
@@ -383,4 +500,20 @@ private:
     // the non-terminal progress tick a long start/stop emits.
     static void start_callback(int callerRet, char* msg, size_t len, void* userData);
     static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
+
+    // RLN plugin slots installed before createNode, one per ABI function
+    // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
+    // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
+    // for the duration of the call. userData is the DeliveryModuleImpl*.
+    //
+    // The library's plugin carries no registry or membership, so each
+    // trampoline adds this module's own rlnConfig before forwarding.
+    static void rln_get_membership_state_callback(uint64_t reqId, void* userData);
+    static void rln_get_epoch_quota_callback(uint64_t reqId, uint64_t timestamp,
+                                             void* userData);
+    static void rln_generate_proof_callback(uint64_t reqId, const char* signalHex,
+                                            uint64_t timestamp, void* userData);
+    static void rln_validate_proof_callback(uint64_t reqId, const char* signalHex,
+                                            uint64_t timestamp, const char* proofJson,
+                                            void* userData);
 };

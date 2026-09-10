@@ -16,12 +16,18 @@
 #include <boost/beast/core/detail/base64.hpp>
 
 #include "api_call_handler.h"
+#include "rln_bridge.h"
+
+// Generated at build time from metadata.json#dependencies; defines the
+// LogosModules aggregate behind LogosModuleContext::modules().
+#include "logos_sdk.h"
 extern "C" {
 #include <liblogosdelivery.h>
 // Kernel tier: unstable, may change without a deprecation cycle. Only
 // waku_store_query is consumed from it; everything else goes through the
 // stable surface above.
 #include <liblogosdelivery_kernel.h>
+#include <liblogosdelivery_rln.h>
 }
 
 namespace {
@@ -46,6 +52,10 @@ int64_t currentTimestampNs() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
+}
+
+std::string toStringOrEmpty(const char* s) {
+    return s ? std::string(s) : std::string();
 }
 
 // message_received and channel_message_received: base64 string.
@@ -81,7 +91,10 @@ void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, vo
     }
 
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::start_callback: Invalid userData\n");
+        return;
+    }
     impl->nodeStarted(callerRet == RET_OK,
                       (msg && len > 0) ? std::string(msg, len) : std::string(),
                       currentTimestampNs());
@@ -94,21 +107,169 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
     }
 
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) return;
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::stop_callback: Invalid userData\n");
+        return;
+    }
     impl->nodeStopped(callerRet == RET_OK,
                       (msg && len > 0) ? std::string(msg, len) : std::string(),
                       currentTimestampNs());
 }
 
-DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHandle(nullptr)
+// The rln_*_callback trampolines are C callbacks invoked from the Nim runtime,
+// possibly on a foreign thread: a C++ exception escaping them would unwind
+// into Nim frames and terminate the process, so each body is fenced with
+// catch (...). String arguments are borrowed and copied immediately;
+// options/proof JSON is opaque (RLN module's wire schema) and passed through
+// verbatim, never parsed here. Responses come back later via rlnRespond;
+// response timeouts are the library's job.
+
+void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_get_membership_state_callback: Invalid userData\n");
+        return;
+    }
+    try {
+        if (impl->rlnBridge->enabled()) {
+            impl->rlnBridge->getMembershipState(reqId, impl->rlnConfig.registryId,
+                                                impl->rlnConfig.rlnIdentifier);
+        }
+        impl->dispatchRlnGetMembershipStateRequestEvent(static_cast<int64_t>(reqId),
+                                             impl->rlnConfig.registryId,
+                                             impl->rlnConfig.rlnIdentifier,
+                                             currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
+    } catch (...) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request %llu\n",
+                static_cast<unsigned long long>(reqId));
+    }
+}
+
+void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t timestamp,
+                                                      void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_get_epoch_quota_callback: Invalid userData\n");
+        return;
+    }
+    try {
+        if (impl->rlnBridge->enabled()) {
+            impl->rlnBridge->getEpochQuota(reqId, impl->rlnConfig.registryId,
+                                           impl->rlnConfig.rlnIdentifier, timestamp);
+        }
+        impl->dispatchRlnGetEpochQuotaRequestEvent(static_cast<int64_t>(reqId),
+                                      impl->rlnConfig.registryId,
+                                      impl->rlnConfig.rlnIdentifier,
+                                      static_cast<int64_t>(timestamp), currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_epoch_quota request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
+    } catch (...) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_epoch_quota request %llu\n",
+                static_cast<unsigned long long>(reqId));
+    }
+}
+
+void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char* signalHex,
+                                                     uint64_t timestamp, void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_generate_proof_callback: Invalid userData\n");
+        return;
+    }
+    try {
+        if (impl->rlnBridge->enabled()) {
+            impl->rlnBridge->generateProof(reqId, impl->rlnConfig.registryId,
+                                           impl->rlnConfig.rlnIdentifier,
+                                           toStringOrEmpty(signalHex), timestamp);
+        }
+        impl->dispatchRlnGenerateProofRequestEvent(static_cast<int64_t>(reqId),
+                                      impl->rlnConfig.registryId,
+                                      impl->rlnConfig.rlnIdentifier,
+                                      toStringOrEmpty(signalHex),
+                                      static_cast<int64_t>(timestamp), currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN generate_proof request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
+    } catch (...) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN generate_proof request %llu\n",
+                static_cast<unsigned long long>(reqId));
+    }
+}
+
+void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char* signalHex,
+                                                     uint64_t timestamp, const char* proofJson,
+                                                     void* userData)
+{
+    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
+    if (!impl) {
+        fprintf(stderr, "DeliveryModuleImpl::rln_validate_proof_callback: Invalid userData\n");
+        return;
+    }
+    try {
+        if (impl->rlnBridge->enabled()) {
+            impl->rlnBridge->validateProof(reqId, impl->rlnConfig.registryId,
+                                           impl->rlnConfig.rlnIdentifier,
+                                           toStringOrEmpty(signalHex), timestamp,
+                                           toStringOrEmpty(proofJson));
+        }
+        impl->dispatchRlnValidateProofRequestEvent(static_cast<int64_t>(reqId),
+                                      impl->rlnConfig.registryId,
+                                      impl->rlnConfig.rlnIdentifier,
+                                      toStringOrEmpty(signalHex),
+                                      static_cast<int64_t>(timestamp),
+                                      toStringOrEmpty(proofJson), currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN validate_proof request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
+    } catch (...) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN validate_proof request %llu\n",
+                static_cast<unsigned long long>(reqId));
+    }
+}
+
+DeliveryModuleImpl::DeliveryModuleImpl()
+    : rlnBridge(std::make_unique<RlnBridge>())
+    , deliveryCtx(nullptr)
+    , deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
-    fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
+}
+
+std::string DeliveryModuleImpl::bringUpRlnBridge()
+{
+    if (!isContextReady()) {
+        // Unit tests construct this impl without a framework; modules() would
+        // dereference an unset pointer here.
+        return "module context not ready";
+    }
+    rlnBridge->init(&modules().liblogos_rln_module);
+    return rlnBridge->enable();
+}
+
+StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
+{
+    const std::string err = bringUpRlnBridge();
+    if (!err.empty()) {
+        return {false, {}, err};
+    }
+    fprintf(stderr, "DeliveryModuleImpl: rln bridge enabled (in-process responder)\n");
+    return {true, {}};
 }
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
     if (deliveryCtxHandle) {
+        // Clear the RLN surface first: fails all in-flight RLN requests so no
+        // new RLN callback is dispatched into this object during destruction.
+        // (A callback already executing on the library thread is not joined.)
+        logosdelivery_rln_set_plugin(nullptr, nullptr);
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
@@ -119,8 +280,7 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
 
 void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
 {
-    fprintf(stderr, "DeliveryModuleImpl::event_callback called with ret: %d\n", callerRet);
-
+    (void)callerRet;
     DeliveryModuleImpl* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
         fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid userData\n");
@@ -129,7 +289,6 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
 
     if (msg && len > 0) {
         std::string message(msg, len);
-        fprintf(stderr, "DeliveryModuleImpl::event_callback message: %s\n", message.c_str());
 
         // This function is a C callback invoked from the Nim runtime: a C++
         // exception escaping here would unwind into Nim frames and terminate
@@ -250,6 +409,31 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
         }
     }
     return false;
+}
+
+// Locates the object that carries kernel/messaging settings for this config
+// shape: kernelConf when present, messagingOverrides for the layered shapes,
+// top level for the legacy flat shape.
+static nlohmann::json* configTarget(nlohmann::json& cfgObj)
+{
+    const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
+    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
+        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
+    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
+        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
+        return &cfgObj[*kernelConfKey];
+    }
+    if (kernelEntry) {
+        return nullptr;
+    }
+    if (isFlatShape(cfgObj)) {
+        return &cfgObj;
+    }
+    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
+    if (!overridesKey) {
+        return nullptr;
+    }
+    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
 }
 
 // Defaults the node's storage directory to the host's per-instance path, so
@@ -420,6 +604,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
         }
     }
+
     return {true, {}};
 }
 
@@ -449,6 +634,15 @@ StdLogosResult DeliveryModuleImpl::stop()
 
     if (logosdelivery_stop_node(deliveryCtx, stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
+    }
+
+    // This module started the RLN backend, so it stops it too.
+    if (rlnConfig.enabled && rlnBridge->enabled()) {
+        const std::string failure = rlnBridge->stopBackend();
+        if (!failure.empty()) {
+            fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
+                    failure.c_str());
+        }
     }
     return {true, {}};
 }
@@ -753,4 +947,104 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     // Hand the exposition text back verbatim; the openmetrics module parses it,
     // injects the module="delivery_module" label, and merges it with others.
     return outcome.value.get<std::string>();
+}
+
+StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
+{
+    if (deliveryCtx) {
+        return {false, {}, "configureRln must be called before createNode"};
+    }
+
+    nlohmann::json cfgObj = nlohmann::json::parse(cfgJson, nullptr, /*allow_exceptions=*/false);
+    if (!cfgObj.is_object()) {
+        return {false, {}, "configureRln cfg is not a JSON object"};
+    }
+
+    DeliveryRlnConfig parsed;
+    if (auto k = findKey(cfgObj, {"registryid", "registry-id"});
+        k && cfgObj[*k].is_string()) {
+        parsed.registryId = cfgObj[*k].get<std::string>();
+    }
+    if (auto k = findKey(cfgObj, {"rlnidentifier", "rln-identifier"});
+        k && cfgObj[*k].is_string()) {
+        parsed.rlnIdentifier = cfgObj[*k].get<std::string>();
+    }
+    if (auto k = findKey(cfgObj, {"epochsizesec", "epoch-size-sec"});
+        k && cfgObj[*k].is_number_unsigned()) {
+        parsed.epochSizeSec = cfgObj[*k].get<uint64_t>();
+    }
+    if (parsed.registryId.empty()) {
+        return {false, {}, "configureRln needs registry-id"};
+    }
+    if (parsed.rlnIdentifier.empty()) {
+        return {false, {}, "configureRln needs rln-identifier"};
+    }
+    parsed.enabled = true;
+    rlnConfig = parsed;
+
+    // The setter is process-global: one delivery module instance per process.
+    static const LogosDeliveryRlnPlugin rlnPlugin = {
+        .get_membership_state = rln_get_membership_state_callback,
+        .get_epoch_quota = rln_get_epoch_quota_callback,
+        .generate_proof = rln_generate_proof_callback,
+        .validate_proof = rln_validate_proof_callback,
+    };
+    if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
+        rlnConfig = DeliveryRlnConfig{};
+        return {false, {}, "failed to install the RLN plugin"};
+    }
+
+    // The in-process bridge is one way to answer; the rln*Request events plus
+    // rlnRespond are the other, so a bridge that cannot come up is not fatal.
+    // Only a bridge that IS up starts the backend, because only it can reach
+    // the RLN module.
+    const std::string failure = bringUpRlnBridge();
+    if (!failure.empty()) {
+        fprintf(stderr,
+                "DeliveryModuleImpl: rln bridge unavailable (%s); answering falls "
+                "to rlnRespond\n",
+                failure.c_str());
+        return {true, nlohmann::json{{"servedInProcess", false}}};
+    }
+
+    // The delivery library no longer starts the backend, so this module does:
+    // a node that mounts RLN over a stopped module would Ignore every inbound
+    // RLN message.
+    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig.registryId})}};
+    if (rlnConfig.epochSizeSec != 0) {
+        startCfg["epoch_size_sec"] = rlnConfig.epochSizeSec;
+    }
+    const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
+    if (!startFailure.empty()) {
+        // An installed plugin is what makes the library mount RLN, so leaving
+        // it behind would give the next createNode a node whose backend never
+        // started: every inbound RLN message Ignored, every send failing.
+        logosdelivery_rln_set_plugin(nullptr, nullptr);
+        rlnConfig = DeliveryRlnConfig{};
+        return {false, {}, "rln module start failed: " + startFailure};
+    }
+    fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
+    return {true, nlohmann::json{{"servedInProcess", true}}};
+}
+
+StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)
+{
+    fprintf(stderr, "DeliveryModuleImpl::rlnRespond called with reqId: %lld\n",
+            static_cast<long long>(reqId));
+
+    if (!deliveryCtx) {
+        return {false, {}, "Context not initialized"};
+    }
+
+    // resultJson passes through verbatim (opaque JSON, RLN module's schema).
+    // A non-zero return means the reqId is unknown — typically the request
+    // already timed out library-side and was answered with a synthetic
+    // TRANSIENT failure.
+    if (logosdelivery_rln_response(static_cast<uint64_t>(reqId), resultJson.c_str()) != 0) {
+        fprintf(stderr, "DeliveryModuleImpl: rlnRespond rejected for reqId: %lld\n",
+                static_cast<long long>(reqId));
+        return {false, {}, "unknown or already-completed reqId"};
+    }
+
+    return {true, {}};
 }
