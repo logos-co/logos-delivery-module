@@ -721,11 +721,11 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1789056423,
-        "narHash": "sha256-F7wqf6t78xCqbCbbLM54bFHRZ898RuYq7nxpyz1Chlg=",
+        "lastModified": 1789057513,
+        "narHash": "sha256-mkH/b1LFqC0MFZmv3pdUk1BfdmfxgDWFupCxaS2A4AY=",
         "ref": "fix/module-dep-chain-resolution",
-        "rev": "145447bb28fbc6b5ec55c0f4d6596f50e8ade830",
-        "revCount": 63,
+        "rev": "5c8371df3c95e6aa5c340fed03f1d5d822a77c48",
+        "revCount": 65,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
@@ -743,11 +743,11 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1789056436,
-        "narHash": "sha256-bSM3gfJh0H8hetk812M3auKXj5ftMXCqqfykpHvp5j4=",
+        "lastModified": 1789057520,
+        "narHash": "sha256-hEvr9oCXG2kldwmOvT2TvIY/pkwUfTU6OcJEerhiOCY=",
         "ref": "fix/module-dep-chain-resolution",
-        "rev": "a763fbfbc576343c289e010467275841bedf5a40",
-        "revCount": 64,
+        "rev": "d8b8b56eef1211ebba834680a0c736bc1e0ec855",
+        "revCount": 66,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
@@ -8906,17 +8906,17 @@
         "rust-rapidsnark": "rust-rapidsnark"
       },
       "locked": {
-        "lastModified": 1789056030,
-        "narHash": "sha256-krdrE5NMhcXY4weYO1xMORHww3FAZTXEbosMSC8eF3I=",
-        "owner": "logos-blockchain",
+        "lastModified": 1789056767,
+        "narHash": "sha256-uf4UKBOFH8Is8lyrzDk1M5CFccJBXG/7czG5BL1ebqs=",
+        "owner": "igor-sirotin",
         "repo": "logos-execution-zone",
-        "rev": "c772ebc191cb5ffc1db34dcc06d043f4d7450f04",
+        "rev": "d28cb8ca0229ec17d212dbecaf6b355d6bee2c33",
         "type": "github"
       },
       "original": {
-        "owner": "logos-blockchain",
-        "ref": "dev",
+        "owner": "igor-sirotin",
         "repo": "logos-execution-zone",
+        "rev": "d28cb8ca0229ec17d212dbecaf6b355d6bee2c33",
         "type": "github"
       }
     },
