@@ -743,17 +743,17 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1789064364,
+        "lastModified": 1789066325,
         "narHash": "sha256-C0OR7PGdLCByMZpDZkYbehOd6wEuqF5jNau+OTtat+k=",
-        "ref": "fix/module-dep-chain-resolution",
-        "rev": "baefe92201238a1211a9e52735e6e7fa2448e848",
-        "revCount": 62,
+        "ref": "feat/lip-alignment",
+        "rev": "c89c7691d06af32c002426f3c6f6dece79dbffaa",
+        "revCount": 63,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-rln-module",
-        "ref": "fix/module-dep-chain-resolution",
+        "ref": "feat/lip-alignment",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
