@@ -140,8 +140,12 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void*
                                              impl->rlnConfig.registryId,
                                              impl->rlnConfig.rlnIdentifier,
                                              currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
     } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request\n");
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request %llu\n",
+                static_cast<unsigned long long>(reqId));
     }
 }
 
@@ -162,8 +166,12 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t t
                                       impl->rlnConfig.registryId,
                                       impl->rlnConfig.rlnIdentifier,
                                       static_cast<int64_t>(timestamp), currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_epoch_quota request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
     } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_epoch_quota request\n");
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_epoch_quota request %llu\n",
+                static_cast<unsigned long long>(reqId));
     }
 }
 
@@ -186,8 +194,12 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
                                       impl->rlnConfig.rlnIdentifier,
                                       toStringOrEmpty(signalHex),
                                       static_cast<int64_t>(timestamp), currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN generate_proof request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
     } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN generate_proof request\n");
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN generate_proof request %llu\n",
+                static_cast<unsigned long long>(reqId));
     }
 }
 
@@ -213,8 +225,12 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
                                       toStringOrEmpty(signalHex),
                                       static_cast<int64_t>(timestamp),
                                       toStringOrEmpty(proofJson), currentTimestampNs());
+    } catch (const std::exception& e) {
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN validate_proof request %llu: %s\n",
+                static_cast<unsigned long long>(reqId), e.what());
     } catch (...) {
-        fprintf(stderr, "DeliveryModuleImpl: dropped RLN validate_proof request\n");
+        fprintf(stderr, "DeliveryModuleImpl: dropped RLN validate_proof request %llu\n",
+                static_cast<unsigned long long>(reqId));
     }
 }
 
@@ -988,7 +1004,7 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
                 "DeliveryModuleImpl: rln bridge unavailable (%s); answering falls "
                 "to rlnRespond\n",
                 failure.c_str());
-        return {true, {}};
+        return {true, nlohmann::json{{"servedInProcess", false}}};
     }
 
     // The delivery library no longer starts the backend, so this module does:
@@ -1008,7 +1024,7 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
         return {false, {}, "rln module start failed: " + startFailure};
     }
     fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
-    return {true, {}};
+    return {true, nlohmann::json{{"servedInProcess", true}}};
 }
 
 StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)

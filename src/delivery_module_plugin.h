@@ -369,6 +369,9 @@ public:
      * @param cfgJson Object with `registry-id` (CAIP-10 account id of the
      *        registry deployment), `rln-identifier` (32-byte hex, per
      *        application) and optional `epoch-size-sec`.
+     * @return On success the value carries `{"servedInProcess": bool}` —
+     *         `false` means the bridge is unavailable and an external
+     *         responder must answer via @ref rlnRespond.
      */
     StdLogosResult configureRln(const std::string& cfgJson);
 
