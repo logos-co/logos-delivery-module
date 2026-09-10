@@ -464,10 +464,10 @@ private:
     // is only valid once the framework has handed the context over — then
     // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
     // path) funnel through here. Returns an error string, or empty.
-    std::string enableRlnBridge();
+    std::string bringUpRlnBridge();
 
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
-    // and started by enableRlnBridge().
+    // and started by bringUpRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
 
     // Everything the delivery library no longer knows about RLN (see

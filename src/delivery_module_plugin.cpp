@@ -242,7 +242,7 @@ DeliveryModuleImpl::DeliveryModuleImpl()
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
 }
 
-std::string DeliveryModuleImpl::enableRlnBridge()
+std::string DeliveryModuleImpl::bringUpRlnBridge()
 {
     if (!isContextReady()) {
         // Unit tests construct this impl without a framework; modules() would
@@ -255,7 +255,7 @@ std::string DeliveryModuleImpl::enableRlnBridge()
 
 StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 {
-    const std::string err = enableRlnBridge();
+    const std::string err = bringUpRlnBridge();
     if (!err.empty()) {
         return {false, {}, err};
     }
@@ -998,7 +998,7 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
     // rlnRespond are the other, so a bridge that cannot come up is not fatal.
     // Only a bridge that IS up starts the backend, because only it can reach
     // the RLN module.
-    const std::string failure = enableRlnBridge();
+    const std::string failure = bringUpRlnBridge();
     if (!failure.empty()) {
         fprintf(stderr,
                 "DeliveryModuleImpl: rln bridge unavailable (%s); answering falls "
