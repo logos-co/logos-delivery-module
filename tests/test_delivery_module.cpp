@@ -3,8 +3,12 @@
 // Mocks invoke callbacks synchronously so the semaphore inside api_call_handler.h
 // is released before try_acquire_for starts waiting.
 
+#include <cstdlib>
+#include <cstring>
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
+#include "base64.h"
+#include "discovery_config.h"
 #include "mocks/delivery_module_events_stub.h"
 
 // ---------------------------------------------------------------------------
@@ -466,4 +470,160 @@ LOGOS_TEST(name_returns_delivery_module) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_EQ(impl.name(), std::string("delivery_module"));
+}
+
+// One base64 for both plugins (payloads over the FFI, the signed record over
+// libp2p's JSON transport). RFC 4648 vectors, including the padding cases.
+LOGOS_TEST(base64_encode_matches_rfc4648_vectors) {
+    const auto enc = [](const char* s) {
+        return delivery_base64::encode(reinterpret_cast<const uint8_t*>(s), std::strlen(s));
+    };
+    LOGOS_ASSERT(enc("") == "");
+    LOGOS_ASSERT(enc("f") == "Zg==");
+    LOGOS_ASSERT(enc("fo") == "Zm8=");
+    LOGOS_ASSERT(enc("foo") == "Zm9v");
+    LOGOS_ASSERT(enc("foob") == "Zm9vYg==");
+    LOGOS_ASSERT(enc("fooba") == "Zm9vYmE=");
+    LOGOS_ASSERT(enc("foobar") == "Zm9vYmFy");
+    const uint8_t binary[] = {0x00, 0xff, 0x10};
+    LOGOS_ASSERT(delivery_base64::encode(binary, 3) == "AP8Q");
+    LOGOS_ASSERT(delivery_base64::encode(nullptr, 0).empty());
+    LOGOS_ASSERT(delivery_base64::decode("Zm9vYmFy") == std::vector<uint8_t>({'f', 'o', 'o', 'b', 'a', 'r'}));
+}
+
+// discovery config (discovery_config.h): the node's requirements reply
+
+static nlohmann::json parseJson(const char* text) { return nlohmann::json::parse(text); }
+
+static const char* kEnabledReply =
+    R"({"externalServiceDiscovery":true,"bootstrapNodes":[
+        "/dns4/a.example/tcp/30303/p2p/16Uiu2HAmA",
+        "/ip4/10.0.0.2/tcp/30303/p2p/16Uiu2HAmB"]})";
+static const char* kDisabledReply = R"({"externalServiceDiscovery":false,"bootstrapNodes":[]})";
+
+// Sets LIBP2P_MODULE_CONFIG for a test body and restores it afterwards.
+struct ScopedLibp2pEnv {
+    std::string saved;
+    bool had;
+    explicit ScopedLibp2pEnv(const char* value)
+    {
+        const char* old = getenv("LIBP2P_MODULE_CONFIG");
+        had = old != nullptr;
+        if (had) saved = old;
+        setenv("LIBP2P_MODULE_CONFIG", value, 1);
+    }
+    ~ScopedLibp2pEnv()
+    {
+        if (had) setenv("LIBP2P_MODULE_CONFIG", saved.c_str(), 1);
+        else unsetenv("LIBP2P_MODULE_CONFIG");
+    }
+};
+
+LOGOS_TEST(discovery_split_bootstrap_address) {
+    nlohmann::json node;
+    LOGOS_ASSERT_TRUE(delivery_discovery::splitBootstrapAddress(
+        "/dns4/a.example/tcp/30303/p2p/16Uiu2HAmA", node));
+    LOGOS_ASSERT_EQ(node["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(node["addrs"][0].get<std::string>(), std::string("/dns4/a.example/tcp/30303"));
+    LOGOS_ASSERT_FALSE(delivery_discovery::splitBootstrapAddress("/ip4/10.0.0.2/tcp/1", node));
+    LOGOS_ASSERT_FALSE(delivery_discovery::splitBootstrapAddress("/p2p/16Uiu2HAmA", node));
+}
+
+LOGOS_TEST(discovery_from_requirements_disabled_means_no_plugin) {
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kDisabledReply, nlohmann::json::object(), req).empty());
+    LOGOS_ASSERT_FALSE(req.enabled);
+    LOGOS_ASSERT_TRUE(req.libp2pConfig.empty());
+}
+
+LOGOS_TEST(discovery_from_requirements_builds_the_libp2p_config) {
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, nlohmann::json::object(), req).empty());
+    LOGOS_ASSERT_TRUE(req.enabled);
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_TRUE(libp2p["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{2});
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["peerId"].get<std::string>(), std::string("16Uiu2HAmB"));
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["addrs"][0].get<std::string>(), std::string("/ip4/10.0.0.2/tcp/30303"));
+}
+
+LOGOS_TEST(discovery_from_requirements_keeps_libp2p_own_config_underneath) {
+    // The node decides the DHT peers and the mounts; everything else in
+    // libp2p's own config survives.
+    delivery_discovery::PluginRequest req;
+    const auto base = parseJson(R"({"addrs":["/ip4/0.0.0.0/tcp/9000"],"transport":"tcp",
+        "mountKad":false,"bootstrapNodes":[{"peerId":"stale","addrs":["/ip4/1.1.1.1/tcp/1"]}]})");
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, base, req).empty());
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_EQ(libp2p["addrs"][0].get<std::string>(), std::string("/ip4/0.0.0.0/tcp/9000"));
+    LOGOS_ASSERT_EQ(libp2p["transport"].get<std::string>(), std::string("tcp"));
+    LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{2});
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+}
+
+LOGOS_TEST(discovery_libp2p_env_config_is_read_like_libp2p_module_does) {
+    {
+        ScopedLibp2pEnv env(R"({"addrs":["/ip4/127.0.0.1/tcp/7"]})");
+        const auto cfg = delivery_discovery::libp2pEnvConfig();
+        LOGOS_ASSERT_EQ(cfg["addrs"][0].get<std::string>(), std::string("/ip4/127.0.0.1/tcp/7"));
+    }
+    {
+        ScopedLibp2pEnv env("not json");
+        LOGOS_ASSERT_TRUE(delivery_discovery::libp2pEnvConfig().empty());
+    }
+    {
+        ScopedLibp2pEnv env("");
+        LOGOS_ASSERT_TRUE(delivery_discovery::libp2pEnvConfig().empty());
+    }
+}
+
+LOGOS_TEST(discovery_from_requirements_rejects_bad_input) {
+    for (const char* reply : {
+             "", "not json", "[]", R"({"bootstrapNodes":[]})",
+             R"({"externalServiceDiscovery":"yes"})",
+             R"({"externalServiceDiscovery":true,"bootstrapNodes":"x"})",
+             R"({"externalServiceDiscovery":true,"bootstrapNodes":["/ip4/10.0.0.2/tcp/1"]})",
+         }) {
+        delivery_discovery::PluginRequest req;
+        LOGOS_ASSERT_FALSE(delivery_discovery::fromRequirements(reply, nlohmann::json::object(), req).empty());
+        LOGOS_ASSERT_FALSE(req.enabled);
+    }
+}
+
+// createNode: plugin path, driven by the node's answer
+
+LOGOS_TEST(createNode_installs_plugin_when_the_node_asks_for_it) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_get_discovery_requirements").returns(kEnabledReply);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.dev","messagingOverrides":{"pluginKadDiscovery":true}})").success);
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_discovery_requirements"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_service_discovery_plugin"));
+}
+
+LOGOS_TEST(createNode_skips_plugin_when_the_node_wants_none) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_get_discovery_requirements").returns(kDisabledReply);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_discovery_requirements"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_service_discovery_plugin"));
+}
+
+LOGOS_TEST(createNode_fails_on_a_malformed_requirements_reply) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_get_discovery_requirements").returns("nonsense");
+
+    DeliveryModuleImpl impl;
+    const auto r = impl.createNode(R"({"preset":"logos.test"})");
+    LOGOS_ASSERT_FALSE(r.success);
+    LOGOS_ASSERT_TRUE(r.error.find("discovery") != std::string::npos);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_service_discovery_plugin"));
 }

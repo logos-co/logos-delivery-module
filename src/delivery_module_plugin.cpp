@@ -13,9 +13,15 @@
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
-#include <boost/beast/core/detail/base64.hpp>
+#include "base64.h"
 
 #include "api_call_handler.h"
+#include "discovery_config.h"
+#include "service_discovery_plugin.h"
+
+// Generated at build time from metadata.json#dependencies; defines the
+// LogosModules aggregate behind LogosModuleContext::modules().
+#include "logos_sdk.h"
 extern "C" {
 #include <liblogosdelivery.h>
 // Kernel tier: unstable, may change without a deprecation cycle. Only
@@ -25,23 +31,6 @@ extern "C" {
 }
 
 namespace {
-namespace b64 = boost::beast::detail::base64;
-
-std::string base64Encode(const std::vector<uint8_t>& data) {
-    std::string out;
-    out.resize(b64::encoded_size(data.size()));
-    out.resize(b64::encode(out.data(), data.data(), data.size()));
-    return out;
-}
-
-std::vector<uint8_t> base64Decode(const std::string& encoded) {
-    std::vector<uint8_t> out;
-    out.resize(b64::decoded_size(encoded.size()));
-    auto [written, read] = b64::decode(out.data(), encoded.data(), encoded.size());
-    out.resize(written);
-    return out;
-}
-
 int64_t currentTimestampNs() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -53,7 +42,7 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
     if (!payloadValue.is_string()) {
         return {};
     }
-    return base64Decode(payloadValue.get<std::string>());
+    return delivery_base64::decode(payloadValue.get<std::string>());
 }
 
 // Wire names of the events this module forwards. nim-ffi 0.3.0 replaced the
@@ -258,18 +247,19 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 // messagingOverrides (created if needed) for the layered shapes, top level
 // for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
-                                                      const std::string& persistencePath)
+                                                      const std::string& persistencePath,
+                                                      std::string& error)
 {
     nlohmann::json cfgObj;
     try {
         cfgObj = nlohmann::json::parse(cfg);
     } catch (const nlohmann::json::parse_error&) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
     if (!cfgObj.is_object()) {
-        fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
@@ -313,9 +303,12 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
+    std::string configError;
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), configError);
     if (!cfgWithDefaults) {
-        return {false, {}, "Invalid JSON config"};
+        fprintf(stderr, "DeliveryModuleImpl: createNode config rejected: %s\n",
+                configError.c_str());
+        return {false, {}, configError};
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
@@ -420,7 +413,75 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
         }
     }
+
+    // The node, not this module, knows whether discovery is to come from a
+    // plugin and which DHT peers its configuration (presets included)
+    // resolved: ask it, then bring the plugin in when it says so. libp2p's own
+    // options come from its own channel (LIBP2P_MODULE_CONFIG), preserved
+    // underneath the node's answer.
+    const StdLogosResult requirements = callApiRetValue(
+        "get_discovery_requirements", CALLBACK_TIMEOUT,
+        bindScalarApiCall(logosdelivery_get_discovery_requirements, deliveryCtx));
+    delivery_discovery::PluginRequest discovery;
+    std::string failure;
+    if (!requirements.success) {
+        failure = "discovery requirements: " + requirements.error;
+    } else {
+        const std::string reply = requirements.value.is_string()
+            ? requirements.value.get<std::string>()
+            : requirements.value.dump();
+        failure = delivery_discovery::fromRequirements(
+            reply, delivery_discovery::libp2pEnvConfig(), discovery);
+    }
+    if (failure.empty() && discovery.enabled) {
+        failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
+    }
+    if (!failure.empty()) {
+        // A node configured for plugin discovery cannot start without a
+        // registered plugin, so a half-built context is worse than none:
+        // tear it down and report, rather than failing later at start().
+        discoPlugin.reset();
+        logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
+        deliveryCtxHandle = nullptr;
+        deliveryCtx = nullptr;
+        return {false, {}, "service discovery setup failed: " + failure};
+    }
+
     return {true, {}};
+}
+
+std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string& libp2pConfig)
+{
+    if (!deliveryCtx) {
+        return "context not initialized";
+    }
+
+    // libp2p is NOT contacted here: this runs on the Qt main thread inside an
+    // inbound createNode dispatch, from which outbound calls cannot complete.
+    // The plugin brings it up on its first verb instead, on the discovery
+    // thread -- see DeliveryServiceDiscoveryPlugin::ensureBackend.
+    discoPlugin =
+        std::make_unique<DeliveryServiceDiscoveryPlugin>(&modules().libp2p_module, libp2pConfig);
+
+    // The vtable is borrowed for the duration of the call and copied by the
+    // node, but discoPlugin owns the object every entry point dispatches on,
+    // so it must outlive the context -- hence a member, not a local.
+    const StdLogosResult installed = callApiRetVoid(
+        "install service discovery plugin", CALLBACK_TIMEOUT,
+        [this](void* ticket) {
+            return logosdelivery_install_service_discovery_plugin(
+                deliveryCtx,
+                discoPlugin->vtable(),
+                static_cast<DeliveryScalarFn>(scalarTrampoline),
+                ticket);
+        });
+
+    if (!installed.success) {
+        return installed.error;
+    }
+
+    fprintf(stderr, "DeliveryModuleImpl: service discovery plugin installed\n");
+    return {};
 }
 
 StdLogosResult DeliveryModuleImpl::start()
@@ -464,7 +525,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 
     nlohmann::json messageObj;
     messageObj["contentTopic"] = contentTopic;
-    messageObj["payload"] = base64Encode(payload);
+    messageObj["payload"] = delivery_base64::encode(payload);
     messageObj["ephemeral"] = false;
 
     std::string messageJson = messageObj.dump();
@@ -626,7 +687,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
     }
 
     nlohmann::json messageObj;
-    messageObj["payload"] = base64Encode(payload);
+    messageObj["payload"] = delivery_base64::encode(payload);
     messageObj["ephemeral"] = false;
 
     std::string messageJson = messageObj.dump();
