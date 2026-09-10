@@ -71,7 +71,34 @@ jobs:
       - name: Build delivery-module (install-portable layout)
         run: |
           nix build -L .#install-portable
-          echo "LOGOS_MODULES_DIR=$PWD/result/modules" >> $GITHUB_ENV
+
+      # delivery_module declares liblogos_rln_module as dependency in metadata.json, and
+      # logoscore refuses to load a module whose dependency chain is absent
+      # from the modules dir. Stage the whole chain (liblogos_rln_module ->
+      # liblogos_lez_rln_module -> lez_core) next to it. The rln-modules pin
+      # is read from flake.lock so it cannot drift from the
+      # liblogos_rln_module flake input; lez_core has no pin reachable from
+      # that input (the lez-rln flake resolves its lidl via a local
+      # dependency_override), so it mirrors the logos-wallet-module pin in
+      # logos-rln-modules' root flake at the locked rev.
+      - name: Stage RLN dependency modules
+        run: |
+          RLN_URL=$(jq -r '.nodes.liblogos_rln_module.locked.url' flake.lock)
+          RLN_REF=$(jq -r '.nodes.liblogos_rln_module.locked.ref' flake.lock)
+          RLN_REV=$(jq -r '.nodes.liblogos_rln_module.locked.rev' flake.lock)
+          nix build -L --out-link result-rln \
+            "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-rln-module#install-portable"
+          nix build -L --out-link result-lez-rln \
+            "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-lez-rln-module#install-portable"
+          nix build -L --out-link result-lez-core \
+            "github:logos-blockchain/logos-execution-zone-module/549cf1159f20fa0c3fe8e88a5ab71de68a5aa34b#install-portable"
+
+          mkdir -p merged-modules
+          for r in result result-rln result-lez-rln result-lez-core; do
+            cp -rL "$r/modules/." merged-modules/
+          done
+          chmod -R u+w merged-modules
+          echo "LOGOS_MODULES_DIR=$PWD/merged-modules" >> $GITHUB_ENV
 
       - name: Checkout logoscore-py and build smoke image
         env:
