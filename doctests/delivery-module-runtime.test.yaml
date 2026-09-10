@@ -122,8 +122,8 @@ sections:
           `liblogos_lez_rln_module` and `lez_core` — which reads the pins
           straight out of the lock.
         run: |
-          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=c89c7691d06af32c002426f3c6f6dece79dbffaa&dir=logos-rln-module#lgx' -o rln-lgx
-          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=fix/module-dep-chain-resolution&rev=c56869db0d477212d8c3937c8fd85fcb6f27909b&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=53d31e3d71595c481e0e1be2ebc8120d8eaf9447&dir=logos-rln-module#lgx' -o rln-lgx
+          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=c89c7691d06af32c002426f3c6f6dece79dbffaa&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
           nix build 'github:logos-blockchain/logos-execution-zone-module/0ea57f8a1c57539d6ee0961a9cd27b064685b9e8#lgx' -o lez-core-lgx
         post_text: "Three more `.lgx` packages, one per module in the chain:"
         extra_run:
