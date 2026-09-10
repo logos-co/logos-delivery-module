@@ -13,7 +13,8 @@ delivery-module commit end-to-end through the headless `logoscore` runtime:
    its own flake's `#lgx` output, **pinned to the commit under test** — so the
    module you run is built from exactly what is checked out here, not the latest
    published release.
-3. Install the `.lgx` into a `./modules` directory with `lgpm`.
+3. Install the `.lgx` into a `./modules` directory with `lgpm`, together with
+   the RLN modules `delivery_module` depends on.
 4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
    it with `module-info`, call `createNode` with a Waku node config, then call
    `start` — verifying the module actually runs and boots a delivery node.
@@ -29,6 +30,7 @@ keeps the delivery module loadable and callable.
 - How to build the `logoscore` runtime and the `lgpm` package manager from their flakes
 - How a module's flake exposes a ready-to-install `.lgx` via its `#lgx` output
 - How to install an `.lgx` into a modules directory with `lgpm`
+- How a module's declared dependencies have to be installed alongside it
 - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
 - How to create and start a delivery node with `createNode` and `start`
 - How to shut the daemon down and confirm it has exited
@@ -86,8 +88,8 @@ The executable is at `./lgpm/bin/lgpm`.
 ## Step 3: Build and install this delivery module
 
 Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
-output and install it into a local `./modules` directory with `lgpm`. Every
-module built with
+output and install it into a local `./modules` directory with `lgpm`, along
+with the RLN modules it depends on. Every module built with
 [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
 exposes a ready-to-install `#lgx`.
 
@@ -113,7 +115,35 @@ The `.lgx` package is now under `./delivery-lgx/`:
 ls delivery-lgx/*.lgx
 ```
 
-### 3.2 Seed the modules directory with the bundled capability module
+### 3.2 Build the RLN dependency chain
+
+`delivery_module` declares `liblogos_rln_module` in
+`metadata.json#dependencies`, and the host refuses to load a module
+whose dependency chain is absent from the modules directory — so that
+chain has to be installed alongside it: `liblogos_rln_module` →
+`liblogos_lez_rln_module` → `lez_core`.
+
+Each is built at the rev this module's `flake.lock` pins for it, so
+the RLN modules you install are the ones the delivery module was
+built against. From a clone, this flake re-exports the same three
+packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
+`liblogos_lez_rln_module` and `lez_core` — which reads the pins
+straight out of the lock.
+
+```bash
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=c89c7691d06af32c002426f3c6f6dece79dbffaa&dir=logos-rln-module#lgx' -o rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=fix/module-dep-chain-resolution&rev=c56869db0d477212d8c3937c8fd85fcb6f27909b&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+nix build 'github:logos-blockchain/logos-execution-zone-module/0ea57f8a1c57539d6ee0961a9cd27b064685b9e8#lgx' -o lez-core-lgx
+
+```
+
+Three more `.lgx` packages, one per module in the chain:
+
+```bash
+ls rln-lgx/*.lgx lez-rln-lgx/*.lgx lez-core-lgx/*.lgx
+```
+
+### 3.3 Seed the modules directory with the bundled capability module
 
 `delivery_module` is loaded through the host's capability layer, so the
 modules directory also needs the `capability_module` that ships with
@@ -125,19 +155,23 @@ cp -RL ./logos/modules/. ./modules/
 
 ```
 
-### 3.3 Install the .lgx with lgpm
+### 3.4 Install the .lgx packages with lgpm
 
-Install the freshly-built package into `./modules`. `delivery_module` is
-a `core` module, so it goes to `--modules-dir`. The package is unsigned
-(a local dev build), so we pass `--allow-unsigned`.
+Install the freshly-built packages into `./modules`. These are all
+`core` modules, so they go to `--modules-dir`. The packages are
+unsigned (local dev builds), so we pass `--allow-unsigned`.
 
 ```bash
+./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file lez-core-lgx/*.lgx
+./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file lez-rln-lgx/*.lgx
+./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file rln-lgx/*.lgx
 ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx
+
 ```
 
-### 3.4 Confirm the install
+### 3.5 Confirm the install
 
-Scan the directory and confirm the module landed:
+Scan the directory and confirm all four modules landed:
 
 ```bash
 ./lgpm/bin/lgpm --modules-dir ./modules list
@@ -231,7 +265,9 @@ logoscore list-modules
 
 ### 4.6 Load the module
 
-Load `delivery_module` into the running daemon:
+Load `delivery_module` into the running daemon. Only this module is
+named — the host resolves `metadata.json#dependencies` and loads the
+RLN chain with it:
 
 ```bash
 logoscore load-module delivery_module
