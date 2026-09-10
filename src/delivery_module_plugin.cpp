@@ -136,10 +136,10 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void*
             impl->rlnBridge->getMembershipState(reqId, impl->rlnConfig.registryId,
                                                 impl->rlnConfig.rlnIdentifier);
         }
-        impl->rlnGetMembershipStateRequest(static_cast<int64_t>(reqId),
-                                           impl->rlnConfig.registryId,
-                                           impl->rlnConfig.rlnIdentifier,
-                                           currentTimestampNs());
+        impl->dispatchRlnGetMembershipStateRequestEvent(static_cast<int64_t>(reqId),
+                                             impl->rlnConfig.registryId,
+                                             impl->rlnConfig.rlnIdentifier,
+                                             currentTimestampNs());
     } catch (...) {
         fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request\n");
     }
@@ -158,7 +158,7 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t t
             impl->rlnBridge->getEpochQuota(reqId, impl->rlnConfig.registryId,
                                            impl->rlnConfig.rlnIdentifier, timestamp);
         }
-        impl->rlnGetEpochQuotaRequest(static_cast<int64_t>(reqId),
+        impl->dispatchRlnGetEpochQuotaRequestEvent(static_cast<int64_t>(reqId),
                                       impl->rlnConfig.registryId,
                                       impl->rlnConfig.rlnIdentifier,
                                       static_cast<int64_t>(timestamp), currentTimestampNs());
@@ -181,7 +181,7 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
                                            impl->rlnConfig.rlnIdentifier,
                                            toStringOrEmpty(signalHex), timestamp);
         }
-        impl->rlnGenerateProofRequest(static_cast<int64_t>(reqId),
+        impl->dispatchRlnGenerateProofRequestEvent(static_cast<int64_t>(reqId),
                                       impl->rlnConfig.registryId,
                                       impl->rlnConfig.rlnIdentifier,
                                       toStringOrEmpty(signalHex),
@@ -207,7 +207,7 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
                                            toStringOrEmpty(signalHex), timestamp,
                                            toStringOrEmpty(proofJson));
         }
-        impl->rlnValidateProofRequest(static_cast<int64_t>(reqId),
+        impl->dispatchRlnValidateProofRequestEvent(static_cast<int64_t>(reqId),
                                       impl->rlnConfig.registryId,
                                       impl->rlnConfig.rlnIdentifier,
                                       toStringOrEmpty(signalHex),

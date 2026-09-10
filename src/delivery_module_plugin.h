@@ -441,15 +441,15 @@ logos_events:
      * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
      * local emission time, as on every other event.
      */
-    void rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
-                                      const std::string& rlnIdentifier, int64_t timestamp);
-    void rlnGetEpochQuotaRequest(int64_t reqId, const std::string& registryId,
+    void dispatchRlnGetMembershipStateRequestEvent(int64_t reqId, const std::string& registryId,
+                                        const std::string& rlnIdentifier, int64_t timestamp);
+    void dispatchRlnGetEpochQuotaRequestEvent(int64_t reqId, const std::string& registryId,
                                  const std::string& rlnIdentifier,
                                  int64_t epochTimestamp, int64_t timestamp);
-    void rlnGenerateProofRequest(int64_t reqId, const std::string& registryId,
+    void dispatchRlnGenerateProofRequestEvent(int64_t reqId, const std::string& registryId,
                                  const std::string& rlnIdentifier, const std::string& signalHex,
                                  int64_t epochTimestamp, int64_t timestamp);
-    void rlnValidateProofRequest(int64_t reqId, const std::string& registryId,
+    void dispatchRlnValidateProofRequestEvent(int64_t reqId, const std::string& registryId,
                                  const std::string& rlnIdentifier, const std::string& signalHex,
                                  int64_t epochTimestamp, const std::string& proofJson,
                                  int64_t timestamp);

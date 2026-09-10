@@ -34,9 +34,9 @@ void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, i
     delivery_test_events::g_lastNodeStopped = {success, message, timestamp, true};
 }
 
-void DeliveryModuleImpl::rlnGetMembershipStateRequest(int64_t reqId, const std::string& registryId,
-                                                      const std::string& rlnIdentifier,
-                                                      int64_t timestamp) {
+void DeliveryModuleImpl::dispatchRlnGetMembershipStateRequestEvent(int64_t reqId, const std::string& registryId,
+                                                        const std::string& rlnIdentifier,
+                                                        int64_t timestamp) {
     auto& e = delivery_test_events::g_lastRlnRequest;
     e = {};
     e.op = "get_membership_state";
@@ -46,7 +46,7 @@ void DeliveryModuleImpl::rlnGetMembershipStateRequest(int64_t reqId, const std::
     e.timestamp = timestamp;
 }
 
-void DeliveryModuleImpl::rlnGetEpochQuotaRequest(int64_t reqId, const std::string& registryId,
+void DeliveryModuleImpl::dispatchRlnGetEpochQuotaRequestEvent(int64_t reqId, const std::string& registryId,
                                                  const std::string& rlnIdentifier,
                                                  int64_t epochTimestamp, int64_t timestamp) {
     auto& e = delivery_test_events::g_lastRlnRequest;
@@ -59,7 +59,7 @@ void DeliveryModuleImpl::rlnGetEpochQuotaRequest(int64_t reqId, const std::strin
     e.timestamp = timestamp;
 }
 
-void DeliveryModuleImpl::rlnGenerateProofRequest(int64_t reqId, const std::string& registryId,
+void DeliveryModuleImpl::dispatchRlnGenerateProofRequestEvent(int64_t reqId, const std::string& registryId,
                                                  const std::string& rlnIdentifier,
                                                  const std::string& signalHex,
                                                  int64_t epochTimestamp, int64_t timestamp) {
@@ -74,7 +74,7 @@ void DeliveryModuleImpl::rlnGenerateProofRequest(int64_t reqId, const std::strin
     e.timestamp = timestamp;
 }
 
-void DeliveryModuleImpl::rlnValidateProofRequest(int64_t reqId, const std::string& registryId,
+void DeliveryModuleImpl::dispatchRlnValidateProofRequestEvent(int64_t reqId, const std::string& registryId,
                                                  const std::string& rlnIdentifier,
                                                  const std::string& signalHex, int64_t epochTimestamp,
                                                  const std::string& proofJson, int64_t timestamp) {
