@@ -66,6 +66,15 @@
             fi
           '';
         };
+        # The builder stages include/*.h into lib/ but misses subdirectories;
+        # liblogosdelivery.h includes "generated/logosdelivery.h" relatively.
+        # TODO: remove once logos-module-builder copies include/ recursively.
+        preConfigure = { externalLibs }: ''
+          if [ -d "${externalLibs.logosdelivery}/include/generated" ]; then
+            mkdir -p lib/generated
+            cp -f "${externalLibs.logosdelivery}"/include/generated/*.h lib/generated/
+          fi
+        '';
         # Bundle runtime libraries alongside the plugin.
         postInstall = ''
           # liblogosdelivery.dylib has a sandbox-baked absolute path for librln.dylib
