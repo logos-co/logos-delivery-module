@@ -24,7 +24,7 @@ library, which knows nothing about RLN beyond an installed plugin.
 
 ```json
 {
-  "registry-id": "logos:testnet:0",
+  "registry-id": "logos:testnet:<64 hex chars — the registration program's config account>",
   "rln-identifier": "<exactly 64 hex chars — validated as 32 bytes>",
   "epoch-size-sec": 120
 }
