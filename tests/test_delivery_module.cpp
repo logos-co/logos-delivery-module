@@ -405,11 +405,6 @@ CryptoFn asCryptoFn(uint64_t handle) {
 
 const char* kCipherSpec = R"({"module":"demo_module","encrypt":"chEnc","decrypt":"chDec"})";
 
-// A methods document that satisfies the arity check for both methods.
-const char* kMethods =
-    R"([{"name":"chEnc","parameters":[{"name":"channelId"},{"name":"payload"}]},)"
-    R"({"name":"chDec","parameters":[{"name":"channelId"},{"name":"payload"}]}])";
-
 // Installs a responder that applies `flip` to whatever payload it is handed and
 // records the calls it saw.
 struct CipherModule {
@@ -447,7 +442,6 @@ LOGOS_TEST(channelCreate_leaves_the_cipher_uninstalled_without_a_spec) {
 LOGOS_TEST(channelCreate_installs_the_cipher_and_relays_both_directions) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_cipher::reset();
-    delivery_test_cipher::g_methodsJson = kMethods;
     CipherModule cipher;
     cipher.install();
     auto* impl = createInitializedImpl(t);
@@ -489,7 +483,6 @@ LOGOS_TEST(channelCreate_installs_the_cipher_and_relays_both_directions) {
 LOGOS_TEST(cipher_failure_fails_the_message_rather_than_falling_back_to_plaintext) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_cipher::reset();
-    delivery_test_cipher::g_methodsJson = kMethods;
     delivery_test_cipher::g_lpHandler = [](const std::string&, const std::string&, std::string&) {
         return false;
     };
@@ -509,15 +502,29 @@ LOGOS_TEST(cipher_failure_fails_the_message_rather_than_falling_back_to_plaintex
     delete impl;
 }
 
-LOGOS_TEST(channelCreate_rejects_a_cipher_target_that_lacks_the_methods) {
+LOGOS_TEST(a_target_that_serves_nothing_fails_the_message) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_cipher::reset();
-    delivery_test_cipher::g_methodsJson = R"([{"name":"chEnc","parameters":[{"name":"only"}]}])";
+    // What a module that publishes no provider answers — every `ui_qml` module,
+    // and any name that is not loaded: the call is reported as succeeding and
+    // carries a bare null.
+    delivery_test_cipher::g_lpHandler =
+        [](const std::string&, const std::string&, std::string& out) {
+            out = "null";
+            return true;
+        };
     auto* impl = createInitializedImpl(t);
 
-    StdLogosResult r = impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", kCipherSpec);
-    LOGOS_ASSERT_FALSE(r.success);
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_channel_create"));
+    LOGOS_ASSERT_TRUE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", kCipherSpec).success);
+
+    const std::vector<uint8_t> plain = {1, 2, 3};
+    void* ud = reinterpret_cast<void*>(static_cast<uintptr_t>(delivery_test_cipher::g_userData));
+    const uint8_t* out = nullptr;
+    size_t outLen = 0;
+    LOGOS_ASSERT_TRUE(
+        asCryptoFn(delivery_test_cipher::g_encryptFn)(ud, plain.data(), plain.size(), &out, &outLen)
+        != 0);
 
     delete impl;
 }

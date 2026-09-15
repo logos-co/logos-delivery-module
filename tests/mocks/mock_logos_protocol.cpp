@@ -6,7 +6,6 @@
 // mock_channel_state.h, so the relay can be driven end to end.
 
 #include <cstdlib>
-#include <cstring>
 #include <string>
 
 #include <logos_protocol.h>
@@ -18,7 +17,6 @@ uint64_t g_encryptFn = 0;
 uint64_t g_decryptFn = 0;
 uint64_t g_userData = 0;
 LpHandler g_lpHandler;
-std::string g_methodsJson;
 bool g_clientCreateFails = false;
 std::string g_lastTarget;
 std::string g_lastOrigin;
@@ -29,7 +27,6 @@ void reset()
     g_decryptFn = 0;
     g_userData = 0;
     g_lpHandler = nullptr;
-    g_methodsJson.clear();
     g_clientCreateFails = false;
     g_lastTarget.clear();
     g_lastOrigin.clear();
@@ -40,15 +37,6 @@ namespace {
 // The RLN bridge asks for this target and must keep seeing a dead client, so
 // its ops stay transport failures. Everything else gets a live stub.
 constexpr const char* kRlnTarget = "liblogos_rln_module";
-
-char* dup(const std::string& s)
-{
-    char* out = static_cast<char*>(std::malloc(s.size() + 1));
-    if (out) {
-        std::memcpy(out, s.c_str(), s.size() + 1);
-    }
-    return out;
-}
 
 // A non-null handle the mock hands back; never dereferenced.
 char g_handle = 0;
@@ -96,12 +84,9 @@ int lp_invoke(lp_client*, const char*, const char*, int, char**, char**)
     return LP_ERR_UNAVAILABLE;
 }
 
-char* lp_get_methods(lp_client* client)
+char* lp_get_methods(lp_client*)
 {
-    if (!client || delivery_test_cipher::g_methodsJson.empty()) {
-        return nullptr;
-    }
-    return dup(delivery_test_cipher::g_methodsJson);
+    return nullptr;
 }
 
 void lp_string_free(char* s)

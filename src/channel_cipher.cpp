@@ -25,8 +25,9 @@ namespace b64 = boost::beast::detail::base64;
 constexpr const char* kOrigin = "delivery_module";
 
 // Budget for one cipher round trip. It stalls the delivery library's event
-// loop, so it is far below the 30s a module API call gets.
-constexpr int kCipherTimeoutMs = 10'000;
+// loop for its whole duration, and the target is an in-process module, so it
+// sits far below the 30s a module API call gets.
+constexpr int kCipherTimeoutMs = 5'000;
 
 std::string base64Encode(const uint8_t* data, size_t len)
 {
@@ -66,43 +67,6 @@ void replyTrampoline(int ok, const char* jsonText, void* userData)
     box.sem.release();
 }
 
-// The methods document is an array of {name, parameters: [...]}, or an object
-// holding one under "methods". Absent or unreadable means "cannot introspect",
-// which registration treats as a pass rather than a rejection.
-const json* methodsArray(const json& doc)
-{
-    if (doc.is_array()) {
-        return &doc;
-    }
-    if (doc.is_object()) {
-        auto it = doc.find("methods");
-        if (it != doc.end() && it->is_array()) {
-            return &*it;
-        }
-    }
-    return nullptr;
-}
-
-bool hasMethodWithArity(const json& methods, const std::string& name, size_t arity)
-{
-    for (const auto& entry : methods) {
-        if (!entry.is_object()) {
-            continue;
-        }
-        const auto nameIt = entry.find("name");
-        if (nameIt == entry.end() || !nameIt->is_string() || nameIt->get<std::string>() != name) {
-            continue;
-        }
-        const auto paramsIt = entry.find("parameters");
-        if (paramsIt == entry.end() || !paramsIt->is_array()) {
-            return true;
-        }
-        if (paramsIt->size() == arity) {
-            return true;
-        }
-    }
-    return false;
-}
 } // namespace
 
 struct ChannelCipherRelay::Registration {
@@ -159,8 +123,13 @@ struct ChannelCipherRelay::Registration {
 
         const json parsed = json::parse(box->json, nullptr, /*allow_exceptions=*/false);
         if (!parsed.is_string()) {
-            fprintf(stderr, "delivery_module: channel %s %s returned a non-string reply\n",
-                    channelId.c_str(), method.c_str());
+            // A null here is what an unreachable target answers once the call
+            // has burned its timeout, so name that rather than the JSON type.
+            fprintf(stderr,
+                    "delivery_module: channel %s %s answered %s, not a base64 string. A "
+                    "null means nothing served the call: the target publishes no "
+                    "provider (a `ui_qml` module never does) or names no such method.\n",
+                    channelId.c_str(), method.c_str(), box->json.c_str());
             return false;
         }
         const std::string encoded = parsed.get<std::string>();
@@ -247,17 +216,6 @@ std::string ChannelCipherRelay::registerChannel(const std::string& channelId,
         return "could not reach cipher target " + target;
     }
 
-    if (char* methodsText = lp_get_methods(registration->client)) {
-        const json doc = json::parse(methodsText, nullptr, /*allow_exceptions=*/false);
-        lp_string_free(methodsText);
-        if (const json* methods = methodsArray(doc)) {
-            for (const std::string& method : {spec.encryptMethod, spec.decryptMethod}) {
-                if (!hasMethodWithArity(*methods, method, 2)) {
-                    return target + " has no method " + method + "(channelId, payload)";
-                }
-            }
-        }
-    }
 
     {
         std::lock_guard<std::mutex> lock(m_lock);

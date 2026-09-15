@@ -20,8 +20,6 @@ using LpHandler = std::function<bool(const std::string& method,
                                      std::string& outJson)>;
 
 extern LpHandler g_lpHandler;
-// What lp_get_methods answers. Empty means "cannot introspect".
-extern std::string g_methodsJson;
 extern bool g_clientCreateFails;
 extern std::string g_lastTarget;
 extern std::string g_lastOrigin;
