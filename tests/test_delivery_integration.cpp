@@ -8,6 +8,12 @@
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
 #include "mocks/delivery_module_events_stub.h"
+#include "mocks/mock_channel_state.h"
+
+#include <atomic>
+#include <mutex>
+
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstdlib>
@@ -290,6 +296,70 @@ LOGOS_TEST(integration_channel_send_returns_request_id) {
     LOGOS_ASSERT_FALSE(result.value.get<std::string>().empty());
 
     LOGOS_ASSERT_TRUE(g_impl->channelClose(kTestChannelId).success);
+}
+
+LOGOS_TEST(integration_encrypted_channel_send_runs_the_cipher) {
+    ensureStarted();
+    delivery_test_cipher::reset();
+
+    // Stands in for the module that owns the channel: the real library calls
+    // the trampolines this module installed, and they land here.
+    std::atomic<int> encryptCalls{0};
+    std::mutex seenLock;
+    std::string seenChannelId;
+    delivery_test_cipher::g_lpHandler =
+        [&](const std::string& method, const std::string& argsJson, std::string& out) {
+            const auto args = nlohmann::json::parse(argsJson, nullptr, /*allow_exceptions=*/false);
+            if (!args.is_array() || args.size() != 2) return false;
+            {
+                std::lock_guard<std::mutex> lock(seenLock);
+                seenChannelId = args[0].get<std::string>();
+            }
+            if (method == "chEnc") encryptCalls.fetch_add(1);
+            // A cipher that changes nothing: the assertion is that the library
+            // asked at all, and that what it sends is what came back.
+            out = nlohmann::json(args[1]).dump();
+            return true;
+        };
+
+    const char* kCipherSpec =
+        R"({"module":"cipher_owner","encrypt":"chEnc","decrypt":"chDec"})";
+    LOGOS_ASSERT_TRUE(
+        g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId, kCipherSpec).success);
+
+    const std::string msg = "hello from an encrypted channel";
+    const std::vector<uint8_t> payload(msg.begin(), msg.end());
+    LOGOS_ASSERT_TRUE(g_impl->channelSend(kTestChannelId, payload).success);
+
+    // One call per SDS segment; this payload is one segment.
+    LOGOS_ASSERT_TRUE(encryptCalls.load() >= 1);
+    {
+        std::lock_guard<std::mutex> lock(seenLock);
+        LOGOS_ASSERT_EQ(seenChannelId, std::string(kTestChannelId));
+    }
+
+    LOGOS_ASSERT_TRUE(g_impl->channelClose(kTestChannelId).success);
+    delivery_test_cipher::reset();
+}
+
+LOGOS_TEST(integration_encrypted_channel_send_fails_when_the_cipher_declines) {
+    ensureStarted();
+    delivery_test_cipher::reset();
+
+    delivery_test_cipher::g_lpHandler = [](const std::string&, const std::string&, std::string&) {
+        return false;
+    };
+
+    const char* kCipherSpec =
+        R"({"module":"cipher_owner","encrypt":"chEnc","decrypt":"chDec"})";
+    LOGOS_ASSERT_TRUE(
+        g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId, kCipherSpec).success);
+
+    const std::vector<uint8_t> payload{'x', 'y', 'z'};
+    LOGOS_ASSERT_FALSE(g_impl->channelSend(kTestChannelId, payload).success);
+
+    LOGOS_ASSERT_TRUE(g_impl->channelClose(kTestChannelId).success);
+    delivery_test_cipher::reset();
 }
 
 LOGOS_TEST(integration_channel_send_fails_on_unknown_channel) {
