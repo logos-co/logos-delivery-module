@@ -133,6 +133,9 @@ typedef struct {
     const char* channelIdStr;
     const char* contentTopicStr;
     const char* senderIdStr;
+    uint64_t encryptFn;
+    uint64_t decryptFn;
+    uint64_t userData;
 } LogosdeliveryChannelCreateReq;
 typedef struct {
     const char* channelIdStr;
@@ -297,6 +300,17 @@ int waku_lightpush_publish(void* ctx, LogosDeliveryWakuLightpushPublishReplyFn o
 int waku_filter_subscribe(void* ctx, LogosDeliveryWakuFilterSubscribeReplyFn on_reply, void* user_data, const WakuFilterSubscribeReq* req);
 int waku_filter_unsubscribe(void* ctx, LogosDeliveryWakuFilterUnsubscribeReplyFn on_reply, void* user_data, const WakuFilterUnsubscribeReq* req);
 int waku_filter_unsubscribe_all(void* ctx, LogosDeliveryScalarRawFn callback, void* user_data);
+/**
+ * `encryptFn`/`decryptFn` are `LogosDeliveryCryptoFn` pointers cast to
+ * `uint64`, and all three zero means an unencrypted channel. The cipher
+ * is fixed for the channel's life.
+ *
+ * `userData` is what lets one C function serve several channels: a
+ * function pointer carries no state, so the same `my_encrypt` used on two
+ * channels is the same address both times and cannot tell them apart.
+ * Whatever is passed here comes back as the callback's first argument on
+ * every call, so it can point at this channel's key.
+ */
 int logosdelivery_channel_create(void* ctx, LogosDeliveryChannelCreateReplyFn on_reply, void* user_data, const LogosdeliveryChannelCreateReq* req);
 /** Returns `"true"` or `"false"`; a missing channel is not an error. */
 int logosdelivery_channel_exists(void* ctx, LogosDeliveryChannelExistsReplyFn on_reply, void* user_data, const LogosdeliveryChannelExistsReq* req);
@@ -1246,12 +1260,26 @@ static inline int logosdelivery_ctx_waku_filter_unsubscribe_all(const LogosDeliv
     return waku_filter_unsubscribe_all(ctx->ptr, waku_filter_unsubscribe_all_scalar_reply, box);
 }
 
-static inline int logosdelivery_ctx_channel_create(const LogosDeliveryCtx* ctx, const char* channelIdStr, const char* contentTopicStr, const char* senderIdStr, LogosDeliveryChannelCreateReplyFn on_reply, void* user_data) {
+/**
+ * `encryptFn`/`decryptFn` are `LogosDeliveryCryptoFn` pointers cast to
+ * `uint64`, and all three zero means an unencrypted channel. The cipher
+ * is fixed for the channel's life.
+ *
+ * `userData` is what lets one C function serve several channels: a
+ * function pointer carries no state, so the same `my_encrypt` used on two
+ * channels is the same address both times and cannot tell them apart.
+ * Whatever is passed here comes back as the callback's first argument on
+ * every call, so it can point at this channel's key.
+ */
+static inline int logosdelivery_ctx_channel_create(const LogosDeliveryCtx* ctx, const char* channelIdStr, const char* contentTopicStr, const char* senderIdStr, uint64_t encryptFn, uint64_t decryptFn, uint64_t userData, LogosDeliveryChannelCreateReplyFn on_reply, void* user_data) {
     LogosdeliveryChannelCreateReq ffi_req;
     memset(&ffi_req, 0, sizeof(ffi_req));
     ffi_req.channelIdStr = channelIdStr;
     ffi_req.contentTopicStr = contentTopicStr;
     ffi_req.senderIdStr = senderIdStr;
+    ffi_req.encryptFn = encryptFn;
+    ffi_req.decryptFn = decryptFn;
+    ffi_req.userData = userData;
     return logosdelivery_channel_create(ctx->ptr, on_reply, user_data, &ffi_req);
 }
 
