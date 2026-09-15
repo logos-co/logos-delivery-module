@@ -6,6 +6,7 @@
     "type": "core",
     "category": "protocol",
     "interface": "universal",
+    "concurrency": "multi",
     "main": "delivery_module_plugin",
     "codegen": {
         "impl_header": "delivery_module_plugin.h"
