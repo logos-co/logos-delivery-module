@@ -329,6 +329,7 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
 
                 std::string hash = jsonObj.value("messageHash", "");
                 std::string topic = msgObj.value("contentTopic", "");
+                std::string source = jsonObj.value("source", "");
 
                 std::vector<uint8_t> payloadBytes;
                 if (msgObj.contains("payload")) {
@@ -336,8 +337,7 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
                 }
 
                 int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
-                impl->messageReceived(hash, topic, payloadBytes,
-                                      jsonObj.value("source", ""), msgTimestamp);
+                impl->messageReceived(hash, topic, payloadBytes, source, msgTimestamp);
 
             } else if (eventType == "connection_status_change") {
                 impl->connectionStateChanged(
