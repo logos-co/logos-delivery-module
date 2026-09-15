@@ -19,6 +19,7 @@ from libs.helpers import (
     event_content_topic,
     event_payload,
     event_request_id,
+    event_source,
     parse_event,
     wait_for_event,
 )
@@ -87,3 +88,7 @@ def test_two_nodes_message_received(node_a, node_b):
     # rather than an error, so assert the payload survived the trip.
     payload = event_payload(event)
     assert payload, f"messageReceived carried an empty payload: {parse_event(event)!r}"
+
+    source = event_source(event)
+    if source is not None:
+        assert source == "live", f"messageReceived source {source!r} != 'live'"

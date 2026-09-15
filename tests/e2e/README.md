@@ -59,6 +59,10 @@ position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTop
 extend the receive checks to the payload, read `messageReceived payload: …` from
 the logs and confirm the decoding in `libs/helpers.py` first.
 
+`source` (`arg3`) is `"live"` or `"history"`. A node that has been down and
+comes back can replay what it missed as `"history"`, so a test asserting on a
+freshly published message should pin `arg3` to `"live"`.
+
 ## Prerequisites
 
 - `docker` available on host.

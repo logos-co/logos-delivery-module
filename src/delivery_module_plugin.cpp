@@ -336,7 +336,8 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
                 }
 
                 int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
-                impl->messageReceived(hash, topic, payloadBytes, msgTimestamp);
+                impl->messageReceived(hash, topic, payloadBytes,
+                                      jsonObj.value("source", ""), msgTimestamp);
 
             } else if (eventType == "connection_status_change") {
                 impl->connectionStateChanged(

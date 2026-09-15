@@ -90,6 +90,13 @@ public:
      * }
      * @endcode
      *
+     * Other overrides worth naming: `backfillEnabled` (default `true`) runs
+     * Store catch-up for the messages missed while the node was down, and
+     * `backfillRequestTimeoutSeconds` bounds one Store query (default 10,
+     * range 1–300); see @ref messageReceived for what catch-up delivers.
+     * `nat` selects public-address discovery — `"any"` (default), `"none"`,
+     * `"upnp"`, `"pmp"` or `"extip:<IP>"`.
+     *
      * **Node operator** — kernel-only service node on a public network. `mode`
      * is not applied on this layer, so protocol flags are set explicitly in
      * `kernelConf`:
@@ -409,10 +416,23 @@ logos_events:
      *
      * `payload` is delivered as raw bytes, already decoded from the wire
      * encoding.
+     *
+     * `source` is `"live"` when the message was delivered as it was published,
+     * or `"history"` when Store catch-up recovered it — at startup, or after a
+     * connectivity gap. Catch-up is on by default, so a restart replays what
+     * was missed while the node was down. Upstream suppresses duplicates only
+     * for a few minutes and only in memory, so a consumer that needs each
+     * message once must deduplicate by `messageHash`.
      */
-    void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
+    void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, const std::string& source, int64_t timestamp);
 
-    /** @brief Emitted when the node's connectivity changes. */
+    /**
+     * @brief Emitted when the node's connectivity changes.
+     *
+     * A node configured with `anonymityLevel` above `"None"` reports
+     * disconnected until a mix exit is ready, since it cannot send anonymously
+     * before that.
+     */
     void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
 
     /**

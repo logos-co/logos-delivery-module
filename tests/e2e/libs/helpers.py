@@ -210,3 +210,9 @@ def event_content_topic(event: dict) -> Optional[str]:
 def event_payload(event: dict) -> Any:
     """payload of a messageReceived event (arg 2)."""
     return event_arg(event, 2)
+
+
+def event_source(event: dict) -> Optional[str]:
+    """source of a messageReceived event (arg 3): "live" or "history"."""
+    src = event_arg(event, 3)
+    return str(src) if src is not None else None
