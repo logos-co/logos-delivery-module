@@ -4,8 +4,16 @@
 // is released before try_acquire_for starts waiting.
 
 #include <logos_test.h>
+
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
 #include "delivery_module_plugin.h"
 #include "mocks/delivery_module_events_stub.h"
+#include "mocks/mock_channel_state.h"
 #include "mocks/mock_rln_state.h"
 
 // ---------------------------------------------------------------------------
@@ -311,7 +319,7 @@ LOGOS_TEST(storeQuery_returns_response_json) {
 LOGOS_TEST(channelCreate_fails_without_createNode) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_FALSE(impl.channelCreate("chan-1", "/test/1/delivery/proto", "sender-1").success);
+    LOGOS_ASSERT_FALSE(impl.channelCreate("chan-1", "/test/1/delivery/proto", "sender-1", "").success);
     LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_channel_create"));
 }
 
@@ -320,11 +328,233 @@ LOGOS_TEST(channelCreate_returns_channel_id) {
     auto* impl = createInitializedImpl(t);
 
     t.mockCFunction("logosdelivery_channel_create").returns("chan-1");
-    StdLogosResult result = impl->channelCreate("chan-1", "/test/1/delivery/proto", "sender-1");
+    StdLogosResult result = impl->channelCreate("chan-1", "/test/1/delivery/proto", "sender-1", "");
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("chan-1"));
     LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_channel_create"), 1);
+
+    delete impl;
+}
+
+// channelCreate — per-channel cipher relay
+//
+// The relay's outbound calls go through the programmable lp stub in
+// mocks/mock_logos_protocol.cpp, so a test stands in for the module that owns
+// the channel. `logos::currentCaller()` is Unknown without a framework, which
+// is why every spec here names its `module` explicitly.
+
+namespace {
+
+// Base64 over the alphabet the module uses, so a test can speak the cipher
+// wire without pulling boost into this TU.
+const char* kB64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string b64Encode(const std::vector<uint8_t>& in) {
+    std::string out;
+    for (size_t i = 0; i < in.size(); i += 3) {
+        const size_t left = in.size() - i;
+        uint32_t chunk = static_cast<uint32_t>(in[i]) << 16;
+        if (left > 1) chunk |= static_cast<uint32_t>(in[i + 1]) << 8;
+        if (left > 2) chunk |= in[i + 2];
+        out += kB64Alphabet[(chunk >> 18) & 0x3f];
+        out += kB64Alphabet[(chunk >> 12) & 0x3f];
+        out += left > 1 ? kB64Alphabet[(chunk >> 6) & 0x3f] : '=';
+        out += left > 2 ? kB64Alphabet[chunk & 0x3f] : '=';
+    }
+    return out;
+}
+
+std::vector<uint8_t> b64Decode(const std::string& in) {
+    std::vector<uint8_t> out;
+    uint32_t chunk = 0;
+    int bits = 0;
+    for (char c : in) {
+        const char* at = c == '=' ? nullptr : strchr(kB64Alphabet, c);
+        if (!at) break;
+        chunk = (chunk << 6) | static_cast<uint32_t>(at - kB64Alphabet);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(static_cast<uint8_t>((chunk >> bits) & 0xff));
+        }
+    }
+    return out;
+}
+
+// The cipher a test module implements: flip every byte. Its own inverse, so
+// one body serves encrypt and decrypt.
+std::vector<uint8_t> flip(const std::vector<uint8_t>& in) {
+    std::vector<uint8_t> out = in;
+    for (auto& b : out) b = static_cast<uint8_t>(~b);
+    return out;
+}
+
+std::string hex(const std::vector<uint8_t>& in) {
+    static const char* digits = "0123456789abcdef";
+    std::string out;
+    for (uint8_t b : in) { out += digits[b >> 4]; out += digits[b & 0x0f]; }
+    return out;
+}
+
+using CryptoFn = int (*)(void*, const uint8_t*, size_t, const uint8_t**, size_t*);
+
+CryptoFn asCryptoFn(uint64_t handle) {
+    return reinterpret_cast<CryptoFn>(static_cast<uintptr_t>(handle));
+}
+
+const char* kCipherSpec = R"({"module":"demo_module","encrypt":"chEnc","decrypt":"chDec"})";
+
+// A methods document that satisfies the arity check for both methods.
+const char* kMethods =
+    R"([{"name":"chEnc","parameters":[{"name":"channelId"},{"name":"payload"}]},)"
+    R"({"name":"chDec","parameters":[{"name":"channelId"},{"name":"payload"}]}])";
+
+// Installs a responder that applies `flip` to whatever payload it is handed and
+// records the calls it saw.
+struct CipherModule {
+    std::vector<std::string> calls;
+    std::string lastChannelId;
+
+    void install() {
+        delivery_test_cipher::g_lpHandler =
+            [this](const std::string& method, const std::string& argsJson, std::string& out) {
+                calls.push_back(method);
+                const auto args = nlohmann::json::parse(argsJson, nullptr, false);
+                if (!args.is_array() || args.size() != 2) return false;
+                lastChannelId = args[0].get<std::string>();
+                out = nlohmann::json(b64Encode(flip(b64Decode(args[1].get<std::string>())))).dump();
+                return true;
+            };
+    }
+};
+
+} // namespace
+
+LOGOS_TEST(channelCreate_leaves_the_cipher_uninstalled_without_a_spec) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_TRUE(impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", "").success);
+    LOGOS_ASSERT_EQ(delivery_test_cipher::g_encryptFn, static_cast<uint64_t>(0));
+    LOGOS_ASSERT_EQ(delivery_test_cipher::g_decryptFn, static_cast<uint64_t>(0));
+    LOGOS_ASSERT_EQ(delivery_test_cipher::g_userData, static_cast<uint64_t>(0));
+
+    delete impl;
+}
+
+LOGOS_TEST(channelCreate_installs_the_cipher_and_relays_both_directions) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    delivery_test_cipher::g_methodsJson = kMethods;
+    CipherModule cipher;
+    cipher.install();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_TRUE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", kCipherSpec).success);
+    LOGOS_ASSERT_EQ(delivery_test_cipher::g_lastTarget, std::string("demo_module"));
+    LOGOS_ASSERT_EQ(delivery_test_cipher::g_lastOrigin, std::string("delivery_module"));
+    LOGOS_ASSERT_TRUE(delivery_test_cipher::g_encryptFn != 0);
+    LOGOS_ASSERT_TRUE(delivery_test_cipher::g_decryptFn != 0);
+    LOGOS_ASSERT_TRUE(delivery_test_cipher::g_userData != 0);
+
+    const std::vector<uint8_t> plain = {0x00, 0x01, 0x7f, 0xff};
+    void* ud = reinterpret_cast<void*>(static_cast<uintptr_t>(delivery_test_cipher::g_userData));
+
+    const uint8_t* out = nullptr;
+    size_t outLen = 0;
+    LOGOS_ASSERT_EQ(
+        asCryptoFn(delivery_test_cipher::g_encryptFn)(ud, plain.data(), plain.size(), &out, &outLen),
+        0);
+    const std::vector<uint8_t> sealed(out, out + outLen);
+    LOGOS_ASSERT_EQ(hex(sealed), hex(flip(plain)));
+    LOGOS_ASSERT_EQ(cipher.lastChannelId, std::string("chan-1"));
+
+    out = nullptr;
+    outLen = 0;
+    LOGOS_ASSERT_EQ(
+        asCryptoFn(delivery_test_cipher::g_decryptFn)(ud, sealed.data(), sealed.size(), &out, &outLen),
+        0);
+    LOGOS_ASSERT_EQ(hex(std::vector<uint8_t>(out, out + outLen)), hex(plain));
+
+    LOGOS_ASSERT_EQ(cipher.calls.size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(cipher.calls[0], std::string("chEnc"));
+    LOGOS_ASSERT_EQ(cipher.calls[1], std::string("chDec"));
+
+    delete impl;
+}
+
+LOGOS_TEST(cipher_failure_fails_the_message_rather_than_falling_back_to_plaintext) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    delivery_test_cipher::g_methodsJson = kMethods;
+    delivery_test_cipher::g_lpHandler = [](const std::string&, const std::string&, std::string&) {
+        return false;
+    };
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_TRUE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", kCipherSpec).success);
+
+    const std::vector<uint8_t> plain = {1, 2, 3};
+    void* ud = reinterpret_cast<void*>(static_cast<uintptr_t>(delivery_test_cipher::g_userData));
+    const uint8_t* out = nullptr;
+    size_t outLen = 0;
+    LOGOS_ASSERT_TRUE(
+        asCryptoFn(delivery_test_cipher::g_encryptFn)(ud, plain.data(), plain.size(), &out, &outLen)
+        != 0);
+
+    delete impl;
+}
+
+LOGOS_TEST(channelCreate_rejects_a_cipher_target_that_lacks_the_methods) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    delivery_test_cipher::g_methodsJson = R"([{"name":"chEnc","parameters":[{"name":"only"}]}])";
+    auto* impl = createInitializedImpl(t);
+
+    StdLogosResult r = impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", kCipherSpec);
+    LOGOS_ASSERT_FALSE(r.success);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_channel_create"));
+
+    delete impl;
+}
+
+LOGOS_TEST(channelCreate_rejects_a_malformed_cipher_spec) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_FALSE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", "not json").success);
+    LOGOS_ASSERT_FALSE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", R"({"encrypt":"e"})").success);
+
+    delete impl;
+}
+
+LOGOS_TEST(channelCreate_needs_a_named_module_when_the_caller_is_unknown) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_FALSE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s",
+                            R"({"encrypt":"chEnc","decrypt":"chDec"})").success);
+
+    delete impl;
+}
+
+LOGOS_TEST(channelCreate_fails_when_the_cipher_target_cannot_be_reached) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_cipher::reset();
+    delivery_test_cipher::g_clientCreateFails = true;
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_FALSE(
+        impl->channelCreate("chan-1", "/test/1/delivery/proto", "s", kCipherSpec).success);
 
     delete impl;
 }

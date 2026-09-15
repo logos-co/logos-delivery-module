@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "mock_channel_state.h"
 #include "mock_rln_state.h"
 
 namespace delivery_test_rln {
@@ -143,8 +144,25 @@ int logosdelivery_unsubscribe(void* /*ctx*/, logosdelivery_reply onReply, void* 
     return RET_OK;
 }
 
-int logosdelivery_channel_create(void* /*ctx*/, logosdelivery_reply onReply, void* userData, const void* /*req*/) {
+// The one request struct the mock reads: the tests drive the cipher callbacks
+// the module installs here. Mirrors LogosdeliveryChannelCreateReq.
+struct MockChannelCreateReq {
+    const char* channelIdStr;
+    const char* contentTopicStr;
+    const char* senderIdStr;
+    uint64_t encryptFn;
+    uint64_t decryptFn;
+    uint64_t userData;
+};
+
+int logosdelivery_channel_create(void* /*ctx*/, logosdelivery_reply onReply, void* userData, const void* req) {
     LOGOS_CMOCK_RECORD("logosdelivery_channel_create");
+    if (req) {
+        const auto* r = static_cast<const MockChannelCreateReq*>(req);
+        delivery_test_cipher::g_encryptFn = r->encryptFn;
+        delivery_test_cipher::g_decryptFn = r->decryptFn;
+        delivery_test_cipher::g_userData = r->userData;
+    }
     replyOk("logosdelivery_channel_create", onReply, userData);
     return RET_OK;
 }

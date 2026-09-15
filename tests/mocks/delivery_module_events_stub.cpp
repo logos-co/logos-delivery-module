@@ -16,6 +16,7 @@ namespace delivery_test_events {
 NodeLifecycleEvent g_lastNodeStarted{};
 NodeLifecycleEvent g_lastNodeStopped{};
 RlnRequestEvent g_lastRlnRequest{};
+ChannelMessageLostEvent g_lastChannelMessageLost{};
 } // namespace delivery_test_events
 
 void DeliveryModuleImpl::messageSent(const std::string&, const std::string&, int64_t) {}
@@ -26,6 +27,11 @@ void DeliveryModuleImpl::connectionStateChanged(const std::string&, int64_t) {}
 void DeliveryModuleImpl::channelMessageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, int64_t) {}
 void DeliveryModuleImpl::channelMessageSent(const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::channelMessageError(const std::string&, const std::string&, const std::string&, int64_t) {}
+
+void DeliveryModuleImpl::channelMessageLost(const std::string& channelId, const std::string& payloadHash,
+                                            const std::string& reason, int64_t timestamp) {
+    delivery_test_events::g_lastChannelMessageLost = {channelId, payloadHash, reason, timestamp, true};
+}
 
 void DeliveryModuleImpl::nodeStarted(bool success, const std::string& message, int64_t timestamp) {
     delivery_test_events::g_lastNodeStarted = {success, message, timestamp, true};

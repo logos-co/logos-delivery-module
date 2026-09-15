@@ -16,6 +16,7 @@
 #include <boost/beast/core/detail/base64.hpp>
 
 #include "api_call_handler.h"
+#include "channel_cipher.h"
 #include "rln_bridge.h"
 
 // Generated at build time from metadata.json#dependencies; defines the
@@ -81,6 +82,7 @@ constexpr const char* kEventNames[] = {
     "onChannelMessageReceived",
     "onChannelMessageSent",
     "onChannelMessageError",
+    "onChannelMessageLost",
 };
 } // namespace
 
@@ -236,6 +238,7 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
 
 DeliveryModuleImpl::DeliveryModuleImpl()
     : rlnBridge(std::make_unique<RlnBridge>())
+    , cipherRelay(std::make_unique<ChannelCipherRelay>())
     , deliveryCtx(nullptr)
     , deliveryCtxHandle(nullptr)
 {
@@ -366,6 +369,13 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
                     jsonObj.value("channelId", ""),
                     jsonObj.value("requestId", ""),
                     jsonObj.value("error", ""),
+                    timestamp);
+
+            } else if (eventType == "channel_message_lost") {
+                impl->channelMessageLost(
+                    jsonObj.value("channelId", ""),
+                    jsonObj.value("payloadHash", ""),
+                    jsonObj.value("reason", ""),
                     timestamp);
 
             } else {
@@ -764,7 +774,8 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
 
 StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
                                                  const std::string& contentTopic,
-                                                 const std::string& senderId)
+                                                 const std::string& senderId,
+                                                 const std::string& cipherSpec)
 {
     fprintf(stderr, "DeliveryModuleImpl::channelCreate called with channelId: %s, contentTopic: %s\n",
             channelId.c_str(), contentTopic.c_str());
@@ -774,13 +785,30 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
         return {false, {}, "Context not initialized"};
     }
 
+    ChannelCipherSpec spec;
+    if (const std::string err = parseChannelCipherSpec(cipherSpec, spec); !err.empty()) {
+        return {false, {}, err};
+    }
+
+    uint64_t encryptFn = 0;
+    uint64_t decryptFn = 0;
+    uint64_t cipherUserData = 0;
+    if (const std::string err =
+            cipherRelay->registerChannel(channelId, spec, encryptFn, decryptFn, cipherUserData);
+        !err.empty()) {
+        return {false, {}, err};
+    }
+
     auto outcome = callApiRetValue(
         "channel_create",
         CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_channel_create, deliveryCtx,
                     LogosdeliveryChannelCreateReq{.channelIdStr = channelId.c_str(),
                                                   .contentTopicStr = contentTopic.c_str(),
-                                                  .senderIdStr = senderId.c_str()}));
+                                                  .senderIdStr = senderId.c_str(),
+                                                  .encryptFn = encryptFn,
+                                                  .decryptFn = decryptFn,
+                                                  .userData = cipherUserData}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",

@@ -21,6 +21,8 @@ logos_module(
         src/delivery_module_plugin.cpp
         src/rln_bridge.h
         src/rln_bridge.cpp
+        src/channel_cipher.h
+        src/channel_cipher.cpp
     EXTERNAL_LIBS
         logosdelivery
     INCLUDE_DIRS

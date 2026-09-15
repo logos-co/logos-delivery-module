@@ -56,6 +56,9 @@ typedef struct {
     const char* channelIdStr;
     const char* contentTopicStr;
     const char* senderIdStr;
+    uint64_t encryptFn;
+    uint64_t decryptFn;
+    uint64_t userData;
 } LogosdeliveryChannelCreateReq;
 typedef struct {
     const char* channelIdStr;

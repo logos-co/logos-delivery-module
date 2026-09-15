@@ -10,6 +10,7 @@
 #include <logos_module_context.h>
 #include <logos_result.h>
 
+class ChannelCipherRelay;
 class RlnBridge;
 
 // Everything the delivery library no longer knows about RLN. Read out of
@@ -216,14 +217,40 @@ public:
      * Persisted channel state survives @ref channelClose, so re-creating a
      * channel with the same id restores it.
      *
+     * `cipherSpec` names the encrypt/decrypt method pair that seals this
+     * channel, and is fixed for its life. An empty string leaves the channel
+     * plaintext on the wire; otherwise it is a JSON object:
+     *
+     * @code{.json}
+     * { "encrypt": "channelEncrypt", "decrypt": "channelDecrypt" }
+     * @endcode
+     *
+     * This module holds no cipher and no key of its own: the two methods are
+     * called on the module that creates the channel, which is the only module
+     * allowed to be its cipher target (`module` may name it explicitly, but it
+     * must match the caller). Each call carries the channel id and a base64
+     * payload and must answer with the transformed payload, also base64 —
+     * `encrypt(channelId, payloadB64) -> payloadB64`. An empty answer, a
+     * failure or a timeout fails the message; nothing falls back to plaintext.
+     *
+     * The cipher covers the whole SDS message, repairs included, so no routing
+     * metadata reaches the wire. It runs on the delivery library's event loop
+     * and blocks it for the round trip, so the handler must be quick, must not
+     * call back into this module, and must be serviced on a thread that is not
+     * itself waiting on this module.
+     *
+     * A failed decrypt is reported as @ref channelMessageLost.
+     *
      * @param channelId Application-chosen channel identifier.
      * @param contentTopic Content topic the channel communicates on.
      * @param senderId This participant's SDS (Scalable Data Sync) sender identifier.
+     * @param cipherSpec Cipher target JSON, or empty for a plaintext channel.
      * @return Success with the channel id, or error details.
      */
     StdLogosResult channelCreate(const std::string& channelId,
                                  const std::string& contentTopic,
-                                 const std::string& senderId);
+                                 const std::string& senderId,
+                                 const std::string& cipherSpec);
 
     /**
      * @brief Checks whether a reliable channel is currently open.
@@ -449,6 +476,16 @@ logos_events:
     /** @brief Emitted when a @ref channelSend finalises with a failed segment. */
     void channelMessageError(const std::string& channelId, const std::string& requestId, const std::string& error, int64_t timestamp);
 
+    /**
+     * @brief Emitted when an inbound channel message could not be delivered.
+     *
+     * `payloadHash` is the hex hash of the payload that was dropped and
+     * `reason` says why. On an encrypted channel this is how a failed decrypt
+     * surfaces — a key the two participants do not share shows up here rather
+     * than as silence.
+     */
+    void channelMessageLost(const std::string& channelId, const std::string& payloadHash, const std::string& reason, int64_t timestamp);
+
     /** @brief Emitted when @ref start finishes; `message` carries the reason when `success` is false. */
     void nodeStarted(bool success, const std::string& message, int64_t timestamp);
 
@@ -489,6 +526,10 @@ private:
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
     // and started by bringUpRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
+
+    // Per-channel cipher targets (src/channel_cipher.h). Outlives the delivery
+    // context, which the destructor tears down before any member is released.
+    std::unique_ptr<ChannelCipherRelay> cipherRelay;
 
     // Everything the delivery library no longer knows about RLN (see
     // DeliveryRlnConfig).

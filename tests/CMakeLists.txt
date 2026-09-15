@@ -10,6 +10,7 @@ logos_test(
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
         ../src/rln_bridge.cpp
+        ../src/channel_cipher.cpp
         mocks/delivery_module_events_stub.cpp
     TEST_SOURCES
         main.cpp
@@ -40,6 +41,7 @@ if(LIBLOGOSDELIVERY_PATH)
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
             ../src/rln_bridge.cpp
+        ../src/channel_cipher.cpp
             mocks/delivery_module_events_stub.cpp
         TEST_SOURCES
             main.cpp

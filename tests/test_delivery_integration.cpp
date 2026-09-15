@@ -257,7 +257,7 @@ LOGOS_TEST(integration_channel_lifecycle) {
     LOGOS_ASSERT_EQ(missing.value.get<std::string>(), std::string("false"));
 
     // Create returns the channel id; the channel then exists.
-    StdLogosResult created = g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId);
+    StdLogosResult created = g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId, "");
     LOGOS_ASSERT_TRUE(created.success);
     LOGOS_ASSERT_EQ(created.value.get<std::string>(), std::string(kTestChannelId));
 
@@ -280,7 +280,7 @@ LOGOS_TEST(integration_channel_lifecycle) {
 LOGOS_TEST(integration_channel_send_returns_request_id) {
     ensureStarted();
 
-    LOGOS_ASSERT_TRUE(g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId).success);
+    LOGOS_ASSERT_TRUE(g_impl->channelCreate(kTestChannelId, kTestChannelTopic, kTestSenderId, "").success);
 
     std::string msg = "hello from channel integration test";
     std::vector<uint8_t> payload(msg.begin(), msg.end());

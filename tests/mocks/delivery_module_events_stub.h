@@ -36,6 +36,17 @@ struct RlnRequestEvent {
 
 extern RlnRequestEvent g_lastRlnRequest;
 
+// Last channelMessageLost payload; `fired` stays false until one is emitted.
+struct ChannelMessageLostEvent {
+    std::string channelId;
+    std::string payloadHash;
+    std::string reason;
+    int64_t timestamp = 0;
+    bool fired = false;
+};
+
+extern ChannelMessageLostEvent g_lastChannelMessageLost;
+
 inline void resetNodeLifecycleEvents() {
     g_lastNodeStarted = NodeLifecycleEvent{};
     g_lastNodeStopped = NodeLifecycleEvent{};
@@ -43,6 +54,10 @@ inline void resetNodeLifecycleEvents() {
 
 inline void resetRlnRequestEvent() {
     g_lastRlnRequest = RlnRequestEvent{};
+}
+
+inline void resetChannelMessageLostEvent() {
+    g_lastChannelMessageLost = ChannelMessageLostEvent{};
 }
 
 } // namespace delivery_test_events
