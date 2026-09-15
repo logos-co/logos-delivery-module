@@ -6,11 +6,14 @@
 extern "C" {
 #endif
 
-/* One typed callback per RLN operation the node performs. Each dispatches and
-   returns immediately; the call completes later via logosdelivery_rln_response
-   with the same req_id. Scalar args are passed directly; complex args (proof)
-   and every result are JSON strings. All strings are borrowed for the duration
-   of the call — copy before returning.
+/* "Host" below is the application embedding this library over its C ABI and
+   installing the plugin — logos-delivery-module in a Logos Core deployment.
+
+   One typed callback per RLN operation the node performs. Each dispatches and
+   returns immediately; the plugin replies to logosdelivery later via
+   logosdelivery_rln_response with the same req_id. Scalar args are passed
+   directly; complex args (proof) and every result are JSON strings. All strings
+   are borrowed for the duration of the call — copy before returning.
 
    The plugin is implementation-agnostic: the library never names a membership,
    a registry or an epoch size, and never starts or configures the backend. The
@@ -50,6 +53,13 @@ typedef struct {
    fails all in-flight requests. Returns 0 on success. */
 int logosdelivery_rln_set_plugin(const LogosDeliveryRlnPlugin* plugin,
                                  void* user_data);
+
+/* This is a temporary config option. Needed to phase in RLN on an existing
+   network. Validating message proofs will be disabled while proof generation
+   and attaching RLN proofs is still enabled. Call before node creation, the
+   value is read once when the node is created. Defaults to 0 (validation
+   enabled). Returns 0 on success. */
+int logosdelivery_rln_disable_validation(int disable);
 
 /* The host application sends the response on completion of an outbound call, same req_id. Thread-safe;
    result_json is copied before return. */
