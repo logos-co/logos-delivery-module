@@ -5,12 +5,17 @@
 // Requires liblogosdelivery to be available in ../lib at build time.
 // Skipped automatically when liblogosdelivery is not found.
 
+#include <unistd.h>
+
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
+#include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
 
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -362,18 +367,22 @@ static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
 // this test observes the chain through the rln*Request events and verifies an
 // external response is rejected as a duplicate.
 //
-// The node config carries no RLN keys at all: RLN is configured through the
-// module's own configureRln, and createNode stays a pass-through.
+// The node config carries no RLN keys at all: RLN comes from the network
+// preset, and createNode stays a pass-through to the library otherwise. This
+// config names no preset, so it resolves the table's "" entry below.
 static const char* kRlnNodeConfig = R"({
   "logLevel": "DEBUG",
   "relay": true,
   "numShardsInNetwork": 8
 })";
 
-static const char* kRlnModuleConfig = R"({
-  "registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
-  "rln-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
-  "epoch-size-sec": 600
+static const char* kRlnPresetTable = R"({
+  "": {
+    "enabled": true,
+    "registry-id": "logos:testnet:0000000000000000000000000000000000000000000000000000000000000000",
+    "rln-identifier": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "epoch-size-sec": 600
+  }
 })";
 
 LOGOS_TEST(integration_rln_start_chain_round_trip) {
@@ -395,13 +404,28 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
     // fires, and the test takes the skip path below.
     const bool live = std::getenv("LOGOS_DELIVERY_RLN_LIVE") != nullptr;
 
-    DeliveryModuleImpl impl;
-    // configureRln installs the plugin, enables the in-process bridge and
-    // starts the RLN module; a module start failure fails the call, so this
-    // covers the auto-enable and self-start wiring.
+    // An enabled preset installs the plugin, brings the in-process bridge up
+    // and starts the RLN module, so this covers the auto-enable and self-start
+    // wiring the way a real deployment reaches it.
+    std::filesystem::path presetsPath;
     if (live) {
-        LOGOS_ASSERT_TRUE(impl.configureRln(kRlnModuleConfig).success);
+        presetsPath = std::filesystem::temp_directory_path() / "delivery-rln-presets-integration.json";
+        std::ofstream(presetsPath) << kRlnPresetTable;
+        ::setenv(kRlnPresetsEnvVar, presetsPath.c_str(), 1);
     }
+    struct PresetsCleanup {
+        const std::filesystem::path& path;
+        ~PresetsCleanup() {
+            if (path.empty()) {
+                return;
+            }
+            ::unsetenv(kRlnPresetsEnvVar);
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    } presetsCleanup{presetsPath};
+
+    DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(live ? kRlnNodeConfig : kMinimalConfig).success);
     LOGOS_ASSERT_TRUE(impl.start().success);
 

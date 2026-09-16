@@ -3,8 +3,18 @@
 // Mocks invoke callbacks synchronously so the semaphore inside api_call_handler.h
 // is released before try_acquire_for starts waiting.
 
+#include <unistd.h>
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <string>
+#include <thread>
+
 #include <logos_test.h>
 #include "delivery_module_plugin.h"
+#include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
 #include "mocks/mock_rln_state.h"
 
@@ -18,17 +28,58 @@ static DeliveryModuleImpl* createInitializedImpl(LogosTestContext& t) {
     return impl;
 }
 
-// RLN lives behind its own method, never in the node config. Without a
-// framework context the bridge cannot come up, which is not fatal — the plugin
-// is still installed.
-static constexpr const char* kRlnCfg =
-    R"({"registry-id":"reg","rln-identifier":"rln-id","epoch-size-sec":600})";
+// RLN is never in the node config and has no method of its own: it comes from
+// the network preset. This is what a deployment's own presets file looks like,
+// staged and pointed at by LOGOS_DELIVERY_RLN_PRESETS.
+static constexpr const char* kRlnPresetTable = R"({
+  "logos.test": {
+    "enabled": true,
+    "registry-id": "reg",
+    "rln-identifier": "rln-id",
+    "epoch-size-sec": 600
+  }
+})";
 
+static constexpr const char* kRlnNodeCfg = R"({"logLevel":"INFO","preset":"logos.test"})";
+
+// Stages a presets file and points the env var at it for this scope.
+class RlnPresetsFile {
+public:
+    explicit RlnPresetsFile(const char* table) {
+        path_ = std::filesystem::temp_directory_path()
+                / ("delivery-rln-presets-" + std::to_string(::getpid()) + ".json");
+        std::ofstream(path_) << table;
+        ::setenv(kRlnPresetsEnvVar, path_.c_str(), 1);
+    }
+    ~RlnPresetsFile() {
+        ::unsetenv(kRlnPresetsEnvVar);
+        std::error_code ec;
+        std::filesystem::remove(path_, ec);
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+// Bring-up runs off the createNode thread, so settle before asserting on it.
+static std::string settledRlnState(DeliveryModuleImpl& impl) {
+    for (int i = 0; i < 500; ++i) {
+        const std::string state = impl.rlnState().value.value("state", "");
+        if (state != "Initializing") {
+            return state;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return "Initializing";
+}
+
+// Without a framework context the bridge cannot come up, so bring-up settles
+// on Failed. The plugin is installed synchronously either way, which is what
+// the RLN callback tests below need.
 static DeliveryModuleImpl* createRlnImpl(LogosTestContext& t) {
     t.mockCFunction("logosdelivery_create_node").returns(1);
     auto* impl = new DeliveryModuleImpl();
-    LOGOS_ASSERT_TRUE(impl->configureRln(kRlnCfg).success);
-    LOGOS_ASSERT_TRUE(impl->createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT_TRUE(impl->createNode(kRlnNodeCfg).success);
     return impl;
 }
 
@@ -494,6 +545,7 @@ LOGOS_TEST(collectOpenMetricsText_returns_metrics_text_verbatim) {
 LOGOS_TEST(createNode_installs_rln_plugin) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTable);
     auto* impl = createRlnImpl(t);
 
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_rln_set_plugin"));
@@ -513,6 +565,7 @@ LOGOS_TEST(rln_generate_proof_callback_emits_typed_event_with_verbatim_args) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     delivery_test_events::resetRlnRequestEvent();
+    RlnPresetsFile presets(kRlnPresetTable);
     auto* impl = createRlnImpl(t);
 
     delivery_test_rln::g_callbacks.generate_proof(7, "ab01", 1700000000,
@@ -533,6 +586,7 @@ LOGOS_TEST(rln_generate_proof_callback_emits_typed_event_with_verbatim_args) {
 LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTable);
     auto* impl = createRlnImpl(t);
     void* ud = delivery_test_rln::g_userData;
 
@@ -578,36 +632,89 @@ LOGOS_TEST(rln_callback_slots_route_to_their_events) {
     delete impl;
 }
 
-LOGOS_TEST(createNode_without_configureRln_installs_no_plugin) {
+LOGOS_TEST(createNode_without_an_rln_preset_installs_no_plugin) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     auto* impl = createInitializedImpl(t);
 
     LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_rln_set_plugin"));
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
+    LOGOS_ASSERT_EQ(impl->rlnState().value.value("state", ""), std::string("Disabled"));
 
     delete impl;
 }
 
-LOGOS_TEST(configureRln_rejects_an_incomplete_config) {
+// The shipped presets all carry RLN off, so naming one must not turn it on.
+LOGOS_TEST(builtin_presets_leave_rln_off) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_create_node").returns(1);
 
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_FALSE(impl.configureRln("not json").success);
-    LOGOS_ASSERT_FALSE(impl.configureRln(R"({"rln-identifier":"rln-id"})").success);
-    LOGOS_ASSERT_FALSE(impl.configureRln(R"({"registry-id":"reg"})").success);
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.test"})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
+    LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
+}
+
+LOGOS_TEST(an_rln_preset_installs_the_plugin_and_reports_bring_up) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    delivery_test_events::resetRlnStateEvent();
+    RlnPresetsFile presets(kRlnPresetTable);
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+
+    // No framework context in a unit test, so the bridge cannot come up.
+    LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
+    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnState.state, std::string("Failed"));
+    // Initializing, then Failed.
+    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnState.transitions, 2);
+}
+
+// A presets file that cannot be used fails node creation rather than quietly
+// producing a node without the rate limiting its deployment expects.
+LOGOS_TEST(a_broken_presets_file_fails_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(R"({"logos.test": {"enabled": true, "registry-id": "reg"}})");
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    StdLogosResult r = impl.createNode(kRlnNodeCfg);
+    LOGOS_ASSERT_FALSE(r.success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
 }
 
-LOGOS_TEST(configureRln_must_precede_createNode) {
-    auto t = LogosTestContext("delivery_module");
-    delivery_test_rln::resetRlnMockState();
-    auto* impl = createInitializedImpl(t);
+LOGOS_TEST(preset_names_normalise_across_spellings) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
 
-    LOGOS_ASSERT_FALSE(impl->configureRln(kRlnCfg).success);
+    LOGOS_ASSERT_EQ(normalizeRlnPresetName("logos.test"), std::string("logostest"));
+    LOGOS_ASSERT_EQ(normalizeRlnPresetName("LogosTest"), std::string("logostest"));
+    LOGOS_ASSERT_EQ(table.count("logostest"), static_cast<size_t>(1));
+    LOGOS_ASSERT_TRUE(table["logostest"].enabled);
+    LOGOS_ASSERT_EQ(table["logostest"].epochSizeSec, static_cast<uint64_t>(600));
+}
 
-    delete impl;
+// The RLN module rejects a start config without a positive epoch size and has
+// no default, so an enabled preset missing one is caught here instead.
+LOGOS_TEST(preset_table_rejects_incomplete_enabled_entries) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable("not json", table).empty());
+    LOGOS_ASSERT_FALSE(
+        parseRlnPresetTable(R"({"logos.test":{"enabled":true,"rln-identifier":"x","epoch-size-sec":1}})", table)
+            .empty());
+    LOGOS_ASSERT_FALSE(
+        parseRlnPresetTable(R"({"logos.test":{"enabled":true,"registry-id":"r","epoch-size-sec":1}})", table)
+            .empty());
+    LOGOS_ASSERT_FALSE(
+        parseRlnPresetTable(R"({"logos.test":{"enabled":true,"registry-id":"r","rln-identifier":"x"}})", table)
+            .empty());
+    // A disabled entry needs none of them.
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(R"({"logos.test":{"enabled":false}})", table).empty());
 }
 
 LOGOS_TEST(rlnRespond_fails_without_createNode) {
@@ -665,6 +772,7 @@ LOGOS_TEST(rlnRespond_passes_negative_req_id_bit_exactly) {
 LOGOS_TEST(destructor_clears_rln_callbacks) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTable);
     auto* impl = createRlnImpl(t);
     LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
 

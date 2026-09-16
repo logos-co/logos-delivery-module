@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <logos_module_context.h>
@@ -12,14 +13,15 @@
 
 class RlnBridge;
 
-// Everything the delivery library no longer knows about RLN. Read out of
-// createNode's config and stripped from it before the config reaches the
-// library, which rejects these keys.
+// Everything the delivery library no longer knows about RLN. Resolved from
+// the createNode config's network preset (see src/rln_presets.h), never
+// carried in the config itself.
 struct DeliveryRlnConfig {
     bool enabled = false;
     std::string registryId;
     std::string rlnIdentifier;
     uint64_t epochSizeSec = 0;
+    uint64_t maxEpochGap = 0;
 };
 
 /**
@@ -349,38 +351,34 @@ public:
      * pass its reply back unchanged. The events keep emitting for
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
-     * call any time before @ref start. @ref configureRln does this
+     * call any time before @ref start. A preset that enables RLN does this
      * automatically. Calling it directly is mainly for test purposes.
      */
     StdLogosResult rlnBridgeEnable();
 
     /**
-     * @brief Configures RLN for this module and installs the delivery
-     *        library's RLN plugin.
+     * @brief Where this node's RLN stands.
      *
-     * RLN is this module's business, not the delivery library's: the
-     * library's plugin is implementation-agnostic — it carries no
-     * configuration, names no registry or membership, and does not start the
-     * backend. Everything it lacks is supplied from here.
+     * RLN is not configured by a caller: @ref createNode reads the network
+     * `preset` and brings RLN up for deployments whose preset enables it.
+     * The chain-touching part of that runs off the @ref createNode thread, so
+     * a node is created before RLN is usable and this reports the progress.
      *
-     * Call before @ref createNode: an installed plugin is what makes the
-     * library mount RLN over it, and it reads that at node creation. Without
-     * this call the node comes up with RLN off, and @ref createNode stays a
-     * plain pass-through to the library.
+     * | State | Meaning |
+     * |---|---|
+     * | `Disabled` | No node yet, or the node's preset carries no RLN |
+     * | `Initializing` | Plugin installed, backend still coming up |
+     * | `Ready` | The in-process bridge answers requests |
+     * | `Failed` | Bring-up failed; `message` carries the reason |
      *
-     * Enables the in-process bridge (see @ref rlnBridgeEnable) and starts the
-     * co-loaded `liblogos_rln_module`; a start failure fails this call. A
-     * bridge that cannot come up is not fatal — the `rln*Request` events and
-     * @ref rlnRespond remain — but nothing starts the backend on that path.
+     * `Ready` means the backend started and the bridge answers. It does not
+     * promise the RLN module's valid-root window is warm — that is a
+     * background refresh the module does not currently expose.
      *
-     * @param cfgJson Object with `registry-id` (CAIP-10 account id of the
-     *        registry deployment), `rln-identifier` (32-byte hex, per
-     *        application) and optional `epoch-size-sec`.
-     * @return On success the value carries `{"servedInProcess": bool}` —
-     *         `false` means the bridge is unavailable and an external
-     *         responder must answer via @ref rlnRespond.
+     * @return Value `{"state": "<state>", "message": "<detail>"}`.
+     * @see rlnStateChanged for the same transitions as an event.
      */
-    StdLogosResult configureRln(const std::string& cfgJson);
+    StdLogosResult rlnState();
 
     std::string name() const { return "delivery_module"; }
 
@@ -456,6 +454,15 @@ logos_events:
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
     /**
+     * @brief Emitted on every RLN bring-up transition.
+     *
+     * `state` is one of `Disabled`, `Initializing`, `Ready` or `Failed`, and
+     * `message` carries the reason on `Failed`. See @ref rlnState for what
+     * each one means and when they occur.
+     */
+    void rlnStateChanged(const std::string& state, const std::string& message, int64_t timestamp);
+
+    /**
      * @brief RLN request events, one per ABI function
      * (`liblogosdelivery_rln.h`).
      *
@@ -485,6 +492,48 @@ private:
     // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
     // path) funnel through here. Returns an error string, or empty.
     std::string bringUpRlnBridge();
+
+    /**
+     * @brief Installs the delivery library's RLN plugin for `cfg`.
+     *
+     * RLN is this module's business, not the delivery library's: the
+     * library's plugin is implementation-agnostic — it carries no
+     * configuration, names no registry or membership, and does not start the
+     * backend. Everything it lacks is supplied from here.
+     *
+     * Runs before the library creates the node — an installed plugin is what
+     * makes it mount RLN, and it reads that at node creation — so this half
+     * of RLN configuration cannot be deferred. It is also purely local.
+     *
+     * @return Empty on success, a description of the problem otherwise.
+     */
+    std::string installRlnPlugin(const DeliveryRlnConfig& cfg);
+
+    /**
+     * @brief Brings the bridge up and starts the co-loaded RLN module.
+     *
+     * The other half of RLN configuration, split from @ref installRlnPlugin
+     * because this one reaches the chain: @ref createNode runs it on its own
+     * thread so node creation does not wait for a registry round trip.
+     *
+     * @return Empty on success, a description of the problem otherwise.
+     */
+    std::string startRlnBackend();
+
+    // Publishes an RLN state transition: stores it and emits
+    // rlnStateChanged. A repeat of the current state is not re-emitted.
+    void setRlnState(const char* state, const std::string& message);
+
+    // Joins a finished bring-up thread, if any. Call under createNodeMutex.
+    void joinRlnBringUp();
+
+    // Guards rlnStateName / rlnStateMessage against the bring-up thread.
+    mutable std::mutex rlnStateMutex;
+    std::string rlnStateName{"Disabled"};
+    std::string rlnStateMessage;
+
+    // Runs startRlnBackend() for a node whose preset enables RLN.
+    std::thread rlnBringUpThread;
 
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
     // and started by bringUpRlnBridge().

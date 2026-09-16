@@ -36,6 +36,16 @@ struct RlnRequestEvent {
 
 extern RlnRequestEvent g_lastRlnRequest;
 
+// Last rlnStateChanged payload; `transitions` counts every emission, so a
+// test can tell a repeated state from a re-entered one.
+struct RlnStateEvent {
+    std::string state;
+    std::string message;
+    int transitions = 0;
+};
+
+extern RlnStateEvent g_lastRlnState;
+
 inline void resetNodeLifecycleEvents() {
     g_lastNodeStarted = NodeLifecycleEvent{};
     g_lastNodeStopped = NodeLifecycleEvent{};
@@ -43,6 +53,10 @@ inline void resetNodeLifecycleEvents() {
 
 inline void resetRlnRequestEvent() {
     g_lastRlnRequest = RlnRequestEvent{};
+}
+
+inline void resetRlnStateEvent() {
+    g_lastRlnState = RlnStateEvent{};
 }
 
 } // namespace delivery_test_events

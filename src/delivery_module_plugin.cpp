@@ -17,6 +17,7 @@
 
 #include "api_call_handler.h"
 #include "rln_bridge.h"
+#include "rln_presets.h"
 
 // Generated at build time from metadata.json#dependencies; defines the
 // LogosModules aggregate behind LogosModuleContext::modules().
@@ -265,6 +266,10 @@ StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
+    // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
+    // run while it is still in flight.
+    joinRlnBringUp();
+
     if (deliveryCtxHandle) {
         // Clear the RLN surface first: fails all in-flight RLN requests so no
         // new RLN callback is dispatched into this object during destruction.
@@ -504,6 +509,48 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
+    joinRlnBringUp();
+
+    std::string presetName;
+    {
+        nlohmann::json cfgObj = nlohmann::json::parse(cfg, nullptr, /*allow_exceptions=*/false);
+        if (cfgObj.is_object()) {
+            if (auto k = findKey(cfgObj, {"preset"}); k && cfgObj[*k].is_string()) {
+                presetName = cfgObj[*k].get<std::string>();
+            }
+        }
+    }
+
+    // A named presets file that cannot be used is fatal: the caller asked for
+    // a deployment this node cannot reproduce, and coming up without RLN
+    // would look like success.
+    std::string presetError;
+    const RlnPresetEntry rlnPreset = resolveRlnPreset(presetName, presetError);
+    if (!presetError.empty()) {
+        return {false, {}, presetError};
+    }
+
+    if (rlnPreset.enabled) {
+        DeliveryRlnConfig fromPreset;
+        fromPreset.registryId = rlnPreset.registryId;
+        fromPreset.rlnIdentifier = rlnPreset.rlnIdentifier;
+        fromPreset.epochSizeSec = rlnPreset.epochSizeSec;
+        fromPreset.maxEpochGap = rlnPreset.maxEpochGap;
+        if (std::string failure = installRlnPlugin(fromPreset); !failure.empty()) {
+            return {false, {}, failure};
+        }
+        setRlnState("Initializing", {});
+    }
+
+    auto abortRln = [this, &rlnPreset]() {
+        if (!rlnPreset.enabled) {
+            return;
+        }
+        logosdelivery_rln_set_plugin(nullptr, nullptr);
+        rlnConfig = DeliveryRlnConfig{};
+        setRlnState("Disabled", {});
+    };
+
     // logosdelivery_ctx_create packs the request struct and turns the decimal
     // context address the FFI reports back into a LogosDeliveryCtx handle.
     struct CreateContext {
@@ -568,6 +615,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts.erase(callbackKey);
 
         fprintf(stderr, "DeliveryModuleImpl: Failed to initiate createNode\n");
+        abortRln();
         return {false, {}, "Failed to initiate createNode"};
     }
 
@@ -578,6 +626,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts.erase(callbackKey);
 
         fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
+        abortRln();
         return {false, {}, "Timeout waiting for createNode callback"};
     }
 
@@ -592,6 +641,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
 
         fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
+        abortRln();
         return {false, {}, "Failed to create Delivery context"};
     }
 
@@ -604,6 +654,17 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
             fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
         }
+    }
+
+    if (rlnPreset.enabled) {
+        rlnBringUpThread = std::thread([this] {
+            const std::string failure = startRlnBackend();
+            if (failure.empty()) {
+                setRlnState("Ready", {});
+            } else {
+                setRlnState("Failed", failure);
+            }
+        });
     }
 
     return {true, {}};
@@ -637,7 +698,9 @@ StdLogosResult DeliveryModuleImpl::stop()
         return {false, {}, "failed to initiate stop"};
     }
 
-    // This module started the RLN backend, so it stops it too.
+    // This module started the RLN backend, so it stops it too. Stopping one
+    // that is still starting would race the bring-up thread.
+    joinRlnBringUp();
     if (rlnConfig.enabled && rlnBridge->enabled()) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
@@ -950,39 +1013,29 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     return outcome.value.get<std::string>();
 }
 
-StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
+StdLogosResult DeliveryModuleImpl::rlnState()
 {
-    if (deliveryCtx) {
-        return {false, {}, "configureRln must be called before createNode"};
-    }
+    std::lock_guard<std::mutex> lock(rlnStateMutex);
+    return {true, nlohmann::json{{"state", rlnStateName}, {"message", rlnStateMessage}}};
+}
 
-    nlohmann::json cfgObj = nlohmann::json::parse(cfgJson, nullptr, /*allow_exceptions=*/false);
-    if (!cfgObj.is_object()) {
-        return {false, {}, "configureRln cfg is not a JSON object"};
+void DeliveryModuleImpl::setRlnState(const char* state, const std::string& message)
+{
+    {
+        std::lock_guard<std::mutex> lock(rlnStateMutex);
+        if (rlnStateName == state && rlnStateMessage == message) {
+            return;
+        }
+        rlnStateName = state;
+        rlnStateMessage = message;
     }
+    fprintf(stderr, "DeliveryModuleImpl: rln %s%s%s\n", state,
+            message.empty() ? "" : ": ", message.c_str());
+    rlnStateChanged(state, message, currentTimestampNs());
+}
 
-    DeliveryRlnConfig parsed;
-    if (auto k = findKey(cfgObj, {"registryid", "registry-id"});
-        k && cfgObj[*k].is_string()) {
-        parsed.registryId = cfgObj[*k].get<std::string>();
-    }
-    if (auto k = findKey(cfgObj, {"rlnidentifier", "rln-identifier"});
-        k && cfgObj[*k].is_string()) {
-        parsed.rlnIdentifier = cfgObj[*k].get<std::string>();
-    }
-    if (auto k = findKey(cfgObj, {"epochsizesec", "epoch-size-sec"});
-        k && cfgObj[*k].is_number_unsigned()) {
-        parsed.epochSizeSec = cfgObj[*k].get<uint64_t>();
-    }
-    if (parsed.registryId.empty()) {
-        return {false, {}, "configureRln needs registry-id"};
-    }
-    if (parsed.rlnIdentifier.empty()) {
-        return {false, {}, "configureRln needs rln-identifier"};
-    }
-    parsed.enabled = true;
-    rlnConfig = parsed;
-
+std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
+{
     // The setter is process-global: one delivery module instance per process.
     static const LogosDeliveryRlnPlugin rlnPlugin = {
         .get_membership_state = rln_get_membership_state_callback,
@@ -990,22 +1043,25 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
         .generate_proof = rln_generate_proof_callback,
         .validate_proof = rln_validate_proof_callback,
     };
+
+    rlnConfig = cfg;
+    rlnConfig.enabled = true;
     if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
         rlnConfig = DeliveryRlnConfig{};
-        return {false, {}, "failed to install the RLN plugin"};
+        return "failed to install the RLN plugin";
     }
+    return {};
+}
 
+std::string DeliveryModuleImpl::startRlnBackend()
+{
     // The in-process bridge is one way to answer; the rln*Request events plus
     // rlnRespond are the other, so a bridge that cannot come up is not fatal.
     // Only a bridge that IS up starts the backend, because only it can reach
     // the RLN module.
     const std::string failure = bringUpRlnBridge();
     if (!failure.empty()) {
-        fprintf(stderr,
-                "DeliveryModuleImpl: rln bridge unavailable (%s); answering falls "
-                "to rlnRespond\n",
-                failure.c_str());
-        return {true, nlohmann::json{{"servedInProcess", false}}};
+        return "rln bridge unavailable (" + failure + "); answering falls to rlnRespond";
     }
 
     // The delivery library no longer starts the backend, so this module does:
@@ -1015,17 +1071,21 @@ StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
     if (rlnConfig.epochSizeSec != 0) {
         startCfg["epoch_size_sec"] = rlnConfig.epochSizeSec;
     }
+    if (rlnConfig.maxEpochGap != 0) {
+        startCfg["max_epoch_gap"] = rlnConfig.maxEpochGap;
+    }
     const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
     if (!startFailure.empty()) {
-        // An installed plugin is what makes the library mount RLN, so leaving
-        // it behind would give the next createNode a node whose backend never
-        // started: every inbound RLN message Ignored, every send failing.
-        logosdelivery_rln_set_plugin(nullptr, nullptr);
-        rlnConfig = DeliveryRlnConfig{};
-        return {false, {}, "rln module start failed: " + startFailure};
+        return "rln module start failed: " + startFailure;
     }
-    fprintf(stderr, "DeliveryModuleImpl: rln served in-process\n");
-    return {true, nlohmann::json{{"servedInProcess", true}}};
+    return {};
+}
+
+void DeliveryModuleImpl::joinRlnBringUp()
+{
+    if (rlnBringUpThread.joinable()) {
+        rlnBringUpThread.join();
+    }
 }
 
 StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)

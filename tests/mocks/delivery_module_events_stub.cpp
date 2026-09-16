@@ -16,6 +16,7 @@ namespace delivery_test_events {
 NodeLifecycleEvent g_lastNodeStarted{};
 NodeLifecycleEvent g_lastNodeStopped{};
 RlnRequestEvent g_lastRlnRequest{};
+RlnStateEvent g_lastRlnState{};
 } // namespace delivery_test_events
 
 void DeliveryModuleImpl::messageSent(const std::string&, const std::string&, int64_t) {}
@@ -32,6 +33,12 @@ void DeliveryModuleImpl::nodeStarted(bool success, const std::string& message, i
 }
 void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, int64_t timestamp) {
     delivery_test_events::g_lastNodeStopped = {success, message, timestamp, true};
+}
+
+void DeliveryModuleImpl::rlnStateChanged(const std::string& state, const std::string& message, int64_t) {
+    delivery_test_events::g_lastRlnState.state = state;
+    delivery_test_events::g_lastRlnState.message = message;
+    delivery_test_events::g_lastRlnState.transitions++;
 }
 
 void DeliveryModuleImpl::dispatchRlnGetMembershipStateRequestEvent(int64_t reqId, const std::string& registryId,

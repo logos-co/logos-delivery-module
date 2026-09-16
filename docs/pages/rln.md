@@ -5,7 +5,7 @@ asks an external RLN module for every RLN operation. Its plugin is
 implementation-agnostic: it never names a registry or a membership, carries
 no configuration and never starts the backend. All of that lives here. This
 module answers those requests in-process: `src/rln_bridge.cpp` adds the
-registry id and rln identifier from `configureRln`, calls the co-loaded
+registry id and rln identifier from the node's preset, calls the co-loaded
 `liblogos_rln_module` and feeds each reply back unchanged. Every request is
 also emitted as an `rln*Request` event for observability; `rlnRespond`
 exists to answer a request from outside, but on a bridge-enabled node the
@@ -16,27 +16,25 @@ delivery library, not modelled here. The only replies the bridge fabricates
 are transport failures. If nothing answers a request at all, the library
 times it out itself and everything non-RLN keeps working.
 
-## Configuring a node for RLN testing
+## Turning RLN on
 
-RLN has its own module method, `configureRln`, called before `createNode`.
-It never rides the node config: `createNode` is a pass-through to the
-library, which knows nothing about RLN beyond an installed plugin.
+**There is no RLN method to call.** RLN comes from the network `preset` in
+the `createNode` config, because every value it needs — the registry, the
+epoch size, the application identifier — is a property of the deployment
+rather than of the caller. A client picks a network and gets whatever rate
+limiting that network runs.
 
-```json
-{
-  "registry-id": "logos:testnet:<64 hex chars — the registration program's config account>",
-  "rln-identifier": "<exactly 64 hex chars — validated as 32 bytes>",
-  "epoch-size-sec": 120
-}
-```
+Every shipped preset has RLN **off** (see [`networks.md`](./networks.md)).
 
-- Installing the plugin is what makes the library mount RLN over it, and it
-  reads that at node creation — hence the ordering. Without the call the
-  node comes up with RLN off.
+- Installing the library's RLN plugin is what makes it mount RLN, and it
+  reads that at node creation, so `createNode` does it before handing the
+  config to the library.
+- Bringing the backend up reaches the chain, so `createNode` runs that on its
+  own thread and returns without waiting. Follow it with `rlnState` or the
+  `rlnStateChanged` event: `Disabled` → `Initializing` → `Ready` | `Failed`.
 - This module starts `liblogos_rln_module` itself; the library no longer
-  does. A start failure fails `configureRln`. A bridge that cannot come up
-  is not fatal: the `rln*Request` events plus `rlnRespond` remain, but
-  nothing starts the backend on that path.
+  does. A bridge that cannot come up is not fatal: the `rln*Request` events
+  plus `rlnRespond` remain, but nothing starts the backend on that path.
 - `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the
   host auto-loads it along with its own deps (`liblogos_lez_rln_module`,
   `lez_core`).
@@ -46,6 +44,39 @@ library, which knows nothing about RLN beyond an installed plugin.
   RLN module, not through this library or its plugin.
   Without one (e.g. no chain), `start` fails with the RLN module's own
   error carried verbatim into `nodeStarted`.
+
+`Ready` means the backend started and the bridge answers. It does not mean
+the RLN module's valid-root window is warm — that is a background refresh
+the RLN module does not currently expose a probe for.
+
+### Presets for a test or local deployment
+
+`LOGOS_DELIVERY_RLN_PRESETS` names a JSON file whose entries are merged over
+the built-in table, which is how a rig points a node at its own registry
+without any public API for it:
+
+```json
+{
+  "": {
+    "enabled": true,
+    "registry-id": "logos:testnet:<64 hex chars — the registration program's config account>",
+    "rln-identifier": "<exactly 64 hex chars — validated as 32 bytes>",
+    "epoch-size-sec": 120,
+    "max-epoch-gap": 1
+  }
+}
+```
+
+Keys are preset names as the `createNode` config spells them, matched
+case-insensitively and ignoring dots (`logos.test`, `LogosTest` and
+`logostest` are one entry). The empty name above is the preset-less config
+the delivery library also accepts.
+
+Entries may only use names the library knows — `""`, `twn`, `logos.dev`,
+`logos.test`, `status.prod` — because it resolves the same key and rejects
+anything else. A file that cannot be read or parsed, or an enabled entry
+missing a required field, fails `createNode` rather than quietly producing a
+node without the rate limiting its deployment expects.
 
 ## Running the e2e
 
