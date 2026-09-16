@@ -60,12 +60,19 @@ without any public API for it:
   "": {
     "enabled": true,
     "registry-id": "logos:testnet:<64 hex chars — the registration program's config account>",
-    "rln-identifier": "<exactly 64 hex chars — validated as 32 bytes>",
     "epoch-size-sec": 120,
     "max-epoch-gap": 1
   }
 }
 ```
+
+`rln-identifier` is optional and defaults to this application's scope,
+`sha256("rln/logos-delivery/v0.0.1")`. Name one only for a deployment that
+needs a scope of its own — every node that must validate another's proofs has
+to use the same value, and two that disagree reject each other's messages as
+invalid rather than reporting a misconfiguration. The 32 bytes are arbitrary
+to the protocol: the circuit path reduces them with `hash_to_field_le`
+(Keccak-256) however they were chosen.
 
 Keys are preset names spelled exactly as the delivery library spells them —
 `""`, `twn`, `logos.dev`, `logos.test`, `status.prod` — and matched exactly.

@@ -37,14 +37,14 @@ std::string knownPresetNameList()
     return out;
 }
 
-// Neither fleet runs RLN, so neither names a registry: `enabled` is the whole
-// entry until one does.
+// The identifier is this application's and is known; the registry and epoch
+// size belong to a deployment, and neither fleet runs RLN yet to have one.
 const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
-        {"", RlnPresetEntry{.enabled = false}},
-        {"logos.dev", RlnPresetEntry{.enabled = false}},
-        {"logos.test", RlnPresetEntry{.enabled = false}},
+        {"", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
+        {"logos.dev", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
+        {"logos.test", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
     };
     return table;
 }
@@ -118,12 +118,14 @@ std::string parseRlnPresetTable(const std::string& json,
         entry.epochSizeSec = unsignedField(value, "epoch-size-sec");
         entry.maxEpochGap = unsignedField(value, "max-epoch-gap");
 
+        // The application's own scope unless the deployment names another.
+        if (entry.rlnIdentifier.empty()) {
+            entry.rlnIdentifier = kLogosDeliveryRlnIdentifier;
+        }
+
         if (entry.enabled) {
             if (entry.registryId.empty()) {
                 return "preset \"" + name + "\" needs registry-id";
-            }
-            if (entry.rlnIdentifier.empty()) {
-                return "preset \"" + name + "\" needs rln-identifier";
             }
             // The RLN module rejects a start config without it, and has no default.
             if (entry.epochSizeSec == 0) {

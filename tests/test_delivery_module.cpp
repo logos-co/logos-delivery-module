@@ -722,13 +722,27 @@ LOGOS_TEST(preset_table_rejects_incomplete_enabled_entries) {
         parseRlnPresetTable(R"({"logos.test":{"enabled":true,"rln-identifier":"x","epoch-size-sec":1}})", table)
             .empty());
     LOGOS_ASSERT_FALSE(
-        parseRlnPresetTable(R"({"logos.test":{"enabled":true,"registry-id":"r","epoch-size-sec":1}})", table)
-            .empty());
-    LOGOS_ASSERT_FALSE(
         parseRlnPresetTable(R"({"logos.test":{"enabled":true,"registry-id":"r","rln-identifier":"x"}})", table)
             .empty());
     // A disabled entry needs none of them.
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(R"({"logos.test":{"enabled":false}})", table).empty());
+}
+
+// The identifier scopes the application, so a deployment that does not name
+// one still has to agree with every other Logos Delivery node.
+LOGOS_TEST(an_omitted_rln_identifier_defaults_to_this_application) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(
+        parseRlnPresetTable(R"({"logos.test":{"enabled":true,"registry-id":"r","epoch-size-sec":600}})",
+                            table)
+            .empty());
+    LOGOS_ASSERT_EQ(table["logos.test"].rlnIdentifier, std::string(kLogosDeliveryRlnIdentifier));
+
+    // sha256("rln/logos-delivery/v0.0.1"), as 32 bytes of hex.
+    LOGOS_ASSERT_EQ(std::string(kLogosDeliveryRlnIdentifier).size(), static_cast<size_t>(64));
+    LOGOS_ASSERT_EQ(
+        std::string(kLogosDeliveryRlnIdentifier),
+        std::string("5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977"));
 }
 
 LOGOS_TEST(rlnRespond_fails_without_createNode) {
