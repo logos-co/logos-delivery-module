@@ -1,5 +1,6 @@
 #include "channel_cipher.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <semaphore>
@@ -79,6 +80,10 @@ struct ChannelCipherRelay::Registration {
     // thread, so two calls never share a buffer.
     std::vector<uint8_t> encryptBuf;
     std::vector<uint8_t> decryptBuf;
+    // Latched once a call comes back with nothing serving it. The cipher runs
+    // inline on the delivery event loop, so without this every later segment
+    // would stall the whole node for the full timeout to learn the same thing.
+    std::atomic<bool> unserved{false};
 
     ~Registration()
     {
@@ -90,7 +95,7 @@ struct ChannelCipherRelay::Registration {
     bool invoke(const std::string& method, const uint8_t* in, size_t inLen,
                 std::vector<uint8_t>& out)
     {
-        if (!client) {
+        if (!client || unserved.load(std::memory_order_acquire)) {
             return false;
         }
         json args = json::array();
@@ -122,6 +127,9 @@ struct ChannelCipherRelay::Registration {
         }
 
         const json parsed = json::parse(box->json, nullptr, /*allow_exceptions=*/false);
+        if (parsed.is_null()) {
+            unserved.store(true, std::memory_order_release);
+        }
         if (!parsed.is_string()) {
             // A null here is what an unreachable target answers once the call
             // has burned its timeout, so name that rather than the JSON type.
@@ -230,6 +238,20 @@ std::string ChannelCipherRelay::registerChannel(const std::string& channelId,
         reinterpret_cast<uintptr_t>(&ChannelCipherRelay::decryptTrampoline));
     userData = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(registration.get()));
     return {};
+}
+
+void ChannelCipherRelay::forgetChannel(uint64_t userData)
+{
+    if (userData == 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_lock);
+    for (auto it = m_registrations.begin(); it != m_registrations.end(); ++it) {
+        if (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(it->get())) == userData) {
+            m_registrations.erase(it);
+            return;
+        }
+    }
 }
 
 // The two trampolines are C callbacks invoked from the Nim runtime on its event

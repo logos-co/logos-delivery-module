@@ -277,7 +277,7 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
         // listeners registered against it along the way.
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
         deliveryCtxHandle = nullptr;
-        deliveryCtx = nullptr;
+        deliveryCtx.store(nullptr, std::memory_order_release);
     }
 }
 
@@ -500,7 +500,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 {
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
 
-    if (deliveryCtx != nullptr) {
+    if (ctx() != nullptr) {
         fprintf(stderr, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
         return {false, {}, "Context already initialized"};
     }
@@ -605,16 +605,20 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return {false, {}, "Failed to create Delivery context"};
     }
 
-    deliveryCtxHandle = callbackCtx->ctx;
-    deliveryCtx = callbackCtx->ctx->ptr;
-
-    fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
-
+    // Listeners first: under concurrency:"multi" another caller's send can be
+    // dispatched the moment deliveryCtx is non-null, and its events would be
+    // dropped by a node that has none registered yet.
+    void* const ctx = callbackCtx->ctx->ptr;
     for (const char* eventName : kEventNames) {
-        if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
+        if (logosdelivery_add_event_listener(ctx, eventName, event_callback, this) == 0) {
             fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
         }
     }
+
+    deliveryCtxHandle = callbackCtx->ctx;
+    deliveryCtx.store(ctx, std::memory_order_release);
+
+    fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
     return {true, {}};
 }
@@ -623,13 +627,13 @@ StdLogosResult DeliveryModuleImpl::start()
 {
     fprintf(stderr, "DeliveryModuleImpl::start called\n");
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         return {false, {}, "Context not initialized"};
     }
 
     // Node start can block for a long time (relay reconnect backoff), so return
     // once dispatched. Completion arrives via nodeStarted.
-    if (logosdelivery_start_node(deliveryCtx, start_callback, this) != RET_OK) {
+    if (logosdelivery_start_node(ctx(), start_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate start"};
     }
     return {true, {}};
@@ -639,11 +643,11 @@ StdLogosResult DeliveryModuleImpl::stop()
 {
     fprintf(stderr, "DeliveryModuleImpl::stop called\n");
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         return {false, {}, "Context not initialized"};
     }
 
-    if (logosdelivery_stop_node(deliveryCtx, stop_callback, this) != RET_OK) {
+    if (logosdelivery_stop_node(ctx(), stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
 
@@ -662,7 +666,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 {
     fprintf(stderr, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -677,7 +681,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
     auto outcome = callApiRetValue(
         "send",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_send, deliveryCtx,
+        bindApiCall(logosdelivery_send, ctx(),
                     LogosdeliverySendReq{.messageJson = messageJson.c_str()}));
 
     if (!outcome.success) {
@@ -696,7 +700,7 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
 {
     fprintf(stderr, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -704,7 +708,7 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
     auto outcome = callApiRetVoid(
         "subscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_subscribe, deliveryCtx,
+        bindApiCall(logosdelivery_subscribe, ctx(),
                     LogosdeliverySubscribeReq{.contentTopicStr = contentTopic.c_str()}));
 
     if (!outcome.success) {
@@ -720,7 +724,7 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
 {
     fprintf(stderr, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -728,7 +732,7 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     auto outcome = callApiRetVoid(
         "unsubscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_unsubscribe, deliveryCtx,
+        bindApiCall(logosdelivery_unsubscribe, ctx(),
                     LogosdeliveryUnsubscribeReq{.contentTopicStr = contentTopic.c_str()}));
 
     if (!outcome.success) {
@@ -746,7 +750,7 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
 {
     fprintf(stderr, "DeliveryModuleImpl::storeQuery called with peerAddr: %s\n", peerAddr.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot run store query - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -760,7 +764,7 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
     auto outcome = callApiRetValue(
         "store_query",
         callbackTimeout,
-        bindApiCall(waku_store_query, deliveryCtx,
+        bindApiCall(waku_store_query, ctx(),
                     WakuStoreQueryReq{.jsonQuery = jsonQuery.c_str(),
                                       .peerAddr = peerAddr.c_str(),
                                       .timeoutMs = static_cast<int32_t>(timeoutMs)}));
@@ -780,7 +784,7 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
     fprintf(stderr, "DeliveryModuleImpl::channelCreate called with channelId: %s, contentTopic: %s\n",
             channelId.c_str(), contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot create channel - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -802,7 +806,7 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
     auto outcome = callApiRetValue(
         "channel_create",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_create, deliveryCtx,
+        bindApiCall(logosdelivery_channel_create, ctx(),
                     LogosdeliveryChannelCreateReq{.channelIdStr = channelId.c_str(),
                                                   .contentTopicStr = contentTopic.c_str(),
                                                   .senderIdStr = senderId.c_str(),
@@ -811,6 +815,8 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
                                                   .userData = cipherUserData}));
 
     if (!outcome.success) {
+        // The library never took the registration, so its client can go.
+        cipherRelay->forgetChannel(cipherUserData);
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
                 channelId.c_str(), outcome.error.c_str());
     }
@@ -821,7 +827,7 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
 {
     fprintf(stderr, "DeliveryModuleImpl::channelExists called with channelId: %s\n", channelId.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot query channel - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -829,7 +835,7 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
     auto outcome = callApiRetValue(
         "channel_exists",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_exists, deliveryCtx,
+        bindApiCall(logosdelivery_channel_exists, ctx(),
                     LogosdeliveryChannelExistsReq{.channelIdStr = channelId.c_str()}));
 
     if (!outcome.success) {
@@ -843,7 +849,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
 {
     fprintf(stderr, "DeliveryModuleImpl::channelSend called with channelId: %s\n", channelId.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send channel message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -857,7 +863,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
     auto outcome = callApiRetValue(
         "channel_send",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_send, deliveryCtx,
+        bindApiCall(logosdelivery_channel_send, ctx(),
                     LogosdeliveryChannelSendReq{.channelIdStr = channelId.c_str(),
                                                 .messageJson = messageJson.c_str()}));
 
@@ -877,7 +883,7 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
 {
     fprintf(stderr, "DeliveryModuleImpl::channelClose called with channelId: %s\n", channelId.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot close channel - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -885,7 +891,7 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
     auto outcome = callApiRetVoid(
         "channel_close",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_close, deliveryCtx,
+        bindApiCall(logosdelivery_channel_close, ctx(),
                     LogosdeliveryChannelCloseReq{.channelIdStr = channelId.c_str()}));
 
     if (!outcome.success) {
@@ -898,14 +904,14 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
 StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
         "get_available_node_info_ids",
         CALLBACK_TIMEOUT,
-        bindScalarApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
+        bindScalarApiCall(logosdelivery_get_available_node_info_ids, ctx()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
@@ -916,14 +922,14 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
 StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
     fprintf(stderr, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx,
+        bindApiCall(logosdelivery_get_node_info, ctx(),
                     LogosdeliveryGetNodeInfoReq{.nodeInfoId = nodeInfoId.c_str()}));
 
     if (!outcome.success) {
@@ -937,14 +943,14 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
 StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
     auto outcome = callApiRetValue(
         "get_available_configs",
         CALLBACK_TIMEOUT,
-        bindScalarApiCall(logosdelivery_get_available_configs, deliveryCtx));
+        bindScalarApiCall(logosdelivery_get_available_configs, ctx()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
@@ -955,7 +961,7 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
 
 std::string DeliveryModuleImpl::collectOpenMetricsText()
 {
-    if (!deliveryCtx) {
+    if (!ctx()) {
         // No node yet — empty document; the openmetrics scraper renders nothing
         // for this module rather than treating the scrape as a hard error.
         return "";
@@ -964,7 +970,7 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx,
+        bindApiCall(logosdelivery_get_node_info, ctx(),
                     LogosdeliveryGetNodeInfoReq{.nodeInfoId = "Metrics"}));
 
     if (!outcome.success || !outcome.value.is_string()) {
@@ -980,7 +986,7 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
 
 StdLogosResult DeliveryModuleImpl::configureRln(const std::string& cfgJson)
 {
-    if (deliveryCtx) {
+    if (ctx()) {
         return {false, {}, "configureRln must be called before createNode"};
     }
 
@@ -1061,7 +1067,7 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
     fprintf(stderr, "DeliveryModuleImpl::rlnRespond called with reqId: %lld\n",
             static_cast<long long>(reqId));
 
-    if (!deliveryCtx) {
+    if (!ctx()) {
         return {false, {}, "Context not initialized"};
     }
 

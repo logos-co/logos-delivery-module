@@ -73,9 +73,13 @@ public:
      * @brief Registers @p spec for @p channelId and yields the three fields
      *        `LogosdeliveryChannelCreateReq` wants.
      *
-     * Verifies that both methods exist on the target with two parameters, when
-     * the target can be introspected. Every registration is kept alive, since
-     * the library may still hold its `user_data`.
+     * The target is not checked here: a module's method list is not reliably
+     * readable from another module, so a bad name or a target that publishes
+     * no provider surfaces on the first cipher call instead.
+     *
+     * A registration handed to the library is kept for the relay's life, since
+     * the library may still hold its `user_data`; @ref forgetChannel drops one
+     * that never reached it.
      *
      * @return An error message, or an empty string on success.
      */
@@ -84,6 +88,14 @@ public:
                                 uint64_t& encryptFn,
                                 uint64_t& decryptFn,
                                 uint64_t& userData);
+
+    /**
+     * @brief Drops a registration the library never received.
+     *
+     * Only safe when the `channelCreate` that would have handed `user_data`
+     * over failed; a registration the library holds must outlive it.
+     */
+    void forgetChannel(uint64_t userData);
 
 private:
     struct Registration;

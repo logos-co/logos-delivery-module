@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -226,9 +227,10 @@ public:
      * @endcode
      *
      * This module holds no cipher and no key of its own: the two methods are
-     * called on the module that creates the channel, which is the only module
-     * allowed to be its cipher target (`module` may name it explicitly, but it
-     * must match the caller). Each call carries the channel id and a base64
+     * called on `module`, which names the cipher target and must be the module
+     * that creates the channel. That last part is only *enforced* where the
+     * SDK exposes the caller's identity, which the pinned logos-module-builder
+     * does not yet ship. Each call carries the channel id and a base64
      * payload and must answer with the transformed payload, also base64 —
      * `encrypt(channelId, payloadB64) -> payloadB64`. An empty answer, a
      * failure or a timeout fails the message; nothing falls back to plaintext.
@@ -535,8 +537,15 @@ private:
     // DeliveryRlnConfig).
     DeliveryRlnConfig rlnConfig;
 
-    // Raw FFI context: what every call and the event registry take.
-    void* deliveryCtx;
+    // Raw FFI context: what every call and the event registry take. Atomic
+    // because concurrency:"multi" dispatches methods on pool workers, so the
+    // createNode that publishes it and the calls that read it run on different
+    // threads; the release/acquire pair is also what orders the event
+    // listeners ahead of the first call that can reach the node.
+    std::atomic<void*> deliveryCtx;
+
+    // The published context, or null before createNode has finished.
+    void* ctx() const { return deliveryCtx.load(std::memory_order_acquire); }
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
     // as void* so the C ABI header stays out of this header's includers.
     // Released with logosdelivery_ctx_destroy.
