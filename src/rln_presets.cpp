@@ -1,22 +1,50 @@
 #include "rln_presets.h"
 
-#include <cctype>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 namespace {
 
+// Spelled as the delivery library spells them (tools/confutils/cli_args.nim):
+// it resolves the same key, so a name it rejects can never reach RLN anyway.
+const std::vector<std::string>& knownPresetNames()
+{
+    static const std::vector<std::string> names = {"", "twn", "logos.dev", "logos.test",
+                                                   "status.prod"};
+    return names;
+}
+
+bool isKnownPresetName(const std::string& preset)
+{
+    const auto& names = knownPresetNames();
+    return std::find(names.begin(), names.end(), preset) != names.end();
+}
+
+std::string knownPresetNameList()
+{
+    std::string out;
+    for (const std::string& name : knownPresetNames()) {
+        if (!out.empty()) {
+            out += ", ";
+        }
+        out += name.empty() ? "\"\"" : name;
+    }
+    return out;
+}
+
+// Neither fleet runs RLN, so neither names a registry: `enabled` is the whole
+// entry until one does.
 const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
-        {"", RlnPresetEntry{}},
-        {"twn", RlnPresetEntry{}},
-        {"logosdev", RlnPresetEntry{}},
-        {"logostest", RlnPresetEntry{}},
-        {"statusprod", RlnPresetEntry{}},
+        {"", RlnPresetEntry{.enabled = false}},
+        {"logos.dev", RlnPresetEntry{.enabled = false}},
+        {"logos.test", RlnPresetEntry{.enabled = false}},
     };
     return table;
 }
@@ -56,19 +84,6 @@ uint64_t unsignedField(const nlohmann::json& obj, const char* key)
 
 } // namespace
 
-std::string normalizeRlnPresetName(const std::string& preset)
-{
-    std::string key;
-    key.reserve(preset.size());
-    for (unsigned char c : preset) {
-        if (c == '.') {
-            continue;
-        }
-        key.push_back(static_cast<char>(std::tolower(c)));
-    }
-    return key;
-}
-
 std::string parseRlnPresetTable(const std::string& json,
                                 std::map<std::string, RlnPresetEntry>& out)
 {
@@ -86,6 +101,11 @@ std::string parseRlnPresetTable(const std::string& json,
         const nlohmann::json& value = item.value();
         if (!value.is_object()) {
             return "preset \"" + name + "\" is not an object";
+        }
+
+        if (!isKnownPresetName(name)) {
+            return "preset \"" + name + "\" is not a name the delivery library accepts ("
+                   + knownPresetNameList() + ")";
         }
 
         RlnPresetEntry entry;
@@ -110,7 +130,7 @@ std::string parseRlnPresetTable(const std::string& json,
                 return "preset \"" + name + "\" needs a positive epoch-size-sec";
             }
         }
-        parsed[normalizeRlnPresetName(name)] = entry;
+        parsed[name] = entry;
     }
 
     out = std::move(parsed);
@@ -120,6 +140,12 @@ std::string parseRlnPresetTable(const std::string& json,
 RlnPresetEntry resolveRlnPreset(const std::string& preset, std::string& error)
 {
     error.clear();
+
+    if (!isKnownPresetName(preset)) {
+        error = "preset \"" + preset + "\" is not a name the delivery library accepts ("
+                + knownPresetNameList() + ")";
+        return {};
+    }
 
     std::map<std::string, RlnPresetEntry> table = builtinPresets();
 
@@ -139,7 +165,7 @@ RlnPresetEntry resolveRlnPreset(const std::string& preset, std::string& error)
         }
     }
 
-    auto it = table.find(normalizeRlnPresetName(preset));
+    auto it = table.find(preset);
     if (it == table.end()) {
         return {};
     }

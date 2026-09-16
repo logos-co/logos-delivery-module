@@ -688,15 +688,29 @@ LOGOS_TEST(a_broken_presets_file_fails_createNode) {
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
 }
 
-LOGOS_TEST(preset_names_normalise_across_spellings) {
+LOGOS_TEST(preset_names_are_matched_exactly) {
     std::map<std::string, RlnPresetEntry> table;
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
+    LOGOS_ASSERT_EQ(table.count("logos.test"), static_cast<size_t>(1));
+    LOGOS_ASSERT_TRUE(table["logos.test"].enabled);
+    LOGOS_ASSERT_EQ(table["logos.test"].epochSizeSec, static_cast<uint64_t>(600));
 
-    LOGOS_ASSERT_EQ(normalizeRlnPresetName("logos.test"), std::string("logostest"));
-    LOGOS_ASSERT_EQ(normalizeRlnPresetName("LogosTest"), std::string("logostest"));
-    LOGOS_ASSERT_EQ(table.count("logostest"), static_cast<size_t>(1));
-    LOGOS_ASSERT_TRUE(table["logostest"].enabled);
-    LOGOS_ASSERT_EQ(table["logostest"].epochSizeSec, static_cast<uint64_t>(600));
+    // A variant spelling is an error where it is written, not a silent miss.
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(R"({"logostest":{"enabled":false}})", table).empty());
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(R"({"LogosTest":{"enabled":false}})", table).empty());
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(R"({"nosuchnet":{"enabled":false}})", table).empty());
+}
+
+// Same rule on the lookup side: a node asking for a spelling this module does
+// not carry fails rather than coming up quietly without rate limiting.
+LOGOS_TEST(createNode_rejects_a_preset_spelling_it_does_not_know) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.createNode(R"({"logLevel":"INFO","preset":"logostest"})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
 }
 
 // The RLN module rejects a start config without a positive epoch size and has

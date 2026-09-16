@@ -67,16 +67,18 @@ without any public API for it:
 }
 ```
 
-Keys are preset names as the `createNode` config spells them, matched
-case-insensitively and ignoring dots (`logos.test`, `LogosTest` and
-`logostest` are one entry). The empty name above is the preset-less config
-the delivery library also accepts.
+Keys are preset names spelled exactly as the delivery library spells them —
+`""`, `twn`, `logos.dev`, `logos.test`, `status.prod` — and matched exactly.
+The empty name above is the preset-less config the library also accepts.
 
-Entries may only use names the library knows — `""`, `twn`, `logos.dev`,
-`logos.test`, `status.prod` — because it resolves the same key and rejects
-anything else. A file that cannot be read or parsed, or an enabled entry
-missing a required field, fails `createNode` rather than quietly producing a
-node without the rate limiting its deployment expects.
+A variant spelling is an error, not a miss: `logostest` in this file, or in a
+node's `preset`, fails rather than resolving to `logos.test`. The library
+accepts some of those variants for its own network config, so a node could
+otherwise come up on the right network with RLN silently off.
+
+A file that cannot be read or parsed, an unknown preset name, or an enabled
+entry missing a required field all fail `createNode` rather than quietly
+producing a node without the rate limiting its deployment expects.
 
 ## Running the e2e
 

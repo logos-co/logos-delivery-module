@@ -24,14 +24,6 @@ struct RlnPresetEntry {
 };
 
 /**
- * @brief Normalises a preset name to its table key.
- *
- * Lowercases and drops dots, so `logos.test`, `LogosTest` and `logostest`
- * select one entry — the same spellings the delivery library accepts.
- */
-std::string normalizeRlnPresetName(const std::string& preset);
-
-/**
  * @brief Parses a preset table.
  *
  * The document maps a preset name to an object with `enabled` plus, when
@@ -39,8 +31,13 @@ std::string normalizeRlnPresetName(const std::string& preset);
  * `max-epoch-gap`. An enabled entry missing any required field is rejected
  * here rather than at node creation.
  *
+ * Names are matched exactly, and must be ones the delivery library accepts —
+ * `""`, `twn`, `logos.dev`, `logos.test`, `status.prod`. A variant spelling
+ * such as `logostest` is an error rather than a match, so a typo cannot
+ * silently leave a node without the rate limiting it asked for.
+ *
  * @param json Table document.
- * @param out Receives the entries, keyed by normalised preset name.
+ * @param out Receives the entries, keyed by preset name.
  * @return Empty on success, a description of the problem otherwise.
  */
 std::string parseRlnPresetTable(const std::string& json,
@@ -55,9 +52,11 @@ std::string parseRlnPresetTable(const std::string& json,
  * may only key entries by preset names the delivery library accepts — it
  * cannot introduce a new network.
  *
- * @param preset Preset name as it appears in the `createNode` config.
- * @param error Receives a description when the env-var table cannot be used;
- *        the caller should treat that as fatal rather than run without RLN.
+ * @param preset Preset name as it appears in the `createNode` config, spelled
+ *        exactly as the delivery library spells it.
+ * @param error Receives a description when the name is not one of those
+ *        spellings or the env-var table cannot be used; the caller should
+ *        treat either as fatal rather than run without RLN.
  * @return The preset's settings; RLN off for a name the table does not carry.
  */
 RlnPresetEntry resolveRlnPreset(const std::string& preset, std::string& error);
