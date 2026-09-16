@@ -25,6 +25,10 @@ on:
         description: "Force deploy to GitHub Pages"
         type: boolean
         default: false
+      version:
+        description: "Publish under this version directory (e.g. v0.2.1). Must name an existing tag. Needed when deploying from a release branch, whose HEAD carries no tag of its own."
+        type: string
+        default: ""
   push:
     branches-ignore: [master]
 
@@ -98,10 +102,16 @@ jobs:
           set -euo pipefail
           tag="${{ github.event.release.tag_name }}"
           if [ -z "$tag" ]; then
-            # Manual deploy: refuse anything but a tagged commit, so branch docs
+            # Manual deploy: the directory has to name a release, so branch docs
             # cannot land in a released version's directory.
-            if ! tag="$(git describe --tags --exact-match 2>/dev/null)"; then
-              echo "::error::Force deploy needs a tagged commit; $(git rev-parse --short HEAD) has no tag." >&2
+            tag="${{ inputs.version }}"
+            if [ -n "$tag" ]; then
+              git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null || {
+                echo "::error::No such tag: $tag" >&2
+                exit 1
+              }
+            elif ! tag="$(git describe --tags --exact-match 2>/dev/null)"; then
+              echo "::error::Force deploy needs a tagged commit, or a version input naming the tag to publish under; $(git rev-parse --short HEAD) has no tag." >&2
               exit 1
             fi
           fi
