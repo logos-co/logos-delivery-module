@@ -1,0 +1,45 @@
+{
+    "name": "delivery_module",
+    "version": "0.2.1",
+    "description": "Logos Delivery Module - High-level message-delivery API",
+    "author": "Logos Core Team",
+    "type": "core",
+    "category": "protocol",
+    "interface": "universal",
+    "main": "delivery_module_plugin",
+    "codegen": {
+        "impl_header": "delivery_module_plugin.h"
+    },
+    "dependencies": [],
+    "include": [
+        "liblogosdelivery.so",
+        "liblogosdelivery.dylib",
+        "liblogosdelivery.dll",
+        "librln.so",
+        "librln.dylib",
+        "librln.dll",
+        "libpq.so",
+        "libpq.so.5",
+        "libpq.dylib",
+        "libpq.5.dylib",
+        "libpq.dll"
+    ],
+    "capabilities": [],
+    "nix": {
+        "packages": {
+            "runtime": ["postgresql", "nlohmann_json"]
+        },
+        "external_libraries": [
+            {
+                "name": "logosdelivery",
+                "build_command": "true"
+            },
+            {
+                "name": "rln"
+            }
+        ],
+        "cmake": {
+            "extra_include_dirs": ["lib"]
+        }
+    }
+}
