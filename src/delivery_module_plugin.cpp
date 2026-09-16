@@ -548,6 +548,10 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
         logosdelivery_rln_set_plugin(nullptr, nullptr);
         rlnConfig = DeliveryRlnConfig{};
+        {
+            std::lock_guard<std::mutex> lock(rlnStateMutex);
+            rlnStateConfig = DeliveryRlnConfig{};
+        }
         setRlnState("Disabled", {});
     };
 
@@ -1016,7 +1020,13 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
 StdLogosResult DeliveryModuleImpl::rlnState()
 {
     std::lock_guard<std::mutex> lock(rlnStateMutex);
-    return {true, nlohmann::json{{"state", rlnStateName}, {"message", rlnStateMessage}}};
+    nlohmann::json out{{"state", rlnStateName}, {"message", rlnStateMessage}};
+    if (rlnStateConfig.enabled) {
+        out["registryId"] = rlnStateConfig.registryId;
+        out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
+        out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
+    }
+    return {true, std::move(out)};
 }
 
 void DeliveryModuleImpl::setRlnState(const char* state, const std::string& message)
@@ -1049,6 +1059,10 @@ std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
     if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
         rlnConfig = DeliveryRlnConfig{};
         return "failed to install the RLN plugin";
+    }
+    {
+        std::lock_guard<std::mutex> lock(rlnStateMutex);
+        rlnStateConfig = rlnConfig;
     }
     return {};
 }

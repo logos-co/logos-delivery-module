@@ -375,7 +375,10 @@ public:
      * promise the RLN module's valid-root window is warm — that is a
      * background refresh the module does not currently expose.
      *
-     * @return Value `{"state": "<state>", "message": "<detail>"}`.
+     * @return Value `{"state": "<state>", "message": "<detail>"}`, plus
+     *         `registryId`, `rlnIdentifier` and `epochSizeSec` once a preset
+     *         has enabled RLN — the resolved deployment, so a caller can name
+     *         or query it without a second copy of the preset table.
      * @see rlnStateChanged for the same transitions as an event.
      */
     StdLogosResult rlnState();
@@ -527,10 +530,13 @@ private:
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
 
-    // Guards rlnStateName / rlnStateMessage against the bring-up thread.
+    // Guards the published RLN state against the bring-up thread.
     mutable std::mutex rlnStateMutex;
     std::string rlnStateName{"Disabled"};
     std::string rlnStateMessage;
+    // The resolved deployment, published so a caller can query the same
+    // registry this node answers for without resolving the preset itself.
+    DeliveryRlnConfig rlnStateConfig;
 
     // Runs startRlnBackend() for a node whose preset enables RLN.
     std::thread rlnBringUpThread;
