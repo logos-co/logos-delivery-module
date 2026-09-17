@@ -443,12 +443,15 @@ static nlohmann::json* configTarget(nlohmann::json& cfgObj)
 }
 
 // Defaults the node's storage directory to the host's per-instance path, so
-// side-by-side instances don't share upstream's cwd-relative "./data". The
-// path goes where each config shape accepts it: kernelConf when present,
-// messagingOverrides (created if needed) for the layered shapes, top level
-// for the legacy flat shape.
+// side-by-side instances don't share upstream's cwd-relative "./data". Also
+// carries the preset's validation switch into the config as
+// rln-disable-validation: deployment policy, so it overrides any client key.
+// Each setting goes where the config shape accepts it: kernelConf when
+// present, messagingOverrides (created if needed) for the layered shapes,
+// top level for the legacy flat shape.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
-                                                      const std::string& persistencePath)
+                                                      const std::string& persistencePath,
+                                                      bool disableRlnValidation)
 {
     nlohmann::json cfgObj;
     try {
@@ -463,7 +466,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
-    if (!persistencePath.empty()) {
+    if (!persistencePath.empty() || disableRlnValidation) {
         nlohmann::json* target = &cfgObj;
         const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
         const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
@@ -483,8 +486,12 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
             }
             target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
         }
-        if (target && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
+        if (target && !persistencePath.empty()
+            && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
             (*target)["localStoragePath"] = persistencePath + "/data";
+        }
+        if (target && disableRlnValidation) {
+            (*target)["rln-disable-validation"] = true;
         }
     }
 
@@ -502,14 +509,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // Don't log cfg: it can carry sensitive config.
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
-
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath());
-    if (!cfgWithDefaults) {
-        return {false, {}, "Invalid JSON config"};
-    }
-    const std::string& cfgWithPorts = *cfgWithDefaults;
-
-    joinRlnBringUp();
 
     std::string presetName;
     {
@@ -529,6 +528,15 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
+
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(),
+                                               rlnPreset.enabled && !rlnPreset.enableValidation);
+    if (!cfgWithDefaults) {
+        return {false, {}, "Invalid JSON config"};
+    }
+    const std::string& cfgWithPorts = *cfgWithDefaults;
+
+    joinRlnBringUp();
 
     if (rlnPreset.enabled) {
         DeliveryRlnConfig fromPreset;

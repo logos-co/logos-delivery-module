@@ -113,6 +113,10 @@ std::string parseRlnPresetTable(const std::string& json,
         entry.enabled = enabledIt != value.end() && enabledIt->is_boolean()
                             ? enabledIt->get<bool>()
                             : false;
+        auto enableValidationIt = value.find("enable-validation");
+        entry.enableValidation = enableValidationIt != value.end() && enableValidationIt->is_boolean()
+                                     ? enableValidationIt->get<bool>()
+                                     : true;
         entry.registryId = stringField(value, "registry-id");
         entry.rlnIdentifier = stringField(value, "rln-identifier");
         entry.epochSizeSec = unsignedField(value, "epoch-size-sec");

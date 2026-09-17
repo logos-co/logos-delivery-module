@@ -33,6 +33,7 @@ int g_setCallbacksCalls = 0;
 uint64_t g_lastResponseReqId = 0;
 std::string g_lastResponseJson;
 bool g_responseFired = false;
+std::string g_lastCreateConfigJson;
 } // namespace delivery_test_rln
 
 #define RET_OK  0
@@ -70,8 +71,15 @@ static void scalarOk(const char* funcName, logosdelivery_scalar callback, void* 
 
 extern "C" {
 
-void* logosdelivery_create_node(const void* /*req*/, logosdelivery_create onCreated, void* userData) {
+// Mirrors LogosdeliveryCreateNodeCtorReq (one borrowed string), so tests can
+// inspect the config the module handed to the library.
+typedef struct { const char* configJson; } MockCreateNodeReq;
+
+void* logosdelivery_create_node(const void* req, logosdelivery_create onCreated, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_create_node");
+    const auto* ctorReq = static_cast<const MockCreateNodeReq*>(req);
+    delivery_test_rln::g_lastCreateConfigJson =
+        ctorReq && ctorReq->configJson ? ctorReq->configJson : "";
     int ok = LOGOS_CMOCK_RETURN(int, "logosdelivery_create_node");
     if (onCreated) {
         if (ok) {

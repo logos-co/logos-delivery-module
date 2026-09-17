@@ -22,6 +22,9 @@ extern uint64_t g_lastResponseReqId;
 extern std::string g_lastResponseJson;
 extern bool g_responseFired;
 
+// Config JSON the module handed to logosdelivery_create_node.
+extern std::string g_lastCreateConfigJson;
+
 inline void resetRlnMockState() {
     g_callbacks = LogosDeliveryRlnPlugin{};
     g_userData = nullptr;
@@ -30,6 +33,7 @@ inline void resetRlnMockState() {
     g_lastResponseReqId = 0;
     g_lastResponseJson.clear();
     g_responseFired = false;
+    g_lastCreateConfigJson.clear();
 }
 
 } // namespace delivery_test_rln

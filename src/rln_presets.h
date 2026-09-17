@@ -34,6 +34,7 @@ inline constexpr const char* kLogosDeliveryRlnIdentifier =
  */
 struct RlnPresetEntry {
     bool enabled = false;
+    bool enableValidation = true;
     std::string registryId;
     std::string rlnIdentifier;
     uint64_t epochSizeSec = 0;
@@ -45,8 +46,9 @@ struct RlnPresetEntry {
  *
  * The document maps a preset name to an object with `enabled` plus, when
  * enabled, `registry-id` and `epoch-size-sec`, and the optional
- * `rln-identifier` and `max-epoch-gap`. An omitted `rln-identifier` defaults
- * to @ref kLogosDeliveryRlnIdentifier. An enabled entry missing a required
+ * `rln-identifier`, `max-epoch-gap` and `enable-validation`. An omitted
+ * `rln-identifier` defaults to @ref kLogosDeliveryRlnIdentifier; an omitted
+ * `enable-validation` defaults to true. An enabled entry missing a required
  * field is rejected here rather than at node creation.
  *
  * Names are matched exactly, and must be ones the delivery library accepts —

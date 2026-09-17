@@ -13,6 +13,7 @@
 #include <thread>
 
 #include <logos_test.h>
+#include <nlohmann/json.hpp>
 #include "delivery_module_plugin.h"
 #include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
@@ -674,6 +675,46 @@ LOGOS_TEST(an_rln_preset_installs_the_plugin_and_reports_bring_up) {
     LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnState.transitions, 2);
 }
 
+// kRlnPresetTable with validation disabled.
+static constexpr const char* kRlnPresetTableNoValidation = R"({
+  "logos.test": {
+    "enabled": true,
+    "registry-id": "reg",
+    "rln-identifier": "rln-id",
+    "epoch-size-sec": 600,
+    "enable-validation": false
+  }
+})";
+
+// The switch travels to the library inside the createNode config, spelled as
+// the library spells it; the client config never carries it.
+LOGOS_TEST(a_preset_with_validation_off_disables_it_in_the_library_config) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableNoValidation);
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_TRUE(libCfg.value("rln-disable-validation", false));
+}
+
+LOGOS_TEST(a_preset_without_the_flag_leaves_library_validation_on) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTable);
+    t.mockCFunction("logosdelivery_create_node").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
+
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_FALSE(libCfg.contains("rln-disable-validation"));
+}
+
 // A presets file that cannot be used fails node creation rather than quietly
 // producing a node without the rate limiting its deployment expects.
 LOGOS_TEST(a_broken_presets_file_fails_createNode) {
@@ -726,6 +767,16 @@ LOGOS_TEST(preset_table_rejects_incomplete_enabled_entries) {
             .empty());
     // A disabled entry needs none of them.
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(R"({"logos.test":{"enabled":false}})", table).empty());
+}
+
+// The validation switch is opt-out: a table that does not mention it validates.
+LOGOS_TEST(an_omitted_enable_validation_defaults_to_on) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
+    LOGOS_ASSERT_TRUE(table["logos.test"].enableValidation);
+
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableNoValidation, table).empty());
+    LOGOS_ASSERT_FALSE(table["logos.test"].enableValidation);
 }
 
 // The identifier scopes the application, so a deployment that does not name
