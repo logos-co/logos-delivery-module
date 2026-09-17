@@ -3,8 +3,8 @@
 Unlike chat_module, delivery_module's public methods are SYNCHRONOUS: each
 returns a StdLogosResult `{success, value, error}` that `client.call` hands back
 directly — there are no per-call result events. Only message delivery is async,
-surfacing as the typed events messageReceived / messagePropagated / messageSent
-/ messageError / connectionStateChanged.
+surfacing as the typed events messageReceived / messageQueued /
+messagePropagated / messageSent / messageError / connectionStateChanged.
 """
 
 from __future__ import annotations

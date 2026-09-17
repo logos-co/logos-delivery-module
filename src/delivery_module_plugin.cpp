@@ -74,6 +74,7 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
 // onTopicHealthChange, onConnectionChange and onReceivedMessage, which the
 // module does not surface.
 constexpr const char* kEventNames[] = {
+    "onMessageQueued",
     "onMessageSent",
     "onMessageError",
     "onMessagePropagated",
@@ -310,7 +311,13 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
             std::string eventType = jsonObj.value("eventType", "");
             int64_t timestamp = currentTimestampNs();
 
-            if (eventType == "message_sent") {
+            if (eventType == "message_queued") {
+                impl->messageQueued(
+                    jsonObj.value("requestId", ""),
+                    jsonObj.value("messageHash", ""),
+                    timestamp);
+
+            } else if (eventType == "message_sent") {
                 impl->messageSent(
                     jsonObj.value("requestId", ""),
                     jsonObj.value("messageHash", ""),

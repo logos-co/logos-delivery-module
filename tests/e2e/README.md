@@ -46,8 +46,8 @@ We assert `messagePropagated`, not `messageSent`: with relay-only / no store pee
 `delivery_module`'s public methods are **synchronous** — `client.call(...)` returns
 the `StdLogosResult` `{success, value, error}` directly; there are no per-call
 result events. Only message delivery is async, via the typed events
-`messageReceived` / `messagePropagated` / `messageSent` / `messageError` /
-`connectionStateChanged`.
+`messageReceived` / `messageQueued` / `messagePropagated` / `messageSent` /
+`messageError` / `connectionStateChanged`.
 
 The logoscore CLI serializes a typed event as `{"event": <name>, "data": {"arg0":
 <1st arg>, "arg1": <2nd arg>, ...}}` — each codegen event arg lands at `argN` by

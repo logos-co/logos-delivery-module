@@ -19,6 +19,7 @@ RlnRequestEvent g_lastRlnRequest{};
 RlnStateEvent g_lastRlnState{};
 } // namespace delivery_test_events
 
+void DeliveryModuleImpl::messageQueued(const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageSent(const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageError(const std::string&, const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messagePropagated(const std::string&, const std::string&, int64_t) {}

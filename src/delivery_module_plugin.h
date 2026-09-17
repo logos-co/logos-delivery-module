@@ -151,6 +151,7 @@ public:
      *
      * Returns a requestId on success. Async results come via typed events:
      * - `messageError` emitted if the module can't send the message
+     * - `messageQueued` emitted if the send waits for rate-limit budget
      * - `messagePropagated` emitted if the message has hit the network
      * - `messageSent` emitted after the message is validated by the network
      *
@@ -398,6 +399,16 @@ public:
  */
 
 logos_events:
+    /**
+     * @brief Emitted when a send is held back because the epoch's rate-limit
+     *        budget is spent.
+     *
+     * Not a failure: the message stays queued and goes out once the budget
+     * refills, so @ref messagePropagated and @ref messageSent still follow.
+     * Emitted at most once per send, the first time the message is held back.
+     */
+    void messageQueued(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+
     /**
      * @brief Emitted when the network has validated a sent message.
      *
