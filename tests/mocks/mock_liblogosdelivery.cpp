@@ -33,7 +33,6 @@ int g_setCallbacksCalls = 0;
 uint64_t g_lastResponseReqId = 0;
 std::string g_lastResponseJson;
 bool g_responseFired = false;
-int g_lastDisableValidation = -1;
 } // namespace delivery_test_rln
 
 #define RET_OK  0
@@ -209,13 +208,6 @@ int logosdelivery_rln_set_plugin(const LogosDeliveryRlnPlugin* cbs, void* user_d
         delivery_test_rln::g_callbacksSet = false;
     }
     return 0;
-}
-
-// Temp RLN config used by the library
-int logosdelivery_rln_disable_validation(int disable){
-    LOGOS_CMOCK_RECORD("logosdelivery_rln_disable_validation");
-    delivery_test_rln::g_lastDisableValidation = disable;
-    return LOGOS_CMOCK_RETURN(int, "logosdelivery_rln_disable_validation");
 }
 
 // Return value is controllable (default 0 = accepted); set non-zero to

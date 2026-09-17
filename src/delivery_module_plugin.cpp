@@ -275,7 +275,6 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
         // new RLN callback is dispatched into this object during destruction.
         // (A callback already executing on the library thread is not joined.)
         logosdelivery_rln_set_plugin(nullptr, nullptr);
-        logosdelivery_rln_disable_validation(0);
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
