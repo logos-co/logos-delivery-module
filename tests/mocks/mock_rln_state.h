@@ -33,7 +33,6 @@ inline void resetRlnMockState() {
     g_lastResponseReqId = 0;
     g_lastResponseJson.clear();
     g_responseFired = false;
-    g_lastDisableValidation = -1;
 }
 
 } // namespace delivery_test_rln
