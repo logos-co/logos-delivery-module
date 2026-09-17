@@ -9,7 +9,7 @@
   };
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.2.5";
+    logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.0";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=6ab621754a4866c2636ef3cecfc6bae16b7eaceb";
     # The RLN API module. The input name is load-bearing and cannot be chosen
