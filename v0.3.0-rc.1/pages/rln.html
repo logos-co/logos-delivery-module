@@ -1,0 +1,646 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="auto">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>RLN bridge &#8212; Logos Delivery Module 0.3.0-rc.1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "auto";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "auto";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=55c26ed414f5f8a31ebb" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=55c26ed414f5f8a31ebb" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=eb78edbb" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="../_static/scripts/fontawesome.js?digest=55c26ed414f5f8a31ebb"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
+
+    <script src="../_static/documentation_options.js?v=44413ba7"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'pages/rln';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.17.1';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://logos-co.github.io/logos-delivery-module/switcher.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.0-rc.1';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner =
+            false;
+        </script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="icon" href="../_static/logos-logo-dark.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Versioning" href="versioning.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="0.3.0-rc.1" />
+  
+    
+    <script src="../_static/searchtools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <script src="../searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="auto">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/logos-logo-dark.png" class="logo__image only-light" alt=""/>
+    <img src="../_static/logos-logo-dark.png" class="logo__image only-dark pst-js-only" alt=""/>
+  
+  
+    <p class="title logo__title">Delivery Module 0.3.0-rc.1</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api-layers.html">
+    API layers
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api_reference.html">
+    API reference
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="internal.html">
+    Internal docs
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://docs.logos.co/messaging">
+    Logos Messaging Docs
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/logos-co/logos-delivery-module" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api-layers.html">
+    API layers
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api_reference.html">
+    API reference
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="internal.html">
+    Internal docs
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://docs.logos.co/messaging">
+    Logos Messaging Docs
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-3"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-3"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-3"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-3">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/logos-co/logos-delivery-module" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar"><svg class="pst-icon svg-inline--fa" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
+
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="networks.html">Networks: <code class="docutils literal notranslate"><span class="pre">logos.dev</span></code> vs <code class="docutils literal notranslate"><span class="pre">logos.test</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="run-node.html">Run a delivery node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="query-node.html">Query a running node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="versioning.html">Versioning</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">RLN bridge</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="internal.html" class="nav-link">Internal docs</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">RLN bridge</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="rln-bridge">
+<h1>RLN bridge<a class="headerlink" href="#rln-bridge" title="Link to this heading">#</a></h1>
+<p>The delivery library (liblogosdelivery) does not implement RLN itself — it
+asks an external RLN module for every RLN operation. Its plugin is
+implementation-agnostic: it never names a registry or a membership, carries
+no configuration and never starts the backend. All of that lives here. This
+module answers those requests in-process: <code class="docutils literal notranslate"><span class="pre">src/rln_bridge.cpp</span></code> adds the
+registry id and rln identifier from the node’s preset, calls the co-loaded
+<code class="docutils literal notranslate"><span class="pre">liblogos_rln_module</span></code> and feeds each reply back unchanged. Every request is
+also emitted as an <code class="docutils literal notranslate"><span class="pre">rln*Request</span></code> event for observability; <code class="docutils literal notranslate"><span class="pre">rlnRespond</span></code>
+exists to answer a request from outside, but on a bridge-enabled node the
+bridge answers first and a second response per reqId is rejected.</p>
+<p>Replies cross verbatim — the wire schema is owned by the RLN module and the
+delivery library, not modelled here. The only replies the bridge fabricates
+are transport failures. If nothing answers a request at all, the library
+times it out itself and everything non-RLN keeps working.</p>
+<section id="turning-rln-on">
+<h2>Turning RLN on<a class="headerlink" href="#turning-rln-on" title="Link to this heading">#</a></h2>
+<p><strong>There is no RLN method to call.</strong> RLN comes from the network <code class="docutils literal notranslate"><span class="pre">preset</span></code> in
+the <code class="docutils literal notranslate"><span class="pre">createNode</span></code> config, because every value it needs — the registry, the
+epoch size, the application identifier — is a property of the deployment
+rather than of the caller. A client picks a network and gets whatever rate
+limiting that network runs.</p>
+<p>Every shipped preset has RLN <strong>off</strong> (see <a class="reference internal" href="networks.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">networks.md</span></code></span></a>).</p>
+<ul class="simple">
+<li><p>Installing the library’s RLN plugin is what makes it mount RLN, and it
+reads that at node creation, so <code class="docutils literal notranslate"><span class="pre">createNode</span></code> does it before handing the
+config to the library.</p></li>
+<li><p>Bringing the backend up reaches the chain, so <code class="docutils literal notranslate"><span class="pre">createNode</span></code> runs that on its
+own thread and returns without waiting. Follow it with <code class="docutils literal notranslate"><span class="pre">rlnState</span></code> or the
+<code class="docutils literal notranslate"><span class="pre">rlnStateChanged</span></code> event: <code class="docutils literal notranslate"><span class="pre">Disabled</span></code> → <code class="docutils literal notranslate"><span class="pre">Initializing</span></code> → <code class="docutils literal notranslate"><span class="pre">Ready</span></code> | <code class="docutils literal notranslate"><span class="pre">Failed</span></code>.</p></li>
+<li><p>This module starts <code class="docutils literal notranslate"><span class="pre">liblogos_rln_module</span></code> itself; the library no longer
+does. A bridge that cannot come up is not fatal: the <code class="docutils literal notranslate"><span class="pre">rln*Request</span></code> events
+plus <code class="docutils literal notranslate"><span class="pre">rlnRespond</span></code> remain, but nothing starts the backend on that path.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">liblogos_rln_module</span></code> is declared in <code class="docutils literal notranslate"><span class="pre">metadata.json#dependencies</span></code>, so the
+host auto-loads it along with its own deps (<code class="docutils literal notranslate"><span class="pre">liblogos_lez_rln_module</span></code>,
+<code class="docutils literal notranslate"><span class="pre">lez_core</span></code>).</p></li>
+<li><p>Bring-up fires <code class="docutils literal notranslate"><span class="pre">start</span></code> from this module, then the library’s
+<code class="docutils literal notranslate"><span class="pre">get_membership_state</span></code> gate: the node’s membership must already be
+<code class="docutils literal notranslate"><span class="pre">active</span></code> or <code class="docutils literal notranslate"><span class="pre">grace_period</span></code> — registration happens out-of-band, through the
+RLN module, not through this library or its plugin.
+Without one (e.g. no chain), <code class="docutils literal notranslate"><span class="pre">start</span></code> fails with the RLN module’s own
+error carried verbatim into <code class="docutils literal notranslate"><span class="pre">nodeStarted</span></code>.</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">Ready</span></code> means the backend started and the bridge answers. It does not mean
+the RLN module’s valid-root window is warm — that is a background refresh
+the RLN module does not currently expose a probe for.</p>
+<section id="presets-for-a-test-or-local-deployment">
+<h3>Presets for a test or local deployment<a class="headerlink" href="#presets-for-a-test-or-local-deployment" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">LOGOS_DELIVERY_RLN_PRESETS</span></code> names a JSON file whose entries are merged over
+the built-in table, which is how a rig points a node at its own registry
+without any public API for it:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">""</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"registry-id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"logos:testnet:&lt;64 hex chars — the registration program's config account&gt;"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"epoch-size-sec"</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"max-epoch-gap"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">rln-identifier</span></code> is optional and defaults to this application’s scope,
+<code class="docutils literal notranslate"><span class="pre">sha256(&quot;rln/logos-delivery/v0.0.1&quot;)</span></code>. Name one only for a deployment that
+needs a scope of its own — every node that must validate another’s proofs has
+to use the same value, and two that disagree reject each other’s messages as
+invalid rather than reporting a misconfiguration. The 32 bytes are arbitrary
+to the protocol: the circuit path reduces them with <code class="docutils literal notranslate"><span class="pre">hash_to_field_le</span></code>
+(Keccak-256) however they were chosen.</p>
+<p>Keys are preset names spelled exactly as the delivery library spells them —
+<code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">twn</span></code>, <code class="docutils literal notranslate"><span class="pre">logos.dev</span></code>, <code class="docutils literal notranslate"><span class="pre">logos.test</span></code>, <code class="docutils literal notranslate"><span class="pre">status.prod</span></code> — and matched exactly.
+The empty name above is the preset-less config the library also accepts.</p>
+<p>A variant spelling is an error, not a miss: <code class="docutils literal notranslate"><span class="pre">logostest</span></code> in this file, or in a
+node’s <code class="docutils literal notranslate"><span class="pre">preset</span></code>, fails rather than resolving to <code class="docutils literal notranslate"><span class="pre">logos.test</span></code>. The library
+accepts some of those variants for its own network config, so a node could
+otherwise come up on the right network with RLN silently off.</p>
+<p>A file that cannot be read or parsed, an unknown preset name, or an enabled
+entry missing a required field all fail <code class="docutils literal notranslate"><span class="pre">createNode</span></code> rather than quietly
+producing a node without the rate limiting its deployment expects.</p>
+</section>
+</section>
+<section id="running-the-e2e">
+<h2>Running the e2e<a class="headerlink" href="#running-the-e2e" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">tests/e2e/run.sh</span></code> boots a logosctl daemon over the four module bundles and
+asserts the bring-up chain; its header documents the env knobs. The daemon
+log — <code class="docutils literal notranslate"><span class="pre">&lt;run</span> <span class="pre">dir&gt;/session/logs/daemon.log</span></code> — carries the library’s log lines.</p>
+</section>
+<section id="time-budgets">
+<h2>Time budgets<a class="headerlink" href="#time-budgets" title="Link to this heading">#</a></h2>
+<p>The library gives each request a budget before synthesizing a TRANSIENT
+failure itself: 80 s for the registry reads (<code class="docutils literal notranslate"><span class="pre">get_membership_state</span></code>,
+<code class="docutils literal notranslate"><span class="pre">generate_proof</span></code>), 10 s for the rest. The bridge’s raw-call timeout for a
+read (70 s) sits just under that; the remaining ops go through the generated
+typed client, whose reply arrives well inside the 10 s budget. The
+module-driven <code class="docutils literal notranslate"><span class="pre">start</span></code> and <code class="docutils literal notranslate"><span class="pre">stop</span></code> have no library clock behind them and
+borrow the 80 s read budget.</p>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="versioning.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Versioning</p>
+      </div>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#turning-rln-on">Turning RLN on</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#presets-for-a-test-or-local-deployment">Presets for a test or local deployment</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#running-the-e2e">Running the e2e</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#time-budgets">Time budgets</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../_sources/pages/rln.md.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026, Institute of Free Technology.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.0.4.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.17.1.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
