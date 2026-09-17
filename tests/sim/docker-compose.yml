@@ -1,0 +1,91 @@
+# Service-discovery simulation: one logosdeliverynode seed with in-process
+# kademlia and N logos-core daemons hosting delivery_module + libp2p_module
+# with the external discovery plugin, each in its own container with its own
+# address. Build the image with ./build.sh first.
+#
+#   ./up.sh 20                # members m1..m20 on scattered addresses (gen-members.py)
+#   ./report.sh               # discovery report over out/traces
+#   ./down.sh
+name: logos-sim
+services:
+  seed:
+    image: logos-sim:local
+    hostname: seed
+    environment:
+      # The nix-built binary dlopens libpq at run time; take the nix-built one
+      # the portable delivery_module bundle ships (Ubuntu's would not resolve
+      # through the nix loader).
+      LD_LIBRARY_PATH: /opt/modules/delivery_module
+    command:
+      - logosdeliverynode
+      - --entry-layer=kernel
+      - --cluster-id=42
+      - --shard=0
+      - --relay=true
+      - --enable-kad-discovery=true
+      - --discv5-discovery=false
+      - --peer-exchange=false
+      - --rendezvous=false
+      - --dns-discovery=false
+      - --nat=extip:10.0.0.10
+      - --rest=false
+      - --metrics-server=true
+      - --metrics-server-address=0.0.0.0
+      - --metrics-server-port=8008
+      - --metrics-logging=false
+      - --kad-service-lookup-interval=${LOOKUP_INTERVAL:-15}
+      - --kad-random-lookup-interval=${LOOKUP_INTERVAL:-15}
+      - --max-pure-libp2p-peers=${MAX_PURE:-200}
+      - --tcp-port=44001
+      # 64 x '9': peer id 16Uiu2HAm4gVVMqAzg2gT5cBii3qfaXykUJoB7jyHgAu71RuiELmz
+      - --nodekey=9999999999999999999999999999999999999999999999999999999999999999
+      - --log-level=${SEED_LOG_LEVEL:-DEBUG}
+    networks:
+      sim:
+        ipv4_address: 10.0.0.10
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/44001"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./out:/etc/prometheus/targets:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      sim:
+        ipv4_address: 10.0.0.11
+
+  grafana:
+    image: grafana/grafana:11.6.6
+    environment:
+      # Local sim: no login, dashboards are provisioned read-write.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_USERS_DEFAULT_THEME: dark
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/discovery-overview.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      sim:
+        ipv4_address: 10.0.0.12
+
+networks:
+  sim:
+    ipam:
+      config:
+        - subnet: ${SUBNET:-10.0.0.0/8}

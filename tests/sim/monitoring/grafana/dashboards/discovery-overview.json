@@ -1,0 +1,1862 @@
+{
+  "uid": "logos-sim-discovery",
+  "title": "Logos sim \u2014 discovery overview",
+  "description": "Fleet view of the compose simulation: how fast and how completely service discovery converges, and what the registrars are doing.",
+  "tags": [
+    "logos-sim"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Fleet",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Nodes up",
+      "description": "Targets answering /metrics: the seed plus every member.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(up{job=\"sim-nodes\"} == 1)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": null,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      },
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Members up",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(up{job=\"sim-nodes\", role=\"member\"} == 1)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": null,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Discovery coverage (median)",
+      "description": "Median over nodes of the peers held in the service-discovery tables, as a share of the nodes currently up. It can pass 100% while ads of departed nodes are still cached.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile(0.5, max by (node) (cd_service_table_peers)) / scalar(count(up{job=\"sim-nodes\"} == 1)) * 100",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 6,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Coverage (worst node)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(max by (node) (cd_service_table_peers)) / scalar(count(up{job=\"sim-nodes\"} == 1)) * 100",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 11,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Lookups/s",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cd_lookup_requests_total[1m]))",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Peers found per lookup",
+      "description": "Records returned per service lookup, fleet-wide.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cd_lookup_peers_found_total[5m])) / clamp_min(sum(rate(cd_lookup_requests_total[5m])), 0.001)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "text": {
+          "valueSize": 28
+        }
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Discovery convergence",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Service-discovery peers known, per node",
+      "description": "cd_service_table_peers: peers this node holds across its service tables. The curve to watch when a run starts.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (cd_service_table_peers)",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Kademlia routing-table peers, per node",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (kad_routing_table_peers)",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Registrar occupancy (ads held), per node",
+      "description": "Adverts each node stores as a registrar for others. A node that stays at 1 is only holding its own.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (cd_registrar_cache_ads)",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 15
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Advertiser backlog (pending actions), per node",
+      "description": "Registrations queued behind a registrar's waiting time. The anti-sybil term charges ~28 s per shared address-prefix bit, so clustered addresses show up here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (cd_advertiser_pending_actions)",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 15
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Anti-sybil IP tree size, per node",
+      "description": "Distinct advertiser addresses in each registrar's prefix tree, the input to the waiting-time penalty.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (cd_iptree_total_ips)",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 15
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "Discovery traffic",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Register requests vs responses (fleet)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cd_register_requests_total[1m]))",
+          "legendFormat": "requests",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(cd_register_responses_total[1m]))",
+          "legendFormat": "responses",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 15,
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Service-discovery messages (fleet)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cd_messages_sent_total[1m]))",
+          "legendFormat": "sent",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(cd_messages_received_total[1m]))",
+          "legendFormat": "received",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 16,
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Service-discovery bytes (fleet)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cd_message_bytes_sent_total[1m]))",
+          "legendFormat": "sent",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(cd_message_bytes_received_total[1m]))",
+          "legendFormat": "received",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 17,
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      }
+    },
+    {
+      "id": 18,
+      "type": "row",
+      "title": "Peering",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Seed: peers admitted (pure libp2p)",
+      "description": "Members reach the seed as plain libp2p peers; it admits them against its --max-pure-libp2p-peers budget.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(logos_delivery_pure_libp2p_peers{role=\"seed\"})",
+          "legendFormat": "connected",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "max(logos_delivery_peer_store_size{role=\"seed\"})",
+          "legendFormat": "peer store",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 19,
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "libp2p peers, per node",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (libp2p_peers)",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 20,
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed dials (fleet)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(libp2p_failed_dials_total[1m]))",
+          "legendFormat": "failed dials",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(kad_lookup_undialable_peers_total[1m]))",
+          "legendFormat": "kad undialable peers",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 21,
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Delivery nodes",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Peers in each node's delivery store",
+      "description": "The working set each delivery node actually holds. Discovered peers appear here only once a backend hands them to the PeerManager, so this is the line that proves discovery is feeding the node rather than just succeeding.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (logos_delivery_peer_store_size{module=~\"delivery_module|in-process\"})",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 23,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Relay mesh peers, per node",
+      "description": "Gossipsub mesh membership, which is what the health monitor reads to decide whether a node counts as connected.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node) (libp2p_gossipsub_peers_per_topic_mesh{module=~\"delivery_module|in-process\"})",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 24,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      }
+    },
+    {
+      "id": 25,
+      "type": "row",
+      "title": "When peers are discovered",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "panels": []
+    },
+    {
+      "type": "heatmap",
+      "title": "Discovery arrivals across the fleet",
+      "description": "Each cell is one node's newly inserted service-table peers in a 30 s window, so a tight band means the fleet converged together and a long tail means stragglers waited on registrars.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node) (increase(cd_service_table_insertions_total[30s]))",
+          "legendFormat": "{{node}}",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "calculate": true,
+        "calculation": {
+          "yBuckets": {
+            "mode": "count",
+            "value": "1"
+          }
+        },
+        "color": {
+          "mode": "scheme",
+          "scheme": "Turbo",
+          "steps": 32,
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "reverse": false
+        },
+        "cellGap": 1,
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "short"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": true,
+          "yHistogram": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "never"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            }
+          }
+        },
+        "overrides": []
+      },
+      "id": 26,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "New peers per minute",
+      "description": "The two ends of the same pipe: what discovery inserted, and what reached the delivery nodes' peer stores.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(cd_service_table_insertions_total[1m]))",
+          "legendFormat": "discovery insertions, fleet",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "sum(clamp_min(delta(logos_delivery_peer_store_size{module=~\"delivery_module|in-process\"}[1m]), 0))",
+          "legendFormat": "arrivals in delivery peer stores",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 25,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 27,
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      }
+    },
+    {
+      "id": 28,
+      "type": "row",
+      "title": "Per node",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Node state",
+      "description": "Click a node name to open its dashboard.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sim-prom"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (node) (cd_service_table_peers)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (node) (cd_service_table_peers) / scalar(count(up{job=\"sim-nodes\"} == 1)) * 100",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "expr": "max by (node) (kad_routing_table_peers)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "expr": "max by (node) (kad_routing_table_buckets)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "E",
+          "expr": "max by (node) (cd_registrar_cache_ads)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "F",
+          "expr": "max by (node) (cd_advertiser_pending_actions)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "G",
+          "expr": "max by (node) (logos_delivery_peer_store_size{module=~\"delivery_module|in-process\"})",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "H",
+          "expr": "sum by (node) (libp2p_gossipsub_peers_per_topic_mesh{module=~\"delivery_module|in-process\"})",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "I",
+          "expr": "sum by (node) (rate(cd_lookup_requests_total[5m]))",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "J",
+          "expr": "sum by (node) (rate(cd_lookup_peers_found_total[5m]))",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "K",
+          "expr": "sum by (node) (process_resident_memory_bytes)",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "L",
+          "expr": "sum by (node) (rate(process_cpu_seconds_total[1m]))",
+          "legendFormat": "",
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sim-prom"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "node",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "node": "node",
+              "Value #A": "service peers",
+              "Value #B": "coverage",
+              "Value #C": "kad peers",
+              "Value #D": "kad buckets",
+              "Value #E": "registrar ads",
+              "Value #F": "advert backlog",
+              "Value #G": "delivery store",
+              "Value #H": "mesh peers",
+              "Value #I": "lookups/s",
+              "Value #J": "found/s",
+              "Value #K": "rss",
+              "Value #L": "cpu"
+            },
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "instance": true,
+              "addr": true,
+              "sim": true,
+              "module": true,
+              "role": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "node": 0,
+              "service peers": 1,
+              "coverage": 2,
+              "kad peers": 3,
+              "kad buckets": 4,
+              "registrar ads": 5,
+              "advert backlog": 6,
+              "delivery store": 7,
+              "mesh peers": 8,
+              "lookups/s": 9,
+              "found/s": 10,
+              "rss": 11,
+              "cpu": 12
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "coverage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lookups/s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "found/s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rss"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cpu"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "node"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open node dashboard",
+                    "url": "/d/logos-sim-node?var-node=${__value.text}&${__url_time_range}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "node",
+            "desc": false
+          }
+        ]
+      },
+      "id": 29,
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      }
+    }
+  ]
+}

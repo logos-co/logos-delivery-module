@@ -1,0 +1,26 @@
+# Scrapes every sim node. Targets come from out/prom-targets.json, regenerated
+# by up.sh on each run and picked up by file_sd without a restart.
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  external_labels:
+    sim: logos-delivery
+
+scrape_configs:
+  - job_name: sim-nodes
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/prom-targets.json]
+        refresh_interval: 5s
+    # `node` and `role` come from the target labels; keep the raw address too.
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: addr
+    # A member is scraped through its openmetrics module, which labels every
+    # series with the module it came from. The seed is a single process and
+    # labels nothing, so give it one — dashboards can then group by `module`
+    # without special-casing the seed.
+    metric_relabel_configs:
+      - source_labels: [module]
+        regex: ""
+        target_label: module
+        replacement: in-process
