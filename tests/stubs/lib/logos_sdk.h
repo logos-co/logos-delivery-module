@@ -1,7 +1,7 @@
 // Stub of the codegen-generated umbrella header, for unit tests.
 //
 // The real one is emitted into generated_code/ at build time and aggregates
-// one typed client per metadata.json#dependencies entry into `LogosModules`,
+// one typed client per metadata.json#optional_dependencies entry into `LogosModules`,
 // which LogosModuleContext::modules() returns.
 
 #pragma once

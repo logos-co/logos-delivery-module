@@ -118,13 +118,12 @@ directly on the host.
 ### Build the runtime and module
 
 Build the `logoscore` CLI (the headless runtime) and the `lgpm` package
-manager from their flakes, then build and install this module's `.lgx` — plus
-the RLN modules it depends on. `delivery_module` declares `liblogos_rln_module`
-in `metadata.json#dependencies` and the host refuses to load a module whose
-dependency chain is missing, so `liblogos_rln_module`,
-`liblogos_lez_rln_module` and `lez_core` have to be installed alongside it.
-This flake re-exports their `.lgx`s from its own locked inputs, so they match
-the revs the module was built against:
+manager from their flakes, then build and install this module's `.lgx`.
+`liblogos_rln_module` is an optional dependency, so a node whose preset has
+RLN off needs nothing else; an RLN-enabled one also needs
+`liblogos_rln_module`, `liblogos_lez_rln_module` and `lez_core`. This flake
+re-exports their `.lgx`s from its own locked inputs, so they match the revs
+the module was built against:
 
 ```bash
 git clone https://github.com/logos-co/logos-delivery-module.git

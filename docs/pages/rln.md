@@ -35,9 +35,11 @@ Every shipped preset has RLN **off** (see [`networks.md`](./networks.md)).
 - This module starts `liblogos_rln_module` itself; the library no longer
   does. A bridge that cannot come up is not fatal: the `rln*Request` events
   plus `rlnRespond` remain, but nothing starts the backend on that path.
-- `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the
-  host auto-loads it along with its own deps (`liblogos_lez_rln_module`,
-  `lez_core`).
+- `liblogos_rln_module` is an `optional_dependency`, so the host neither
+  loads it nor requires it: a node whose preset has RLN off runs without the
+  RLN stack installed at all. A node on an RLN-enabled preset loads it — and
+  its own deps, `liblogos_lez_rln_module` and `lez_core` — before
+  `createNode`, or bring-up ends in `Failed`.
 - Bring-up fires `start` from this module, then the library's
   `get_membership_state` gate: the node's membership must already be
   `active` or `grace_period` — registration happens out-of-band, through the

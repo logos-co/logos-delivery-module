@@ -1,5 +1,5 @@
 #include "rln_bridge.h"
-#include "liblogos_rln_module_api.h" // generated from metadata.json#dependencies
+#include "liblogos_rln_module_api.h" // generated from metadata.json#optional_dependencies
 
 #include <cstdio>
 #include <memory>

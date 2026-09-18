@@ -45,7 +45,7 @@
 #include <thread>
 
 struct lp_client;
-class LiblogosRlnModule; // generated from metadata.json#dependencies
+class LiblogosRlnModule; // generated from metadata.json#optional_dependencies
 
 class RlnBridge {
 public:

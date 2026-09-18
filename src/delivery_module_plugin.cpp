@@ -19,7 +19,7 @@
 #include "rln_bridge.h"
 #include "rln_presets.h"
 
-// Generated at build time from metadata.json#dependencies; defines the
+// Generated at build time from metadata.json#optional_dependencies; defines the
 // LogosModules aggregate behind LogosModuleContext::modules().
 #include "logos_sdk.h"
 extern "C" {

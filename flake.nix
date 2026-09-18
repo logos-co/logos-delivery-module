@@ -13,10 +13,9 @@
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=6ab621754a4866c2636ef3cecfc6bae16b7eaceb";
     # The RLN API module. The input name is load-bearing and cannot be chosen
-    # freely: logos-module-builder resolves each metadata.json#dependencies
+    # freely: logos-module-builder resolves each metadata.json#optional_dependencies
     # entry as the flake input of the SAME name and generates bindings from
-    # its published <name>.lidl, and logos-core auto-loads it by that module
-    # name at runtime. Pinned to feat/lip-alignment (wire 0.7.x).
+    # its published <name>.lidl. Pinned to feat/lip-alignment (wire 0.7.x).
     liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&dir=logos-rln-module";
   };
 
@@ -143,10 +142,7 @@
       };
 
       # The RLN dependency chain, re-exported from this flake's own locked
-      # inputs. delivery_module declares liblogos_rln_module in
-      # metadata.json#dependencies and logoscore refuses to load a module whose
-      # dependency chain is absent from the modules dir, so anything running
-      # this module has to install these three alongside it.
+      # inputs, for a node whose preset enables RLN.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
       lezCore = lezRlnModule.inputs.lez_core;

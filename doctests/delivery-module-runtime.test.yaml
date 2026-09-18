@@ -109,11 +109,11 @@ sections:
 
       - title: "Build the RLN dependency chain"
         text: |
-          `delivery_module` declares `liblogos_rln_module` in
-          `metadata.json#dependencies`, and the host refuses to load a module
-          whose dependency chain is absent from the modules directory — so that
-          chain has to be installed alongside it: `liblogos_rln_module` →
-          `liblogos_lez_rln_module` → `lez_core`.
+          `liblogos_rln_module` is an optional dependency of `delivery_module`:
+          a node whose preset has RLN off loads without it. A node on an
+          RLN-enabled preset needs the whole chain installed alongside it —
+          `liblogos_rln_module` → `liblogos_lez_rln_module` → `lez_core` — so
+          this walkthrough installs it too.
 
           Each is built at the rev this module's `flake.lock` pins for it, so
           the RLN modules you install are the ones the delivery module was
@@ -236,9 +236,8 @@ sections:
 
       - title: "Load the module"
         text: |
-          Load `delivery_module` into the running daemon. Only this module is
-          named — the host resolves `metadata.json#dependencies` and loads the
-          RLN chain with it:
+          Load `delivery_module` into the running daemon. Its RLN dependency is
+          optional, so the host loads this module alone:
         run: "./logos/bin/logoscore load-module delivery_module"
         code_block: "logoscore load-module delivery_module"
         expect_contains:

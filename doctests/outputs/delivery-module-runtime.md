@@ -117,11 +117,11 @@ ls delivery-lgx/*.lgx
 
 ### 3.2 Build the RLN dependency chain
 
-`delivery_module` declares `liblogos_rln_module` in
-`metadata.json#dependencies`, and the host refuses to load a module
-whose dependency chain is absent from the modules directory — so that
-chain has to be installed alongside it: `liblogos_rln_module` →
-`liblogos_lez_rln_module` → `lez_core`.
+`liblogos_rln_module` is an optional dependency of `delivery_module`:
+a node whose preset has RLN off loads without it. A node on an
+RLN-enabled preset needs the whole chain installed alongside it —
+`liblogos_rln_module` → `liblogos_lez_rln_module` → `lez_core` — so
+this walkthrough installs it too.
 
 Each is built at the rev this module's `flake.lock` pins for it, so
 the RLN modules you install are the ones the delivery module was
@@ -131,8 +131,8 @@ packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
 straight out of the lock.
 
 ```bash
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=c89c7691d06af32c002426f3c6f6dece79dbffaa&dir=logos-rln-module#lgx' -o rln-lgx
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=fix/module-dep-chain-resolution&rev=c56869db0d477212d8c3937c8fd85fcb6f27909b&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=53d31e3d71595c481e0e1be2ebc8120d8eaf9447&dir=logos-rln-module#lgx' -o rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=c89c7691d06af32c002426f3c6f6dece79dbffaa&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
 nix build 'github:logos-blockchain/logos-execution-zone-module/0ea57f8a1c57539d6ee0961a9cd27b064685b9e8#lgx' -o lez-core-lgx
 
 ```
@@ -265,9 +265,8 @@ logoscore list-modules
 
 ### 4.6 Load the module
 
-Load `delivery_module` into the running daemon. Only this module is
-named — the host resolves `metadata.json#dependencies` and loads the
-RLN chain with it:
+Load `delivery_module` into the running daemon. Its RLN dependency is
+optional, so the host loads this module alone:
 
 ```bash
 logoscore load-module delivery_module

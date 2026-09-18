@@ -1,7 +1,7 @@
 // Stub of the codegen-generated liblogos_rln_module client, for unit tests.
 //
 // The real header is emitted at build time by logos-cpp-generator from
-// metadata.json#dependencies (the std/LIDL variant). The unit tests build the
+// metadata.json#optional_dependencies (the std/LIDL variant). The unit tests build the
 // module sources without that codegen step, so this stand-in provides the
 // subset of `LiblogosRlnModule` that src/rln_bridge.cpp calls, with inline
 // no-op bodies: a default StdLogosResult is success=false with no error text,
