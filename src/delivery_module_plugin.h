@@ -18,6 +18,7 @@ class RlnBridge;
 // carried in the config itself.
 struct DeliveryRlnConfig {
     bool enabled = false;
+    bool manageBackend = true;
     std::string registryId;
     std::string rlnIdentifier;
     uint64_t epochSizeSec = 0;
@@ -290,6 +291,8 @@ public:
      * @param nodeInfoId Identifier for the requested node info item.
      * @return JSON data string on success, or error details.
      */
+    StdLogosResult getLocalMixPeerRecord();
+    StdLogosResult addMixPeer(const std::string& recordJson);
     StdLogosResult getNodeInfo(const std::string& nodeInfoId);
 
     /**

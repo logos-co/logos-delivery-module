@@ -80,6 +80,8 @@ public:
     void generateProof(uint64_t reqId, std::string registryId,
                        std::string rlnIdentifier, std::string signalHex,
                        uint64_t timestamp);
+    void callMix(uint64_t reqId, const std::string& method, const std::string& args);
+
     void validateProof(uint64_t reqId, std::string registryId,
                        std::string rlnIdentifier, std::string signalHex,
                        uint64_t timestamp, std::string proofJson);

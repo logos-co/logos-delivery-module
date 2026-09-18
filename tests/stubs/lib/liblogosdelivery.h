@@ -80,6 +80,10 @@ typedef void (*LogosDeliveryReplyFn)(int err_code,
 // NUL-terminated, and valid only for the duration of the call.
 typedef void (*LogosDeliveryScalarRawFn)(int caller_ret, char* msg, size_t len, void* user_data);
 
+typedef struct { const char* recordJson; } WakuMixAddPeerReq;
+extern "C" int waku_mix_get_peer_record(void*, LogosDeliveryScalarRawFn, void*);
+extern "C" int waku_mix_add_peer(void*, LogosDeliveryReplyFn, void*, const WakuMixAddPeerReq*);
+
 // Raw reply of the constructor: `ctx_addr` is the context address as decimal text.
 typedef void (*LogosDeliveryCreateRawFn)(int err_code,
                                          const char* ctx_addr,

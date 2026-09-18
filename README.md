@@ -132,3 +132,34 @@ tag. Pushing to a branch builds the site and uploads it as a `docs-preview`
 artifact instead, so a docs change can be previewed before it ships. Adding a
 new release to the version dropdown means editing
 [`docs/_root/switcher.json`](docs/_root/switcher.json).
+
+## Native Mix with a shared RLN backend
+
+Enable native Mix and set `anonymityLevel` to `Required` in `createNode` to
+route application `send()` calls through Mix. Configure
+`mix-rln-registry-id`, `mix-rln-identifier-hex`, and `mix-rln-metadata-topic`
+for the shared Mix proof provider. All Mix peers must use compatible scopes,
+epoch settings, and proof encoding. `Required` does not allow direct-send
+fallback when Mix is unavailable.
+
+`getLocalMixPeerRecord()` returns the node's Mix record;
+`addMixPeer(recordJson)` installs another participant's record. These methods
+require a created node with Mix enabled. Standalone intermediates expose the
+same record format. The final Mix exit must provide Lightpush service and
+connect to Relay; an ordinary Delivery recipient can receive via Relay or
+Filter without running Mix.
+
+Mix proofs and Relay proofs use separate application scopes. Native Mix calls
+`liblogos_rln_module` asynchronously through the module bridge. Its proof
+metadata is published through ordinary Relay or Lightpush, outside the
+application's `Required` path, to avoid a circular dependency.
+
+When several consumers share the backend, the host owns its startup and
+shutdown. In the `LOGOS_DELIVERY_RLN_PRESETS` table, set `manage-backend` to
+`false` for the selected preset. Delivery still installs the Relay proof
+bridge, but does not call backend `start` or `stop`. The default is `true`.
+Start and provision the backend before Delivery, with separate active Mix and
+Relay memberships; stop it only after all consumers have stopped.
+
+The full standalone/Delivery topology and its current verification status are
+tracked in [the Mix module work summary](https://github.com/logos-co/logos-libp2p-mix-rln/blob/feat/standalone-mix-intermediate/WORK_SUMMARY.md).
