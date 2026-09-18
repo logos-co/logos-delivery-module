@@ -152,7 +152,8 @@ Filter without running Mix.
 Mix proofs and Relay proofs use separate application scopes. Native Mix calls
 `liblogos_rln_module` asynchronously through the module bridge. Its proof
 metadata is published through ordinary Relay or Lightpush, outside the
-application's `Required` path, to avoid a circular dependency.
+application's `Required` path, to avoid a circular dependency. Shared Mix
+requires Relay RLN to be enabled before startup.
 
 When several consumers share the backend, the host owns its startup and
 shutdown. In the `LOGOS_DELIVERY_RLN_PRESETS` table, set `manage-backend` to
