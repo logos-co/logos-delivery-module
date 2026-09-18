@@ -86,6 +86,11 @@ int logosdelivery_ctx_create(const char* configJson, logosdelivery_create onCrea
     return RET_OK;
 }
 
+const char* logosdelivery_version(void) {
+    LOGOS_CMOCK_RECORD("logosdelivery_version");
+    return "mock-version";
+}
+
 int logosdelivery_ctx_destroy(LogosDeliveryCtx* ctx) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_destroy");
     free(ctx);

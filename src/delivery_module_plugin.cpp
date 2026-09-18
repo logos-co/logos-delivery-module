@@ -1120,6 +1120,9 @@ std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
 
     rlnConfig = cfg;
     rlnConfig.enabled = true;
+    // The setter is no nim-ffi entry point, so it does not bring the Nim runtime
+    // up; before that its lock is uninitialized (fatal on Windows). This call does.
+    (void)logosdelivery_version();
     if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
         rlnConfig = DeliveryRlnConfig{};
         return "failed to install the RLN plugin";

@@ -46,6 +46,9 @@ extern "C"
 {
 #endif
 
+  // Version and git commit hash. Needs no ctx; initializes the library.
+  const char *logosdelivery_version(void);
+
   // Raw result-delivery callback used by the event API. `msg` is a byte run of
   // `len` bytes, not NUL-terminated, valid only for the duration of the call.
   typedef void (*FFICallBack)(int callerRet, const char *msg, size_t len, void *userData);
