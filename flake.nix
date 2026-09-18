@@ -9,7 +9,7 @@
   };
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.0";
+    logos-module-builder.url = "github:logos-co/logos-module-builder/0c5b062fd11b20f85cc7c0720ddcac1cbbb46c4c";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=05600659d4a695ff65f0113b9cc275211c73e622";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
@@ -41,6 +41,10 @@
           logosdelivery = {
             input = inputs.logos-delivery;
             packages.default = "liblogosdelivery";
+            systems.x86_64-windows = {
+              system = "x86_64-linux";
+              packages.default = "liblogosdelivery-windows-x86_64";
+            };
           };
           # Bundle librln.dylib alongside liblogosdelivery.dylib so the transitive
           # dep resolves at runtime (and during logos-cpp-generator dlopen).
@@ -50,6 +54,10 @@
           rln = {
             input = inputs.logos-delivery;
             packages.default = "rln";
+            systems.x86_64-windows = {
+              system = "x86_64-linux";
+              packages.default = "rln-windows-x86_64";
+            };
           };
         };
         preConfigure = stageTinycbor;
