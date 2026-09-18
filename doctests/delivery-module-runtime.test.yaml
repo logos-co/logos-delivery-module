@@ -122,8 +122,8 @@ sections:
           `liblogos_lez_rln_module` — which reads the pins
           straight out of the lock.
         run: |
-          nix build 'git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=f501685dd8d65452508cac77db6fae967feec6ef&dir=logos-rln-module#lgx' -o rln-lgx
-          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=6e3c6c47d4d1ae7efa635a61a171891c23967fd8&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+          nix build 'git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=4f1f610a05d6108a88b6b9a4f365f6830365ae21&dir=logos-rln-module#lgx' -o rln-lgx
+          nix build 'git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=2f5ba3c5574a879adf245ce01400e0c3b0c5a1ff&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
         post_text: "Two more `.lgx` packages, one per module in the chain:"
         extra_run:
           run: "ls rln-lgx/*.lgx lez-rln-lgx/*.lgx"

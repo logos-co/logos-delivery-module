@@ -578,20 +578,20 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1789593167,
-        "narHash": "sha256-frhyHLPsbWECZxVgnP562lbrPK2j/snNBIOQjo10Lpw=",
-        "ref": "main",
-        "rev": "6e3c6c47d4d1ae7efa635a61a171891c23967fd8",
-        "revCount": 54,
+        "lastModified": 1789703180,
+        "narHash": "sha256-CBdSD00pDKqAeU5K8VO7e9FbQC9ZloAu985u3xZ9AKM=",
+        "ref": "feat/mix-wire-binding",
+        "rev": "2f5ba3c5574a879adf245ce01400e0c3b0c5a1ff",
+        "revCount": 57,
         "type": "git",
-        "url": "https://github.com/logos-co/logos-rln-modules"
+        "url": "https://github.com/richard-ramos/logos-rln-modules"
       },
       "original": {
         "dir": "logos-lez-rln-module",
-        "ref": "main",
-        "rev": "6e3c6c47d4d1ae7efa635a61a171891c23967fd8",
+        "ref": "feat/mix-wire-binding",
+        "rev": "2f5ba3c5574a879adf245ce01400e0c3b0c5a1ff",
         "type": "git",
-        "url": "https://github.com/logos-co/logos-rln-modules"
+        "url": "https://github.com/richard-ramos/logos-rln-modules"
       }
     },
     "liblogos_rln_module": {
@@ -601,18 +601,18 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1789696491,
-        "narHash": "sha256-4ahsn3HFzmHr7+ghfqh7XS9Q7l6vfdYBZqJmjEImpA4=",
+        "lastModified": 1789703283,
+        "narHash": "sha256-2hLS+O9+GSc4cMr7oeB5cn4U8NQHocDkYiPL9cXZk5s=",
         "ref": "feat/mix-wire-binding",
-        "rev": "f501685dd8d65452508cac77db6fae967feec6ef",
-        "revCount": 56,
+        "rev": "4f1f610a05d6108a88b6b9a4f365f6830365ae21",
+        "revCount": 58,
         "type": "git",
         "url": "https://github.com/richard-ramos/logos-rln-modules"
       },
       "original": {
         "dir": "logos-rln-module",
         "ref": "feat/mix-wire-binding",
-        "rev": "f501685dd8d65452508cac77db6fae967feec6ef",
+        "rev": "4f1f610a05d6108a88b6b9a4f365f6830365ae21",
         "type": "git",
         "url": "https://github.com/richard-ramos/logos-rln-modules"
       }
@@ -4759,17 +4759,17 @@
         "rust-rapidsnark": "rust-rapidsnark"
       },
       "locked": {
-        "lastModified": 1789151919,
-        "narHash": "sha256-SRLoER4MLUAUJ1P71RAANMxY6Wm4n2yTSBVKRdD116k=",
-        "owner": "adklempner",
+        "lastModified": 1789703085,
+        "narHash": "sha256-RVAigj0CRHMcpQ6SIwpCbdgndXLX+E3M2q5p/WlSeU8=",
+        "owner": "richard-ramos",
         "repo": "logos-execution-zone",
-        "rev": "8e2b119ea4e18faee58c4c469943cb1beaab742a",
+        "rev": "6752be252e441717ab934013cce101379ea4966b",
         "type": "github"
       },
       "original": {
-        "owner": "adklempner",
+        "owner": "richard-ramos",
         "repo": "logos-execution-zone",
-        "rev": "8e2b119ea4e18faee58c4c469943cb1beaab742a",
+        "rev": "6752be252e441717ab934013cce101379ea4966b",
         "type": "github"
       }
     },

@@ -17,7 +17,7 @@
     # entry as the flake input of the SAME name and generates bindings from
     # its published <name>.lidl, and logos-core auto-loads it by that module
     # name at runtime. Pinned to the Mix wire adapter change (wire 0.8.2).
-    liblogos_rln_module.url = "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=f501685dd8d65452508cac77db6fae967feec6ef&dir=logos-rln-module";
+    liblogos_rln_module.url = "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=4f1f610a05d6108a88b6b9a4f365f6830365ae21&dir=logos-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
