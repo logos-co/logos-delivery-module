@@ -229,4 +229,21 @@ int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
     return LOGOS_CMOCK_RETURN(int, "logosdelivery_rln_response");
 }
 
+int logosdelivery_mix_rln_set_callback(LogosDeliveryMixRlnCallFn, void*) {
+    LOGOS_CMOCK_RECORD("logosdelivery_mix_rln_set_callback");
+    return 0;
+}
+
+int waku_mix_get_peer_record(void*, logosdelivery_scalar cb, void* userData) {
+    LOGOS_CMOCK_RECORD("waku_mix_get_peer_record");
+    scalarOk("waku_mix_get_peer_record", cb, userData);
+    return RET_OK;
+}
+
+int waku_mix_add_peer(void*, logosdelivery_reply cb, void* userData, const void*) {
+    LOGOS_CMOCK_RECORD("waku_mix_add_peer");
+    replyOk("waku_mix_add_peer", cb, userData);
+    return RET_OK;
+}
+
 } // extern "C"

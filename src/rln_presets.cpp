@@ -117,6 +117,13 @@ std::string parseRlnPresetTable(const std::string& json,
         entry.enableValidation = enableValidationIt != value.end() && enableValidationIt->is_boolean()
                                      ? enableValidationIt->get<bool>()
                                      : true;
+        auto manageIt = value.find("manage-backend");
+        if (manageIt != value.end()) {
+            if (!manageIt->is_boolean()) {
+                return "manage-backend must be a boolean";
+            }
+            entry.manageBackend = manageIt->get<bool>();
+        }
         entry.registryId = stringField(value, "registry-id");
         entry.rlnIdentifier = stringField(value, "rln-identifier");
         entry.epochSizeSec = unsignedField(value, "epoch-size-sec");

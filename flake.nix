@@ -11,13 +11,13 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.0";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=6ab621754a4866c2636ef3cecfc6bae16b7eaceb";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=feat/mix-rln-module-interop&rev=9cc5babdd47d07bef396dafb54a367725ecb46e7";
     # The RLN API module. The input name is load-bearing and cannot be chosen
     # freely: logos-module-builder resolves each metadata.json#dependencies
     # entry as the flake input of the SAME name and generates bindings from
     # its published <name>.lidl, and logos-core auto-loads it by that module
-    # name at runtime. Pinned to feat/lip-alignment (wire 0.7.x).
-    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&dir=logos-rln-module";
+    # name at runtime. Pinned to the Mix wire adapter change (wire 0.8.2).
+    liblogos_rln_module.url = "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=4f1f610a05d6108a88b6b9a4f365f6830365ae21&dir=logos-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
@@ -146,16 +146,14 @@
       # inputs. delivery_module declares liblogos_rln_module in
       # metadata.json#dependencies and logoscore refuses to load a module whose
       # dependency chain is absent from the modules dir, so anything running
-      # this module has to install these three alongside it.
+      # this module has to install these two alongside it.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
-      lezCore = lezRlnModule.inputs.lez_core;
     in
     module // {
       packages = builtins.mapAttrs (system: pkgs: pkgs // {
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
-        "lez_core-lgx" = lezCore.packages.${system}.lgx;
       }) module.packages;
     };
 }

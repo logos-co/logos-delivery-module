@@ -440,3 +440,22 @@ std::string RlnBridge::serveFast(const Job& job)
     }
     return resultEnvelope(r);
 }
+
+void RlnBridge::callMix(uint64_t reqId, const std::string& method, const std::string& args)
+{
+    auto* id = new uint64_t(reqId);
+    const auto reply = [](int ok, const char* text, void* data) {
+        std::unique_ptr<uint64_t> id(static_cast<uint64_t*>(data));
+        try {
+            const std::string result = ok && text ? text :
+                json{{"error", {{"class", "transient"}, {"message", text ? text : "Mix RLN transport failed"}}}}.dump();
+            (void)logosdelivery_rln_response(*id, result.c_str());
+        } catch (...) {
+            (void)logosdelivery_rln_response(*id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN reply failed\"}}");
+        }
+    };
+    const int timeout = method == "generate_proof" ? 70000 : 9000;
+    if (!m_client || lp_invoke_async(m_client, method.c_str(), args.c_str(), timeout, reply, id) != LP_OK) {
+        reply(0, "Mix RLN call submission failed", id);
+    }
+}

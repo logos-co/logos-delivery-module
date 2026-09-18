@@ -32,14 +32,13 @@ Every shipped preset has RLN **off** (see [`networks.md`](./networks.md)).
 - Bringing the backend up reaches the chain, so `createNode` runs that on its
   own thread and returns without waiting. Follow it with `rlnState` or the
   `rlnStateChanged` event: `Disabled` → `Initializing` → `Ready` | `Failed`.
-- This module starts `liblogos_rln_module` itself; the library no longer
-  does. A bridge that cannot come up is not fatal: the `rln*Request` events
+- This module starts `liblogos_rln_module` unless the preset sets
+  `manage-backend=false` for a host-owned backend; the library does not.
+  A bridge that cannot come up is not fatal: the `rln*Request` events
   plus `rlnRespond` remain, but nothing starts the backend on that path.
 - `liblogos_rln_module` is declared in `metadata.json#dependencies`, so the
-  host auto-loads it along with its own deps (`liblogos_lez_rln_module`,
-  `lez_core`).
-- Bring-up fires `start` from this module, then the library's
-  `get_membership_state` gate: the node's membership must already be
+  host auto-loads it along with `liblogos_lez_rln_module`, which owns its wallet.
+- After the backend starts, the library checks `get_membership_state`: the node's membership must already be
   `active` or `grace_period` — registration happens out-of-band, through the
   RLN module, not through this library or its plugin.
   Without one (e.g. no chain), `start` fails with the RLN module's own
