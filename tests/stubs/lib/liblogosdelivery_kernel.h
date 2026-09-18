@@ -1,5 +1,5 @@
 // Stub header for liblogosdelivery_kernel - mirrors the subset of the
-// generated waku_* surface from logos-delivery (master 69fbffa3) that
+// generated waku_* surface from logos-delivery (1cf853e9) that
 // delivery_module_plugin.cpp actually consumes, so unit tests compile without
 // the real library. Keep in sync with the real header when bumping the
 // logos-delivery flake input.
@@ -15,21 +15,17 @@
 // Shared reply typedefs and RET_* return codes live in the stable header.
 #include "liblogosdelivery.h"
 
-typedef struct {
-    const char* jsonQuery;
-    const char* peerAddr;
-    int32_t timeoutMs;
-} WakuStoreQueryReq;
-
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-  int waku_store_query(void *ctx,
-                       LogosDeliveryReplyFn on_reply,
-                       void *user_data,
-                       const WakuStoreQueryReq *req);
+  int logosdelivery_ctx_waku_store_query(const LogosDeliveryCtx* ctx,
+                                         const char* jsonQuery,
+                                         const char* peerAddr,
+                                         int32_t timeoutMs,
+                                         LogosDeliveryReplyFn on_reply,
+                                         void* user_data);
 
 #ifdef __cplusplus
 }

@@ -17,12 +17,9 @@ extern "C" {
 }
 
 namespace {
-// The two reply shapes of the generated C ABI. Argument-taking exports deliver
-// a typed (errCode, reply, errMsg) triple of NUL-terminated strings; the
-// no-argument "scalar fast path" exports keep the raw (callerRet, msg, len)
-// byte run. Every generated per-call typedef is an alias of one of these.
-using DeliveryReplyFn = void (*)(int, const char*, const char*, void*);
-using DeliveryScalarFn = void (*)(int, char*, size_t, void*);
+// The reply shape every generated logosdelivery_ctx_* call shares: `reply`
+// points at the decoded result on success, `errMsg` carries a failure.
+using DeliveryReplyFn = void (*)(int, const char* const*, const char*, void*);
 
 struct CallbackContext {
     std::binary_semaphore sem{0};
@@ -72,64 +69,32 @@ void forgetCall(void* ticket)
     pendingCalls().erase(ticket);
 }
 
-// RET_STALE_WARN is a progress tick that fires every ~5s on a long call and is
-// always followed by a terminal code, so both trampolines ignore it instead of
-// completing the call.
-void replyTrampoline(int errCode, const char* reply, const char* errMsg, void* userData)
+// The generated trampolines already drop the RET_STALE_WARN progress ticks, so
+// every call here is terminal.
+void replyTrampoline(int errCode, const char* const* reply, const char* errMsg, void* userData)
 {
-    if (errCode == RET_STALE_WARN) {
-        return;
-    }
-
     auto context = claimCall(userData);
     if (!context) {
         return;
     }
 
     context->callerRet = errCode;
-    const char* text = (errCode == RET_OK) ? reply : errMsg;
+    const char* text = (errCode == RET_OK) ? (reply ? *reply : nullptr) : errMsg;
     if (text) {
         context->message = text;
     }
     context->sem.release();
 }
 
-void scalarTrampoline(int callerRet, char* msg, size_t len, void* userData)
+// Binds a generated wrapper, func(ctx, args..., onReply, userData), to its
+// arguments. The wrapper CBOR-encodes them before returning, so borrowed
+// strings need only outlive the call - they do, since it runs inside
+// callApiRetValue below.
+template <typename Func, typename... Args>
+auto bindApiCall(Func func, const LogosDeliveryCtx* ctx, Args... args)
 {
-    if (callerRet == RET_STALE_WARN) {
-        return;
-    }
-
-    auto context = claimCall(userData);
-    if (!context) {
-        return;
-    }
-
-    context->callerRet = callerRet;
-    if (msg && len > 0) {
-        context->message.assign(msg, len);
-    }
-    context->sem.release();
-}
-
-// Binds an argument-taking export to its request struct; the generated
-// signature is func(ctx, onReply, userData, &req). `req` borrows the caller's
-// strings, so those must outlive the bound call - they do, since it runs to
-// completion inside callApiRetValue below.
-template <typename Func, typename Req>
-auto bindApiCall(Func func, void* deliveryCtx, Req req)
-{
-    return [func, deliveryCtx, req](void* ticket) {
-        return func(deliveryCtx, static_cast<DeliveryReplyFn>(replyTrampoline), ticket, &req);
-    };
-}
-
-// Binds a no-argument export: func(ctx, callback, userData).
-template <typename Func>
-auto bindScalarApiCall(Func func, void* deliveryCtx)
-{
-    return [func, deliveryCtx](void* ticket) {
-        return func(deliveryCtx, static_cast<DeliveryScalarFn>(scalarTrampoline), ticket);
+    return [func, ctx, args...](void* ticket) {
+        return func(ctx, args..., static_cast<DeliveryReplyFn>(replyTrampoline), ticket);
     };
 }
 
@@ -151,7 +116,10 @@ StdLogosResult callApiRetValue(
 
     if (invoke(ticket) != RET_OK) {
         forgetCall(ticket);
-        return {false, {}, "failed to initiate " + operationName};
+        // A local failure (encode, allocation) was already reported through
+        // the reply callback, before the wrapper returned.
+        return {false, {}, context->message.empty() ? "failed to initiate " + operationName
+                                                    : context->message};
     }
 
     if (!context->sem.try_acquire_for(timeout)) {
