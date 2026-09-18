@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
@@ -11,6 +12,10 @@
 #include <optional>
 #include <semaphore>
 #include <unordered_map>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
@@ -34,6 +39,52 @@ extern "C" {
 namespace {
 namespace b64 = boost::beast::detail::base64;
 
+#ifdef _WIN32
+// liblogosdelivery dlopens optional deps (libpq.dll) by bare name, which Windows
+// never resolves against this plugin's directory; add it to the search order.
+void addOwnDirectoryToDllSearchPath()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        HMODULE self = nullptr;
+        if (!GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&addOwnDirectoryToDllSearchPath),
+                &self)) {
+            fprintf(stderr, "DeliveryModuleImpl: GetModuleHandleExW failed (%lu); "
+                            "bare-name dependencies may not resolve\n", GetLastError());
+            return;
+        }
+
+        std::wstring path(MAX_PATH, L'\0');
+        for (;;) {
+            const DWORD n = GetModuleFileNameW(self, path.data(), static_cast<DWORD>(path.size()));
+            if (n == 0) {
+                fprintf(stderr, "DeliveryModuleImpl: GetModuleFileNameW failed (%lu)\n", GetLastError());
+                return;
+            }
+            if (n < path.size()) {
+                path.resize(n);
+                break;
+            }
+            path.resize(path.size() * 2);  // truncated, retry with room
+        }
+
+        const size_t slash = path.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        path.resize(slash);
+
+        if (!SetDllDirectoryW(path.c_str())) {
+            fprintf(stderr, "DeliveryModuleImpl: SetDllDirectoryW failed (%lu)\n", GetLastError());
+        }
+    });
+}
+#else
+void addOwnDirectoryToDllSearchPath() {}
+#endif
+
 std::string base64Encode(const std::vector<uint8_t>& data) {
     std::string out;
     out.resize(b64::encoded_size(data.size()));
@@ -50,9 +101,13 @@ std::vector<uint8_t> base64Decode(const std::string& encoded) {
 }
 
 int64_t currentTimestampNs() {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return static_cast<int64_t>(ts.tv_sec) * 1000000000LL + static_cast<int64_t>(ts.tv_nsec);
+    // std::chrono rather than clock_gettime(CLOCK_REALTIME): the POSIX call is
+    // not available on mingw (neither the function nor CLOCK_REALTIME is
+    // declared), which broke the Windows cross-build. system_clock is the
+    // portable spelling of the same wall-clock reading.
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
 }
 
 std::string toStringOrEmpty(const char* s) {
@@ -536,6 +591,9 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
+
+    // Before the node dlopens anything by bare name (libpq.dll).
+    addOwnDirectoryToDllSearchPath();
 
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(),
                                                rlnPreset.enabled && !rlnPreset.enableValidation);
@@ -1062,6 +1120,9 @@ std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
 
     rlnConfig = cfg;
     rlnConfig.enabled = true;
+    // The setter is no nim-ffi entry point, so it does not bring the Nim runtime
+    // up; before that its lock is uninitialized (fatal on Windows). This call does.
+    (void)logosdelivery_version();
     if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
         rlnConfig = DeliveryRlnConfig{};
         return "failed to install the RLN plugin";

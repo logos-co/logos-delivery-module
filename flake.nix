@@ -9,9 +9,10 @@
   };
 
   inputs = {
-    logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.0";
+    logos-module-builder.url = "github:logos-co/logos-module-builder/0c5b062fd11b20f85cc7c0720ddcac1cbbb46c4c";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=05600659d4a695ff65f0113b9cc275211c73e622";
+    # logos-delivery#4125 (the Windows cross build); back to master once it merges.
+    logos-delivery.url = "git+https://github.com/dlipicar/logos-delivery?submodules=1&ref=feat/windows-cross-compilation&rev=1cf853e9c48613567f97626125c3b8c6f621bf3b";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
@@ -21,8 +22,9 @@
     # The RLN API module. The input name is load-bearing and cannot be chosen
     # freely: logos-module-builder resolves each metadata.json#optional_dependencies
     # entry as the flake input of the SAME name and generates bindings from
-    # its published <name>.lidl. Pinned to feat/lip-alignment (wire 0.7.x).
-    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&dir=logos-rln-module";
+    # its published <name>.lidl. Pinned to logos-rln-modules#26 (feat/lip-alignment,
+    # wire 0.7.x, plus the Windows target) until it merges.
+    liblogos_rln_module.url = "git+https://github.com/dlipicar/logos-rln-modules?ref=feat/windows-cross-support&dir=logos-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
@@ -41,6 +43,10 @@
           logosdelivery = {
             input = inputs.logos-delivery;
             packages.default = "liblogosdelivery";
+            systems.x86_64-windows = {
+              system = "x86_64-linux";
+              packages.default = "liblogosdelivery-windows-x86_64";
+            };
           };
           # Bundle librln.dylib alongside liblogosdelivery.dylib so the transitive
           # dep resolves at runtime (and during logos-cpp-generator dlopen).
@@ -50,6 +56,10 @@
           rln = {
             input = inputs.logos-delivery;
             packages.default = "rln";
+            systems.x86_64-windows = {
+              system = "x86_64-linux";
+              packages.default = "rln-windows-x86_64";
+            };
           };
         };
         preConfigure = stageTinycbor;
