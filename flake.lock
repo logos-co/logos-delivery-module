@@ -5070,18 +5070,18 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1789662409,
-        "narHash": "sha256-sVkpXab7MClU3JlWUkGO7bxlufr1x39F4DznwmnxZxk=",
+        "lastModified": 1789764120,
+        "narHash": "sha256-lmpl7hR1MRg95PcWp984E6riQqgq67NlD06Hlk+CfpE=",
         "ref": "master",
-        "rev": "6ab621754a4866c2636ef3cecfc6bae16b7eaceb",
-        "revCount": 2524,
+        "rev": "05600659d4a695ff65f0113b9cc275211c73e622",
+        "revCount": 2527,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
         "ref": "master",
-        "rev": "6ab621754a4866c2636ef3cecfc6bae16b7eaceb",
+        "rev": "05600659d4a695ff65f0113b9cc275211c73e622",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
@@ -48394,6 +48394,23 @@
         "type": "github"
       }
     },
+    "nim-ffi": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789743092,
+        "narHash": "sha256-PXCMAYcupVAObLZPd6xquL5jIcVWkdkWFSEGuQDZfZQ=",
+        "owner": "logos-messaging",
+        "repo": "nim-ffi",
+        "rev": "b9c4d26de013bba098e810f70074cbba6c5b4c15",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-messaging",
+        "repo": "nim-ffi",
+        "rev": "b9c4d26de013bba098e810f70074cbba6c5b4c15",
+        "type": "github"
+      }
+    },
     "nix-bundle-appimage": {
       "inputs": {
         "logos-nix": "logos-nix_38",
@@ -76079,6 +76096,7 @@
         "liblogos_rln_module": "liblogos_rln_module",
         "logos-delivery": "logos-delivery",
         "logos-module-builder": "logos-module-builder_16",
+        "nim-ffi": "nim-ffi",
         "nix-bundle-lgx": "nix-bundle-lgx_46"
       }
     },
@@ -76539,17 +76557,17 @@
         "rust-overlay": "rust-overlay_13"
       },
       "locked": {
-        "lastModified": 1779168423,
-        "narHash": "sha256-OmCnpM+ZcI79EVozdKADj9h4sFsLwfCs5w7OK8Ir6fc=",
+        "lastModified": 1789606952,
+        "narHash": "sha256-QY6DsVWLvE5tylfHNjt6b+vQ8EEMeaAQ1KWNMKzztnI=",
         "owner": "vacp2p",
         "repo": "zerokit",
-        "rev": "5e64cb8822bee65eed6cf459f95ae72b80c6ba63",
+        "rev": "ea80f39be3e7944e4537b5f4726a7c4aabfe0ab5",
         "type": "github"
       },
       "original": {
         "owner": "vacp2p",
         "repo": "zerokit",
-        "rev": "5e64cb8822bee65eed6cf459f95ae72b80c6ba63",
+        "rev": "ea80f39be3e7944e4537b5f4726a7c4aabfe0ab5",
         "type": "github"
       }
     }

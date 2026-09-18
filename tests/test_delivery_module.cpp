@@ -23,7 +23,7 @@
 // Helper: create an impl that has a valid delivery context (createNode called).
 // ---------------------------------------------------------------------------
 static DeliveryModuleImpl* createInitializedImpl(LogosTestContext& t) {
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
     auto* impl = new DeliveryModuleImpl();
     LOGOS_ASSERT_TRUE(impl->createNode(R"({"logLevel":"INFO"})").success);
     return impl;
@@ -78,7 +78,7 @@ static std::string settledRlnState(DeliveryModuleImpl& impl) {
 // on Failed. The plugin is installed synchronously either way, which is what
 // the RLN callback tests below need.
 static DeliveryModuleImpl* createRlnImpl(LogosTestContext& t) {
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
     auto* impl = new DeliveryModuleImpl();
     LOGOS_ASSERT_TRUE(impl->createNode(kRlnNodeCfg).success);
     return impl;
@@ -88,39 +88,39 @@ static DeliveryModuleImpl* createRlnImpl(LogosTestContext& t) {
 
 LOGOS_TEST(createNode_succeeds_when_ffi_returns_non_null_context) {
     auto t = LogosTestContext("delivery_module");
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO"})").success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_create_node"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_create"));
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_add_event_listener"));
 }
 
 LOGOS_TEST(createNode_fails_when_ffi_returns_null) {
     auto t = LogosTestContext("delivery_module");
-    t.mockCFunction("logosdelivery_create_node").returns(0);
+    t.mockCFunction("logosdelivery_ctx_create").returns(0);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_FALSE(impl.createNode(R"({"logLevel":"INFO"})").success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_create_node"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_create"));
 }
 
 LOGOS_TEST(createNode_tracks_call_count) {
     auto t = LogosTestContext("delivery_module");
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     impl.createNode(R"({"logLevel":"INFO"})");
-    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_create_node"), 1);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_create"), 1);
 }
 
 LOGOS_TEST(createNode_succeeds_with_logos_dev_preset_config) {
     auto t = LogosTestContext("delivery_module");
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"DEBUG","mode":"Core","preset":"logos.dev"})").success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_create_node"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_create"));
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_add_event_listener"));
 }
 
@@ -151,7 +151,7 @@ LOGOS_TEST(start_succeeds_after_createNode) {
     auto* impl = createInitializedImpl(t);
 
     LOGOS_ASSERT_TRUE(impl->start().success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_start_node"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_start_node"));
 
     delete impl;
 }
@@ -161,7 +161,7 @@ LOGOS_TEST(start_calls_ffi_start_node) {
     auto* impl = createInitializedImpl(t);
 
     impl->start();
-    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_start_node"), 1);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_start_node"), 1);
 
     delete impl;
 }
@@ -179,7 +179,7 @@ LOGOS_TEST(stop_succeeds_after_createNode) {
     auto* impl = createInitializedImpl(t);
 
     LOGOS_ASSERT_TRUE(impl->stop().success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_stop_node"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_stop_node"));
 
     delete impl;
 }
@@ -219,7 +219,7 @@ LOGOS_TEST(start_returns_false_when_dispatch_fails) {
 
     // A non-zero dispatch code means the library refused to start; start()
     // reports failure immediately and NO completion event is emitted.
-    t.mockCFunction("logosdelivery_start_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_start_node").returns(1);
     LOGOS_ASSERT_FALSE(impl->start().success);
     LOGOS_ASSERT_FALSE(delivery_test_events::g_lastNodeStarted.fired);
 
@@ -231,7 +231,7 @@ LOGOS_TEST(stop_returns_false_when_dispatch_fails) {
     delivery_test_events::resetNodeLifecycleEvents();
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_stop_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_stop_node").returns(1);
     LOGOS_ASSERT_FALSE(impl->stop().success);
     LOGOS_ASSERT_FALSE(delivery_test_events::g_lastNodeStopped.fired);
 
@@ -253,13 +253,13 @@ LOGOS_TEST(send_succeeds_and_returns_request_id) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_send").returns("req-id-abc123");
+    t.mockCFunction("logosdelivery_ctx_send").returns("req-id-abc123");
     std::vector<uint8_t> payload{'h','e','l','l','o',' ','w','o','r','l','d'};
     StdLogosResult result = impl->send("/test/1/delivery/proto", payload);
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("req-id-abc123"));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_send"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_send"));
 
     delete impl;
 }
@@ -268,12 +268,12 @@ LOGOS_TEST(send_calls_ffi_with_byte_array_payload) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_send").returns("req-id-xyz");
+    t.mockCFunction("logosdelivery_ctx_send").returns("req-id-xyz");
     std::vector<uint8_t> payload{'t','e','s','t','-','p','a','y','l','o','a','d'};
     StdLogosResult result = impl->send("/test/1/delivery/proto", payload);
 
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_send"), 1);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_send"), 1);
 
     delete impl;
 }
@@ -304,7 +304,7 @@ LOGOS_TEST(subscribe_succeeds_with_context) {
     auto* impl = createInitializedImpl(t);
 
     LOGOS_ASSERT_TRUE(impl->subscribe("/test/1/delivery/proto").success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_subscribe"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_subscribe"));
 
     delete impl;
 }
@@ -322,7 +322,7 @@ LOGOS_TEST(unsubscribe_succeeds_with_context) {
     auto* impl = createInitializedImpl(t);
 
     LOGOS_ASSERT_TRUE(impl->unsubscribe("/test/1/delivery/proto").success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_unsubscribe"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_unsubscribe"));
 
     delete impl;
 }
@@ -345,7 +345,7 @@ LOGOS_TEST(storeQuery_returns_response_json) {
 
     const char* responseJson =
         R"({"requestId":"req-1","statusCode":200,"statusDesc":"OK","messages":[]})";
-    t.mockCFunction("waku_store_query").returns(responseJson);
+    t.mockCFunction("logosdelivery_ctx_waku_store_query").returns(responseJson);
 
     StdLogosResult result = impl->storeQuery(
         R"({"requestId":"req-1","includeData":true,"paginationForward":true})",
@@ -353,7 +353,7 @@ LOGOS_TEST(storeQuery_returns_response_json) {
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string(responseJson));
-    LOGOS_ASSERT_EQ(t.cFunctionCallCount("waku_store_query"), 1);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_waku_store_query"), 1);
 
     delete impl;
 }
@@ -364,19 +364,19 @@ LOGOS_TEST(channelCreate_fails_without_createNode) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_FALSE(impl.channelCreate("chan-1", "/test/1/delivery/proto", "sender-1").success);
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_channel_create"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_channel_create"));
 }
 
 LOGOS_TEST(channelCreate_returns_channel_id) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_channel_create").returns("chan-1");
+    t.mockCFunction("logosdelivery_ctx_channel_create").returns("chan-1");
     StdLogosResult result = impl->channelCreate("chan-1", "/test/1/delivery/proto", "sender-1");
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("chan-1"));
-    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_channel_create"), 1);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_channel_create"), 1);
 
     delete impl;
 }
@@ -394,17 +394,17 @@ LOGOS_TEST(channelExists_passes_through_true_and_false) {
     auto* impl = createInitializedImpl(t);
 
     // The FFI returns "true"/"false" verbatim; an unknown id is not an error.
-    t.mockCFunction("logosdelivery_channel_exists").returns("true");
+    t.mockCFunction("logosdelivery_ctx_channel_exists").returns("true");
     StdLogosResult existing = impl->channelExists("chan-1");
     LOGOS_ASSERT_TRUE(existing.success);
     LOGOS_ASSERT_EQ(existing.value.get<std::string>(), std::string("true"));
 
-    t.mockCFunction("logosdelivery_channel_exists").returns("false");
+    t.mockCFunction("logosdelivery_ctx_channel_exists").returns("false");
     StdLogosResult missing = impl->channelExists("no-such-chan");
     LOGOS_ASSERT_TRUE(missing.success);
     LOGOS_ASSERT_EQ(missing.value.get<std::string>(), std::string("false"));
 
-    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_channel_exists"), 2);
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_channel_exists"), 2);
 
     delete impl;
 }
@@ -423,13 +423,13 @@ LOGOS_TEST(channelSend_succeeds_and_returns_request_id) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_channel_send").returns("req-id-chan-42");
+    t.mockCFunction("logosdelivery_ctx_channel_send").returns("req-id-chan-42");
     std::vector<uint8_t> payload{'h','e','l','l','o',' ','c','h','a','n'};
     StdLogosResult result = impl->channelSend("chan-1", payload);
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("req-id-chan-42"));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_channel_send"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_channel_send"));
 
     delete impl;
 }
@@ -447,7 +447,7 @@ LOGOS_TEST(channelClose_succeeds_with_context) {
     auto* impl = createInitializedImpl(t);
 
     LOGOS_ASSERT_TRUE(impl->channelClose("chan-1").success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_channel_close"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_channel_close"));
 
     delete impl;
 }
@@ -458,11 +458,11 @@ LOGOS_TEST(getAvailableNodeInfoIDs_returns_mocked_string) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_get_available_node_info_ids").returns(R"(["Version","MyPeerId"])");
+    t.mockCFunction("logosdelivery_ctx_get_available_node_info_ids").returns(R"(["Version","MyPeerId"])");
     StdLogosResult result = impl->getAvailableNodeInfoIDs();
 
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_available_node_info_ids"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_available_node_info_ids"));
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string(R"(["Version","MyPeerId"])"));
 
     delete impl;
@@ -481,12 +481,12 @@ LOGOS_TEST(getNodeInfo_returns_mocked_value_for_attribute) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_get_node_info").returns("v1.2.3");
+    t.mockCFunction("logosdelivery_ctx_get_node_info").returns("v1.2.3");
     StdLogosResult result = impl->getNodeInfo("Version");
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("v1.2.3"));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_node_info"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_node_info"));
 
     delete impl;
 }
@@ -497,11 +497,11 @@ LOGOS_TEST(getAvailableConfigs_returns_mocked_json) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_get_available_configs").returns(R"([{"key":"mode","type":"string"}])");
+    t.mockCFunction("logosdelivery_ctx_get_available_configs").returns(R"([{"key":"mode","type":"string"}])");
     StdLogosResult result = impl->getAvailableConfigs();
 
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_available_configs"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_available_configs"));
 
     delete impl;
 }
@@ -521,7 +521,7 @@ LOGOS_TEST(collectOpenMetricsText_returns_empty_without_createNode) {
 
     LOGOS_ASSERT_EQ(impl.collectOpenMetricsText(), std::string(""));
     // No context -> we must not even attempt the FFI read.
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_get_node_info"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_get_node_info"));
 }
 
 LOGOS_TEST(collectOpenMetricsText_returns_metrics_text_verbatim) {
@@ -532,11 +532,11 @@ LOGOS_TEST(collectOpenMetricsText_returns_metrics_text_verbatim) {
         "# HELP waku_node_messages_total number of messages\n"
         "# TYPE waku_node_messages_total counter\n"
         "waku_node_messages_total{shard=\"0\"} 42\n";
-    t.mockCFunction("logosdelivery_get_node_info").returns(promText);
+    t.mockCFunction("logosdelivery_ctx_get_node_info").returns(promText);
 
     // The module is a pure passthrough: the openmetrics scraper does the parsing.
     LOGOS_ASSERT_EQ(impl->collectOpenMetricsText(), std::string(promText));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_get_node_info"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_node_info"));
 
     delete impl;
 }
@@ -649,7 +649,7 @@ LOGOS_TEST(createNode_without_an_rln_preset_installs_no_plugin) {
 LOGOS_TEST(builtin_presets_leave_rln_off) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.test"})").success);
@@ -662,7 +662,7 @@ LOGOS_TEST(an_rln_preset_installs_the_plugin_and_reports_bring_up) {
     delivery_test_rln::resetRlnMockState();
     delivery_test_events::resetRlnStateEvent();
     RlnPresetsFile presets(kRlnPresetTable);
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
@@ -692,7 +692,7 @@ LOGOS_TEST(a_preset_with_validation_off_disables_it_in_the_library_config) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     RlnPresetsFile presets(kRlnPresetTableNoValidation);
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
@@ -706,7 +706,7 @@ LOGOS_TEST(a_preset_without_the_flag_leaves_library_validation_on) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     RlnPresetsFile presets(kRlnPresetTable);
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
@@ -721,7 +721,7 @@ LOGOS_TEST(a_broken_presets_file_fails_createNode) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     RlnPresetsFile presets(R"({"logos.test": {"enabled": true, "registry-id": "reg"}})");
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     StdLogosResult r = impl.createNode(kRlnNodeCfg);
@@ -747,7 +747,7 @@ LOGOS_TEST(preset_names_are_matched_exactly) {
 LOGOS_TEST(createNode_rejects_a_preset_spelling_it_does_not_know) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    t.mockCFunction("logosdelivery_create_node").returns(1);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_FALSE(impl.createNode(R"({"logLevel":"INFO","preset":"logostest"})").success);

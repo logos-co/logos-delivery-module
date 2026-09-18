@@ -146,7 +146,7 @@ public:
     /**
      * @brief Sends a message over the active node.
      *
-     * Builds a JSON envelope expected by `logosdelivery_send`:
+     * Builds a JSON envelope expected by `logosdelivery_ctx_send`:
      * `{ "contentTopic": string, "payload": base64, "ephemeral": false }`.
      *
      * Returns a requestId on success. Async results come via typed events:
@@ -179,7 +179,7 @@ public:
      * @brief Runs a Store (historical message) query against a specific store
      *        service peer.
      *
-     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`waku_store_query`,
+     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`logosdelivery_ctx_waku_store_query`,
      * `liblogosdelivery_kernel.h`), which is subject to change at any point
      * without a deprecation cycle. This method's JSON contract follows it.
      *
@@ -241,7 +241,7 @@ public:
     /**
      * @brief Sends a message on a reliable channel.
      *
-     * Builds the JSON envelope expected by `logosdelivery_channel_send`:
+     * Builds the JSON envelope expected by `logosdelivery_ctx_channel_send`:
      * `{ "payload": base64, "ephemeral": false }`.
      *
      * Returns a requestId on success. Async results come via typed events:
@@ -560,11 +560,12 @@ private:
     // DeliveryRlnConfig).
     DeliveryRlnConfig rlnConfig;
 
-    // Raw FFI context: what every call and the event registry take.
+    // Raw FFI context: what the event registry takes.
     void* deliveryCtx;
-    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
-    // as void* so the C ABI header stays out of this header's includers.
-    // Released with logosdelivery_ctx_destroy.
+    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), which
+    // every logosdelivery_ctx_* call takes. Held as void* so the C ABI header
+    // stays out of this header's includers. Released with
+    // logosdelivery_ctx_destroy.
     void* deliveryCtxHandle;
 
     std::mutex createNodeMutex;
@@ -582,10 +583,10 @@ private:
 
     // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
     // userData is the DeliveryModuleImpl*.
-    // Both take the scalar-fast-path reply shape and ignore RET_STALE_WARN,
-    // the non-terminal progress tick a long start/stop emits.
-    static void start_callback(int callerRet, char* msg, size_t len, void* userData);
-    static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
+    static void start_callback(int errCode, const char* const* reply, const char* errMsg,
+                               void* userData);
+    static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
+                              void* userData);
 
     // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by

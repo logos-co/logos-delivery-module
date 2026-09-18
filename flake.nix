@@ -11,7 +11,13 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.0";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=6ab621754a4866c2636ef3cecfc6bae16b7eaceb";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=master&rev=05600659d4a695ff65f0113b9cc275211c73e622";
+    # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
+    # logos-delivery's nimble.lock pins.
+    nim-ffi = {
+      url = "github:logos-messaging/nim-ffi/b9c4d26de013bba098e810f70074cbba6c5b4c15";
+      flake = false;
+    };
     # The RLN API module. The input name is load-bearing and cannot be chosen
     # freely: logos-module-builder resolves each metadata.json#optional_dependencies
     # entry as the flake input of the SAME name and generates bindings from
@@ -21,6 +27,12 @@
 
   outputs = inputs@{ logos-module-builder, ... }:
     let
+      # CMakeLists.txt compiles these into the plugin (and the integration tests).
+      stageTinycbor = ''
+        mkdir -p lib/tinycbor
+        cp ${inputs.nim-ffi}/ffi/codegen/templates/cpp/vendor/tinycbor/*.[ch] lib/tinycbor/
+        chmod -R u+w lib/tinycbor
+      '';
       module = logos-module-builder.lib.mkLogosModule {
         src = ./.;
         configFile = ./metadata.json;
@@ -40,6 +52,7 @@
             packages.default = "rln";
           };
         };
+        preConfigure = stageTinycbor;
         tests = {
           dir = ./tests;
           mockCLibs = [ "logosdelivery" ];
@@ -49,7 +62,7 @@
           # TODO: remove once logos-module-builder mkLogosModuleTests.nix handles
           # transitive dylib dependency rewriting in its preConfigure (similar to
           # the postInstall rewrite done for the main module build).
-          preConfigure = ''
+          preConfigure = stageTinycbor + ''
             if [ -f lib/liblogosdelivery.dylib ]; then
               OLD_RLN=$(otool -L lib/liblogosdelivery.dylib | awk '/librln/{print $1}')
               if [ -n "$OLD_RLN" ]; then
