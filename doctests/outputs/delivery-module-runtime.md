@@ -131,7 +131,7 @@ packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
 straight out of the lock.
 
 ```bash
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=53d31e3d71595c481e0e1be2ebc8120d8eaf9447&dir=logos-rln-module#lgx' -o rln-lgx
+nix build 'git+https://github.com/dlipicar/logos-rln-modules?ref=feat/windows-cross-support&rev=9fec87a67a725935b2040b9d8c65b4e4b3a04082&dir=logos-rln-module#lgx' -o rln-lgx
 nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=feat/lip-alignment&rev=c89c7691d06af32c002426f3c6f6dece79dbffaa&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
 nix build 'github:logos-blockchain/logos-execution-zone-module/0ea57f8a1c57539d6ee0961a9cd27b064685b9e8#lgx' -o lez-core-lgx
 
