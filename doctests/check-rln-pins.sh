@@ -15,10 +15,9 @@ SPEC="doctests/delivery-module-runtime.test.yaml"
 
 rln=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
 lez=$(jq -r --arg n "$rln" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
-core=$(jq -r --arg n "$lez" '.nodes[$n].inputs.lez_core' flake.lock)
 
 status=0
-for node in "$rln" "$lez" "$core"; do
+for node in "$rln" "$lez"; do
   rev=$(jq -r --arg n "$node" '.nodes[$n].locked.rev' flake.lock)
   if ! grep -q "$rev" "$SPEC"; then
     echo "$SPEC does not pin $node at $rev (flake.lock)" >&2

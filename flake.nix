@@ -146,16 +146,14 @@
       # inputs. delivery_module declares liblogos_rln_module in
       # metadata.json#dependencies and logoscore refuses to load a module whose
       # dependency chain is absent from the modules dir, so anything running
-      # this module has to install these three alongside it.
+      # this module has to install these two alongside it.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
-      lezCore = lezRlnModule.inputs.lez_core;
     in
     module // {
       packages = builtins.mapAttrs (system: pkgs: pkgs // {
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
-        "lez_core-lgx" = lezCore.packages.${system}.lgx;
       }) module.packages;
     };
 }
