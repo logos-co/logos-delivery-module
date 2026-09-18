@@ -11,9 +11,8 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0c5b062fd11b20f85cc7c0720ddcac1cbbb46c4c";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    # logos-delivery#4125 (Windows cross build), stacked on #4281 (nim-ffi's
-    # CBOR ABI, which this module now speaks).
-    logos-delivery.url = "github:dlipicar/logos-delivery/1cf853e9c48613567f97626125c3b8c6f621bf3b";
+    # logos-delivery#4125 (the Windows cross build); back to master once it merges.
+    logos-delivery.url = "git+https://github.com/dlipicar/logos-delivery?submodules=1&ref=feat/windows-cross-compilation&rev=1cf853e9c48613567f97626125c3b8c6f621bf3b";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {

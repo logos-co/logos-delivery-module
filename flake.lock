@@ -5071,17 +5071,20 @@
       },
       "locked": {
         "lastModified": 1789754331,
-        "narHash": "sha256-SONiceJpAx7E//UxN3B5iDHvXK6hM3qbTe/nqu0Eq+w=",
-        "owner": "dlipicar",
-        "repo": "logos-delivery",
+        "narHash": "sha256-8xtD61e1BRa8YHxqVgRVjN/HeQ0x3eV1BxXry6HPFdA=",
+        "ref": "feat/windows-cross-compilation",
         "rev": "1cf853e9c48613567f97626125c3b8c6f621bf3b",
-        "type": "github"
+        "revCount": 2537,
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/dlipicar/logos-delivery"
       },
       "original": {
-        "owner": "dlipicar",
-        "repo": "logos-delivery",
+        "ref": "feat/windows-cross-compilation",
         "rev": "1cf853e9c48613567f97626125c3b8c6f621bf3b",
-        "type": "github"
+        "submodules": true,
+        "type": "git",
+        "url": "https://github.com/dlipicar/logos-delivery"
       }
     },
     "logos-design-system": {
