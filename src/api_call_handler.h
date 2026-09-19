@@ -118,7 +118,7 @@ StdLogosResult callApiRetValue(
         forgetCall(ticket);
         // A local failure (encode, allocation) was already reported through
         // the reply callback, before the wrapper returned.
-        return {false, {}, context->message.empty() ? "failed to initiate " + operationName
+        return {false, {}, context->message.empty() ? "failed to initiate: " + operationName
                                                     : context->message};
     }
 
