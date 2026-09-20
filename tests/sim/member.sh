@@ -8,6 +8,7 @@ log() { echo "[sim $(hostname)] $*"; }
 IP=$(hostname -i | awk '{print $1}')
 P2P_PORT=${P2P_PORT:-45000}
 METRICS_PORT=${METRICS_PORT:-9100}
+MESH_CONTENT_TOPIC=${MESH_CONTENT_TOPIC:-/sim/1/mesh/proto}
 LOOKUP=${LOOKUP_INTERVAL:-15}
 : "${SEED_ADDR:?SEED_ADDR (/ip4/../tcp/../p2p/..) is required}"
 
@@ -36,9 +37,17 @@ until logoscore list-modules >/dev/null 2>&1; do
 done
 
 retry() { # <label> <cmd...>: three attempts, replies get lost under load
+  # The CLI exits 0 even when the module answers with a failure, so the reply
+  # body decides: a module error prints as success=false / "error" / "failed".
   local label=$1; shift; local i
   for i in 1 2 3; do
-    if "$@" >/tmp/cli.out 2>&1; then log "$label OK"; return 0; fi
+    if "$@" >/tmp/cli.out 2>&1; then
+      if grep -qiE '"?success"?[[:space:]]*[:=][[:space:]]*false|^error|failed' /tmp/cli.out; then
+        log "$label REFUSED: $(tr '\n' ' ' </tmp/cli.out | cut -c1-300)"
+      else
+        log "$label OK"; return 0
+      fi
+    fi
     sleep 1
   done
   log "$label FAILED: $(tr '\n' ' ' </tmp/cli.out | cut -c1-300)"; return 1
@@ -46,6 +55,14 @@ retry() { # <label> <cmd...>: three attempts, replies get lost under load
 retry "load-module delivery_module" logoscore load-module delivery_module
 retry "createNode" logoscore call delivery_module createNode @/data/member.json
 retry "start" logoscore call delivery_module start
+
+# A node joins a shard's gossipsub topic only when something subscribes: the
+# startup subscription in the library runs solely for an app-supplied relay
+# handler, and neither a kernel node nor the messaging client registers one.
+# So ask for a content topic here. With one shard in the network every content
+# topic autoshards onto shard 0, which is the mesh the members share.
+retry "subscribe ${MESH_CONTENT_TOPIC}" \
+  logoscore call delivery_module subscribe "${MESH_CONTENT_TOPIC}"
 
 # /metrics for this member: the openmetrics module merges the delivery library's
 # Prometheus registry (rendered text) with nim-libp2p's registry inside

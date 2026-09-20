@@ -1,23 +1,14 @@
 {
-  "entryLayer": "kernel",
-  "kernelConf": {
+  "entryLayer": "messaging",
+  "messagingOverrides": {
     "cluster-id": 42,
-    "shard": [0],
-    "relay": true,
-    "mix": false,
+    "num-shards-in-network": 1,
     "plugin-kad-discovery": true,
     "kad-bootstrap-node": ["@SEED@"],
+    "kad-service-lookup-interval": @LOOKUP@,
     "discv5-discovery": false,
-    "peer-exchange": false,
-    "rendezvous": false,
-    "dns-discovery": false,
-    "rest": false,
-    "metrics-server": false,
-    "metrics-logging": false,
     "tcp-port": 44000,
     "nat": "extip:@IP@",
-    "kad-service-lookup-interval": @LOOKUP@,
-    "kad-random-lookup-interval": @LOOKUP@,
     "log-level": "DEBUG"
   }
 }

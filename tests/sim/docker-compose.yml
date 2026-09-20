@@ -34,7 +34,6 @@ services:
       - --metrics-server-port=8008
       - --metrics-logging=false
       - --kad-service-lookup-interval=${LOOKUP_INTERVAL:-15}
-      - --kad-random-lookup-interval=${LOOKUP_INTERVAL:-15}
       - --max-pure-libp2p-peers=${MAX_PURE:-200}
       - --tcp-port=44001
       # 64 x '9': peer id 16Uiu2HAm4gVVMqAzg2gT5cBii3qfaXykUJoB7jyHgAu71RuiELmz
