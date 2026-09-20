@@ -101,10 +101,8 @@ std::vector<uint8_t> base64Decode(const std::string& encoded) {
 }
 
 int64_t currentTimestampNs() {
-    // std::chrono rather than clock_gettime(CLOCK_REALTIME): the POSIX call is
-    // not available on mingw (neither the function nor CLOCK_REALTIME is
-    // declared), which broke the Windows cross-build. system_clock is the
-    // portable spelling of the same wall-clock reading.
+    // std::chrono, not clock_gettime(CLOCK_REALTIME): mingw declares neither,
+    // and system_clock is the portable spelling of the same reading.
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::system_clock::now().time_since_epoch())
         .count();

@@ -18,10 +18,8 @@
       url = "github:logos-messaging/nim-ffi/b9c4d26de013bba098e810f70074cbba6c5b4c15";
       flake = false;
     };
-    # The RLN API module. The input name is load-bearing and cannot be chosen
-    # freely: logos-module-builder resolves each metadata.json#optional_dependencies
-    # entry as the flake input of the SAME name and generates bindings from
-    # its published <name>.lidl.
+    # The name is load-bearing: the builder resolves each optional_dependencies
+    # entry as the input of that name and generates bindings from its LIDL.
     liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=65697028baffc072e1aeebaec7c7e35e7e12cab1&dir=logos-rln-module";
   };
 
