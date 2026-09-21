@@ -56,6 +56,13 @@ typedef struct {
     const char* channelIdStr;
     const char* contentTopicStr;
     const char* senderIdStr;
+    // LogosDeliveryCryptoFn pointers cast to uint64_t; all three zero means
+    // an unencrypted channel. The library reads these unconditionally, so a
+    // caller that omits them feeds it stack garbage — and a non-zero garbage
+    // encryptFn segfaults on the first channel_send.
+    uint64_t encryptFn;
+    uint64_t decryptFn;
+    uint64_t userData;
 } LogosdeliveryChannelCreateReq;
 typedef struct {
     const char* channelIdStr;

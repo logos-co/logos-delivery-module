@@ -862,7 +862,11 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
         bindApiCall(logosdelivery_channel_create, deliveryCtx,
                     LogosdeliveryChannelCreateReq{.channelIdStr = channelId.c_str(),
                                                   .contentTopicStr = contentTopic.c_str(),
-                                                  .senderIdStr = senderId.c_str()}));
+                                                  .senderIdStr = senderId.c_str(),
+                                                  // no channel encryption: all-zero cipher triple
+                                                  .encryptFn = 0,
+                                                  .decryptFn = 0,
+                                                  .userData = 0}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
