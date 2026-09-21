@@ -132,11 +132,14 @@
           # libpq is loaded at runtime via dlopen/dlsym (not a linked dependency),
           # so install_name_tool has no effect on macOS — otool -L won't show libpq.
           # On Linux, dlopen with a bare name searches the calling library's DT_RUNPATH,
-          # so setting $ORIGIN makes libpq.so discoverable from the same directory.
+          # so prepending $ORIGIN makes libpq.so discoverable from the same directory.
+          # Prepend, don't replace: the original RUNPATH carries the store paths for 
+          # linked deps.
           if [ -f "$out/lib/liblogosdelivery.so" ]; then
-            echo "Fixing rpath in liblogosdelivery.so: adding \$ORIGIN for dlopen libpq resolution"
+            echo "Fixing rpath in liblogosdelivery.so: prepending \$ORIGIN for dlopen libpq resolution"
             chmod u+w "$out/lib/liblogosdelivery.so"
-            patchelf --set-rpath '$ORIGIN' "$out/lib/liblogosdelivery.so"
+            OLD_RPATH=$(patchelf --print-rpath "$out/lib/liblogosdelivery.so")
+            patchelf --set-rpath '$ORIGIN'"''${OLD_RPATH:+:$OLD_RPATH}" "$out/lib/liblogosdelivery.so"
           fi
         '';
       };
