@@ -93,6 +93,23 @@ private:
      */
     std::string ensureBackend();
 
+    /**
+     * @brief Precondition for every entry point that talks to libp2p.
+     *
+     * Runs ensureBackend and turns a failure into the LD_DISCO_ERROR the ABI
+     * wants, with the diagnostic in @p errBuf. Cheap once the backend is up --
+     * ensureBackend returns on a bool -- so every verb can afford to ask.
+     *
+     * Every verb has to, because libp2p brings up a default node on its own
+     * when it is called before ours exists, and bootstrap peers can only be
+     * given at createNode. A verb that skipped this and arrived first would
+     * leave libp2p with a kademlia that has no peers and no way to be given
+     * any, which fails silently: lookups simply return nothing.
+     *
+     * @return LD_DISCO_OK when the backend is usable, LD_DISCO_ERROR otherwise.
+     */
+    int requireBackend(char* errBuf, size_t errBufLen);
+
     /// Criteria keys arrive as "service:<id>" / "topic:<pubsubTopic>" / "cap:<x>".
     /// libp2p wants a bare service id, so the "service:" prefix is stripped; other
     /// kinds pass through verbatim, which keeps advertise and lookup agreeing
