@@ -184,6 +184,17 @@ std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
     return k;
 }
 
+int DeliveryServiceDiscoveryPlugin::requireBackend(char* errBuf, size_t errBufLen)
+{
+    const std::string failure = ensureBackend();
+    if (failure.empty()) {
+        return LD_DISCO_OK;
+    }
+    trace("libp2p backend           UNAVAILABLE  %s", failure.c_str());
+    writeErr(errBuf, errBufLen, "libp2p backend unavailable: " + failure);
+    return LD_DISCO_ERROR;
+}
+
 std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
 {
     if (backendReady_) {
@@ -342,11 +353,9 @@ int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBu
     // done. logos-delivery's start/stop scopes ITS use of discovery -- which
     // interests are registered, which lookups run -- not the provider's
     // lifecycle.
-    const std::string failure = LD_SELF(ctx)->ensureBackend();
-    if (!failure.empty()) {
-        trace("libp2p backend           UNAVAILABLE  %s", failure.c_str());
-        writeErr(errBuf, errBufLen, "libp2p backend unavailable: " + failure);
-        return LD_DISCO_ERROR;
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
     }
     trace("%-22s OK (backend already running)", "start");
     return LD_DISCO_OK;
@@ -368,6 +377,10 @@ int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBuf
 int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t limit,
                                             char** outJson, char* errBuf, size_t errBufLen)
 {
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
+    }
     // libp2p's discoLookup takes (serviceId, serviceData) and has no result
     // cap, so `limit` has nowhere to go; the caller trims what it gets back.
     (void)limit;
@@ -399,6 +412,10 @@ int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t 
 int DeliveryServiceDiscoveryPlugin::cRandomLookup(void* ctx, char** outJson,
                                                   char* errBuf, size_t errBufLen)
 {
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
+    }
     logos::CallError err;
     const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoRandomLookup(&err);
     const int rc = settle("discoRandomLookup", r, err, errBuf, errBufLen);
@@ -432,6 +449,10 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
                                                       const uint8_t* record, size_t recordLen,
                                                       char* errBuf, size_t errBufLen)
 {
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
+    }
     // `record` is the delivery node's own signed extended peer record, which
     // libp2p publishes verbatim instead of one built from *its* identity. It
     // is raw protobuf; libp2p_module's transport is JSON and its entry point
@@ -471,6 +492,10 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
 int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
                                                      char* errBuf, size_t errBufLen)
 {
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
+    }
     logos::CallError err;
     const StdLogosResult r =
         LD_SELF(ctx)->libp2p_->discoStopAdvertising(toServiceId(key), &err);
@@ -483,6 +508,10 @@ int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
 int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key,
                                                       char* errBuf, size_t errBufLen)
 {
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
+    }
     logos::CallError err;
     const StdLogosResult r =
         LD_SELF(ctx)->libp2p_->discoRegisterInterest(toServiceId(key), &err);
@@ -495,6 +524,10 @@ int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key
 int DeliveryServiceDiscoveryPlugin::cUnregisterInterest(void* ctx, const char* key,
                                                         char* errBuf, size_t errBufLen)
 {
+    const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
+    if (ready != LD_DISCO_OK) {
+        return ready;
+    }
     logos::CallError err;
     const StdLogosResult r =
         LD_SELF(ctx)->libp2p_->discoUnregisterInterest(toServiceId(key), &err);
