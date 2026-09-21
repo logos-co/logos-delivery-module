@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <algorithm>
+#include <cctype>
 
 #include <nlohmann/json.hpp>
 
@@ -69,6 +71,23 @@ void trace(const char* fmt, ...)
     vfprintf(f, fmt, ap);
     va_end(ap);
     fputc('\n', f);
+}
+
+/// Whether a transport error is a call deadline expiring rather than a
+/// refusal. Matched on the text because CallError carries no typed code for
+/// it: libp2p reports code "Failed to start libp2p" with message "timeout".
+/// Deliberately narrow -- everything else (object_unavailable, dispatch
+/// failures, a refusal by signature) stays fatal, because those mean the
+/// backend is not coming up at all rather than not coming up yet.
+bool isCallTimeout(const logos::CallError& err)
+{
+    const auto mentionsTimeout = [](const std::string& s) {
+        std::string lowered(s);
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lowered.find("timeout") != std::string::npos;
+    };
+    return mentionsTimeout(err.code) || mentionsTimeout(err.message);
 }
 
 void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
@@ -247,7 +266,23 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     {
         logos::CallError err;
         const StdLogosResult r = libp2p_->start(&err);
-        if (!err.ok()) {
+        if (!err.ok() && isCallTimeout(err)) {
+            // A notice, not a failure. libp2p's call deadline is a fixed 10s
+            // (see kMaxBootstrapNodes) and the switch start it covers keeps
+            // running past it -- kademlia bootstraps inside that start, which
+            // is exactly what overruns the budget. So `timeout` says the call
+            // stopped watching, not that the bring-up stopped: re-issuing
+            // `start` would only meet nim-libp2p's double-start guard, and
+            // failing here would abort a node start over work that is still
+            // finishing.
+            //
+            // The cost of being wrong is bounded and visible: if it really did
+            // not come up, the verbs that follow fail and say so, and the
+            // lookup loops retry on their own interval. A fix is in flight on
+            // libp2p's side; revisit when the deadline becomes configurable.
+            trace("libp2p start             NOTICE  %s: %s (bring-up continues)",
+                  err.code.c_str(), err.message.c_str());
+        } else if (!err.ok()) {
             diagnostics += "start: " + err.code + ": " + err.message + "; ";
         } else if (!r.success) {
             diagnostics += "start: " + (r.error.empty() ? std::string("failed") : r.error) + "; ";
