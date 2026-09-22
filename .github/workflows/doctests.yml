@@ -135,11 +135,18 @@ jobs:
           echo "Generated markdown successfully"
 
   windows:
-    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
+    # Shared CI stages logoscore-cli from its own flake, as the Unix doctests do.
+    # Switch back to @v1 after logos-windows-ci#7 is merged into that tag.
+    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@codex/external-windows-targets
     secrets: inherit
     with:
-      # Stage the module's DLL closure, installable layout, and CLI host.
-      targets: default install-portable windows-logoscore
+      # Stage the module's DLL closure and installable layout.
+      targets: default install-portable
+      extra-targets: >-
+        {"windows-logoscore": {
+          "ref": "github:logos-co/logos-logoscore-cli#packages.x86_64-windows.cli-bundle-dir",
+          "omit": ["lib/qt-6/plugins"]
+        }}
       assemble: '{"install-portable": ["default/lib", "windows-logoscore/bin"]}'
       doctest-spec: doctests/delivery-module-runtime.test.yaml
       doctest-artifact: delivery-doctest-report
