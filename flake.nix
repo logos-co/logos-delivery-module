@@ -180,7 +180,7 @@
         windows-logoscore = ((builtins.getFlake
           "github:logos-co/logos-logoscore-cli/f404cabba5106d874686ce3f0bf248449f02cce2?narHash=sha256-Tu86IUL7ELo9MTNZoEbZkdLFcK25uinCeuNXWHe4CDw%3D")
           .packages.${system}.cli-bundle-dir).overrideAttrs (old: {
-            postInstall = (old.postInstall or "") + ''
+            installPhase = (old.installPhase or "true") + "\n" + ''
               rm -rf "$out/lib/qt-6/plugins"
             '';
           });
