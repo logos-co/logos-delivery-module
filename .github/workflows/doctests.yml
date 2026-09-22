@@ -136,8 +136,7 @@ jobs:
 
   windows:
     # Shared CI stages logoscore-cli from its own flake, as the Unix doctests do.
-    # Switch back to @v1 after logos-windows-ci#7 is merged into that tag.
-    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@codex/external-windows-targets
+    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
     secrets: inherit
     with:
       # Stage the module's DLL closure and installable layout.
