@@ -99,8 +99,8 @@ log — `<run dir>/session/logs/daemon.log` — carries the library's log lines.
 
 The library gives each request a budget before synthesizing a TRANSIENT
 failure itself: 80 s for the registry reads (`get_membership_state`,
-`generate_proof`), 10 s for the rest. The bridge's raw-call timeout for a
-read (70 s) sits just under that; the remaining ops go through the generated
-typed client, whose reply arrives well inside the 10 s budget. The
-module-driven `start` and `stop` have no library clock behind them and
-borrow the 80 s read budget.
+`generate_proof`), 10 s for the rest. Each request op fires one lp call
+carrying its own timeout — 70 s for the reads (just under the library's
+budget), 10 s for `get_epoch_quota` and `validate_proof` — and the reply
+arrives on lp's completion callback. `start` and `stop` are synchronous
+typed-client calls with no library clock behind them.
