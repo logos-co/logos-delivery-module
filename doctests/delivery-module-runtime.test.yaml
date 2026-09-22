@@ -27,8 +27,9 @@ intro: |
   keeps the delivery module loadable and callable.
 
   On Windows, CI cross-builds the module and uses a staged native `logoscore`
-  host to create a node with RLN disabled. That leg uses an offline config and
-  stops before `start`, which requires network access.
+  host to create a node without RLN (Rate Limiting Nullifier), the optional
+  rate-limiting feature. That leg uses an offline config, verifies RLN stays
+  disabled, and stops before `start`, which requires network access.
 
 what_you_build: "This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows."
 
@@ -40,7 +41,7 @@ what_you_learn:
   - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
   - How to create and start a delivery node with `createNode` and `start`
   - How to shut the daemon down and confirm it has exited
-  - How to load the module and create a node with RLN disabled on Windows
+  - How to load the module and create a node on Windows without its optional RLN rate-limiting dependency
 
 prerequisites:
   - |
@@ -314,7 +315,7 @@ sections:
         expect_contains:
           - '"status":"not_running"'
 
-  - title: "Create a node with RLN disabled on Windows"
+  - title: "Create a Windows node without the optional RLN module"
     platform: windows
     step: true
     text: |
