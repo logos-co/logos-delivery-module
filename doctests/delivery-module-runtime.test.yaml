@@ -26,9 +26,9 @@ intro: |
   through a real `logoscore` daemon, a green run is real evidence that this change
   keeps the delivery module loadable and callable.
 
-  On Windows, CI cross-builds the module and runs the RLN-off calls with a staged
-  native `logoscore` host. That leg uses an offline config and stops before
-  `start`, which requires network access.
+  On Windows, CI cross-builds the module and uses a staged native `logoscore`
+  host to create a node with RLN disabled. That leg uses an offline config and
+  stops before `start`, which requires network access.
 
 what_you_build: "This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows."
 
@@ -40,7 +40,7 @@ what_you_learn:
   - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
   - How to create and start a delivery node with `createNode` and `start`
   - How to shut the daemon down and confirm it has exited
-  - How to load and call the RLN-off module on Windows
+  - How to load the module and create a node with RLN disabled on Windows
 
 prerequisites:
   - |
@@ -314,7 +314,7 @@ sections:
         expect_contains:
           - '"status":"not_running"'
 
-  - title: "Run the RLN-off module on Windows"
+  - title: "Create a node with RLN disabled on Windows"
     platform: windows
     step: true
     text: |
@@ -359,7 +359,7 @@ sections:
         expect_contains:
           - '"name":"delivery_module"'
 
-      - title: "Load the module without RLN"
+      - title: "Load the module without its optional RLN dependency"
         run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config load-module delivery_module"
         expect_contains:
           - '"status":"ok"'

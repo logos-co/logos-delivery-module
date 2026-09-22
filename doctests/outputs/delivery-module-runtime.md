@@ -23,9 +23,9 @@ Because the module is built from the commit under test and then loaded and calle
 through a real `logoscore` daemon, a green run is real evidence that this change
 keeps the delivery module loadable and callable.
 
-On Windows, CI cross-builds the module and runs the RLN-off calls with a staged
-native `logoscore` host. That leg uses an offline config and stops before
-`start`, which requires network access.
+On Windows, CI cross-builds the module and uses a staged native `logoscore`
+host to create a node with RLN disabled. That leg uses an offline config and
+stops before `start`, which requires network access.
 
 **What you'll build:** This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows.
 
@@ -38,7 +38,7 @@ native `logoscore` host. That leg uses an offline config and stops before
 - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
 - How to create and start a delivery node with `createNode` and `start`
 - How to shut the daemon down and confirm it has exited
-- How to load and call the RLN-off module on Windows
+- How to load the module and create a node with RLN disabled on Windows
 
 ## Prerequisites
 
@@ -349,7 +349,7 @@ logoscore status
 
 ---
 
-## Step 5: Run the RLN-off module on Windows
+## Step 5: Create a node with RLN disabled on Windows
 
 CI stages the Windows module, its DLLs, and a native `logoscore` host.
 Copy the module into the host's scan directory, then use a private daemon
@@ -398,7 +398,7 @@ if [ "$ready" -eq 1 ]; then echo 'daemon ready'; else cat windows-smoke-daemon.l
 run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config list-modules
 ```
 
-### 5.6 Load the module without RLN
+### 5.6 Load the module without its optional RLN dependency
 
 ```bash
 run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config load-module delivery_module
