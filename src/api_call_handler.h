@@ -17,12 +17,10 @@ extern "C" {
 }
 
 namespace {
-// The two reply shapes of the generated C ABI. Argument-taking exports deliver
-// a typed (errCode, reply, errMsg) triple of NUL-terminated strings; the
-// no-argument "scalar fast path" exports keep the raw (callerRet, msg, len)
-// byte run. Every generated per-call typedef is an alias of one of these.
-using DeliveryReplyFn = void (*)(int, const char*, const char*, void*);
-using DeliveryScalarFn = void (*)(int, char*, size_t, void*);
+// The one reply shape of the generated C ABI; every per-call typedef aliases
+// it. Note that `reply` points AT the result string rather than being it:
+// nim-ffi decodes the CBOR reply into a local and hands over its address.
+using DeliveryReplyFn = void (*)(int, const char* const*, const char*, void*);
 
 struct CallbackContext {
     std::binary_semaphore sem{0};
@@ -73,9 +71,9 @@ void forgetCall(void* ticket)
 }
 
 // RET_STALE_WARN is a progress tick that fires every ~5s on a long call and is
-// always followed by a terminal code, so both trampolines ignore it instead of
+// always followed by a terminal code, so the trampoline ignores it instead of
 // completing the call.
-void replyTrampoline(int errCode, const char* reply, const char* errMsg, void* userData)
+void replyTrampoline(int errCode, const char* const* reply, const char* errMsg, void* userData)
 {
     if (errCode == RET_STALE_WARN) {
         return;
@@ -87,49 +85,28 @@ void replyTrampoline(int errCode, const char* reply, const char* errMsg, void* u
     }
 
     context->callerRet = errCode;
-    const char* text = (errCode == RET_OK) ? reply : errMsg;
+    const char* text = (errCode == RET_OK) ? (reply ? *reply : nullptr) : errMsg;
     if (text) {
         context->message = text;
     }
     context->sem.release();
 }
 
-void scalarTrampoline(int callerRet, char* msg, size_t len, void* userData)
+// Binds a generated logosdelivery_ctx_* wrapper to its arguments. The signature
+// is func(ctx, <the call's own arguments>, onReply, userData) and the wrapper
+// CBOR-encodes the request itself, so there is no request struct to build and
+// no separate form for the calls that take nothing. String arguments borrow the
+// caller's storage, which must outlive the bound call - it does, since the call
+// runs to completion inside callApiRetValue below.
+//
+// deliveryCtxHandle is the LogosDeliveryCtx* its owner keeps as void* so that
+// header's includers need no C ABI header; the cast belongs here instead.
+template <typename Func, typename... Args>
+auto bindApiCall(Func func, void* deliveryCtxHandle, Args... args)
 {
-    if (callerRet == RET_STALE_WARN) {
-        return;
-    }
-
-    auto context = claimCall(userData);
-    if (!context) {
-        return;
-    }
-
-    context->callerRet = callerRet;
-    if (msg && len > 0) {
-        context->message.assign(msg, len);
-    }
-    context->sem.release();
-}
-
-// Binds an argument-taking export to its request struct; the generated
-// signature is func(ctx, onReply, userData, &req). `req` borrows the caller's
-// strings, so those must outlive the bound call - they do, since it runs to
-// completion inside callApiRetValue below.
-template <typename Func, typename Req>
-auto bindApiCall(Func func, void* deliveryCtx, Req req)
-{
-    return [func, deliveryCtx, req](void* ticket) {
-        return func(deliveryCtx, static_cast<DeliveryReplyFn>(replyTrampoline), ticket, &req);
-    };
-}
-
-// Binds a no-argument export: func(ctx, callback, userData).
-template <typename Func>
-auto bindScalarApiCall(Func func, void* deliveryCtx)
-{
-    return [func, deliveryCtx](void* ticket) {
-        return func(deliveryCtx, static_cast<DeliveryScalarFn>(scalarTrampoline), ticket);
+    const auto* ctx = static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle);
+    return [func, ctx, args...](void* ticket) {
+        return func(ctx, args..., static_cast<DeliveryReplyFn>(replyTrampoline), ticket);
     };
 }
 

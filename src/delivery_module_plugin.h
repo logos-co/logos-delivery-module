@@ -360,7 +360,9 @@ logos_events:
 /** @} */
 
 private:
-    // Raw FFI context: what every call and the event registry take.
+    // Raw FFI context: what the event registry takes. Every other call goes
+    // through the generated logosdelivery_ctx_* wrappers, which want the handle
+    // below instead.
     void* deliveryCtx;
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
     // as void* so the C ABI header stays out of this header's includers.
@@ -410,8 +412,11 @@ private:
 
     // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
     // userData is the DeliveryModuleImpl*.
-    // Both take the scalar-fast-path reply shape and ignore RET_STALE_WARN,
-    // the non-terminal progress tick a long start/stop emits.
-    static void start_callback(int callerRet, char* msg, size_t len, void* userData);
-    static void stop_callback(int callerRet, char* msg, size_t len, void* userData);
+    // Both take the generated reply shape -- `reply` points at the result on
+    // success, `errMsg` carries the reason otherwise -- and ignore
+    // RET_STALE_WARN, the non-terminal progress tick a long start/stop emits.
+    static void start_callback(
+        int callerRet, const char* const* reply, const char* errMsg, void* userData);
+    static void stop_callback(
+        int callerRet, const char* const* reply, const char* errMsg, void* userData);
 };

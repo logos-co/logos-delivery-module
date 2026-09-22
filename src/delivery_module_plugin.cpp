@@ -63,7 +63,8 @@ constexpr const char* kEventNames[] = {
 };
 } // namespace
 
-void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::start_callback(
+    int callerRet, const char* const* reply, const char* errMsg, void* userData)
 {
     if (callerRet == RET_STALE_WARN) {
         return;
@@ -71,12 +72,14 @@ void DeliveryModuleImpl::start_callback(int callerRet, char* msg, size_t len, vo
 
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
+    const char* text = (callerRet == RET_OK) ? (reply ? *reply : nullptr) : errMsg;
     impl->nodeStarted(callerRet == RET_OK,
-                      (msg && len > 0) ? std::string(msg, len) : std::string(),
+                      text ? std::string(text) : std::string(),
                       currentTimestampNs());
 }
 
-void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::stop_callback(
+    int callerRet, const char* const* reply, const char* errMsg, void* userData)
 {
     if (callerRet == RET_STALE_WARN) {
         return;
@@ -84,8 +87,9 @@ void DeliveryModuleImpl::stop_callback(int callerRet, char* msg, size_t len, voi
 
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) return;
+    const char* text = (callerRet == RET_OK) ? (reply ? *reply : nullptr) : errMsg;
     impl->nodeStopped(callerRet == RET_OK,
-                      (msg && len > 0) ? std::string(msg, len) : std::string(),
+                      text ? std::string(text) : std::string(),
                       currentTimestampNs());
 }
 
@@ -442,7 +446,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // underneath the node's answer.
     const StdLogosResult requirements = callApiRetValue(
         "get_discovery_requirements", CALLBACK_TIMEOUT,
-        bindScalarApiCall(logosdelivery_get_discovery_requirements, deliveryCtx));
+        bindApiCall(logosdelivery_ctx_get_discovery_requirements, deliveryCtxHandle));
     delivery_discovery::PluginRequest discovery;
     std::string failure;
     if (!requirements.success) {
@@ -491,9 +495,9 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
         "install service discovery plugin", CALLBACK_TIMEOUT,
         [this](void* ticket) {
             return logosdelivery_install_service_discovery_plugin(
-                deliveryCtx,
+                static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle),
                 discoPlugin->vtable(),
-                static_cast<DeliveryScalarFn>(scalarTrampoline),
+                replyTrampoline,
                 ticket);
         });
 
@@ -515,7 +519,8 @@ StdLogosResult DeliveryModuleImpl::start()
 
     // Node start can block for a long time (relay reconnect backoff), so return
     // once dispatched. Completion arrives via nodeStarted.
-    if (logosdelivery_start_node(deliveryCtx, start_callback, this) != RET_OK) {
+    if (logosdelivery_ctx_start_node(static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle),
+                                     start_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate start"};
     }
     return {true, {}};
@@ -529,7 +534,8 @@ StdLogosResult DeliveryModuleImpl::stop()
         return {false, {}, "Context not initialized"};
     }
 
-    if (logosdelivery_stop_node(deliveryCtx, stop_callback, this) != RET_OK) {
+    if (logosdelivery_ctx_stop_node(static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle),
+                                    stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
     return {true, {}};
@@ -554,8 +560,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
     auto outcome = callApiRetValue(
         "send",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_send, deliveryCtx,
-                    LogosdeliverySendReq{.messageJson = messageJson.c_str()}));
+        bindApiCall(logosdelivery_ctx_send, deliveryCtxHandle, messageJson.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
@@ -581,8 +586,7 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
     auto outcome = callApiRetVoid(
         "subscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_subscribe, deliveryCtx,
-                    LogosdeliverySubscribeReq{.contentTopicStr = contentTopic.c_str()}));
+        bindApiCall(logosdelivery_ctx_subscribe, deliveryCtxHandle, contentTopic.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
@@ -605,8 +609,7 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     auto outcome = callApiRetVoid(
         "unsubscribe",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_unsubscribe, deliveryCtx,
-                    LogosdeliveryUnsubscribeReq{.contentTopicStr = contentTopic.c_str()}));
+        bindApiCall(logosdelivery_ctx_unsubscribe, deliveryCtxHandle, contentTopic.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
@@ -637,10 +640,8 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
     auto outcome = callApiRetValue(
         "store_query",
         callbackTimeout,
-        bindApiCall(waku_store_query, deliveryCtx,
-                    WakuStoreQueryReq{.jsonQuery = jsonQuery.c_str(),
-                                      .peerAddr = peerAddr.c_str(),
-                                      .timeoutMs = static_cast<int32_t>(timeoutMs)}));
+        bindApiCall(logosdelivery_ctx_waku_store_query, deliveryCtxHandle,
+                    jsonQuery.c_str(), peerAddr.c_str(), static_cast<int32_t>(timeoutMs)));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Store query failed for peer: %s, reason: %s\n",
@@ -664,10 +665,10 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
     auto outcome = callApiRetValue(
         "channel_create",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_create, deliveryCtx,
-                    LogosdeliveryChannelCreateReq{.channelIdStr = channelId.c_str(),
-                                                  .contentTopicStr = contentTopic.c_str(),
-                                                  .senderIdStr = senderId.c_str()}));
+        bindApiCall(logosdelivery_ctx_channel_create, deliveryCtxHandle,
+                    channelId.c_str(), contentTopic.c_str(), senderId.c_str(),
+                    // no cipher: encryptFn, decryptFn, userData
+                    uint64_t{0}, uint64_t{0}, uint64_t{0}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
@@ -688,8 +689,7 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
     auto outcome = callApiRetValue(
         "channel_exists",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_exists, deliveryCtx,
-                    LogosdeliveryChannelExistsReq{.channelIdStr = channelId.c_str()}));
+        bindApiCall(logosdelivery_ctx_channel_exists, deliveryCtxHandle, channelId.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel exists failed for id: %s, reason: %s\n",
@@ -716,9 +716,8 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
     auto outcome = callApiRetValue(
         "channel_send",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_send, deliveryCtx,
-                    LogosdeliveryChannelSendReq{.channelIdStr = channelId.c_str(),
-                                                .messageJson = messageJson.c_str()}));
+        bindApiCall(logosdelivery_ctx_channel_send, deliveryCtxHandle,
+                    channelId.c_str(), messageJson.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel send failed for id: %s, reason: %s\n",
@@ -744,8 +743,7 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
     auto outcome = callApiRetVoid(
         "channel_close",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_channel_close, deliveryCtx,
-                    LogosdeliveryChannelCloseReq{.channelIdStr = channelId.c_str()}));
+        bindApiCall(logosdelivery_ctx_channel_close, deliveryCtxHandle, channelId.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel close failed for id: %s, reason: %s\n",
@@ -764,7 +762,7 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
     auto outcome = callApiRetValue(
         "get_available_node_info_ids",
         CALLBACK_TIMEOUT,
-        bindScalarApiCall(logosdelivery_get_available_node_info_ids, deliveryCtx));
+        bindApiCall(logosdelivery_ctx_get_available_node_info_ids, deliveryCtxHandle));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
@@ -782,8 +780,7 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx,
-                    LogosdeliveryGetNodeInfoReq{.nodeInfoId = nodeInfoId.c_str()}));
+        bindApiCall(logosdelivery_ctx_get_node_info, deliveryCtxHandle, nodeInfoId.c_str()));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
@@ -803,7 +800,7 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
     auto outcome = callApiRetValue(
         "get_available_configs",
         CALLBACK_TIMEOUT,
-        bindScalarApiCall(logosdelivery_get_available_configs, deliveryCtx));
+        bindApiCall(logosdelivery_ctx_get_available_configs, deliveryCtxHandle));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
@@ -823,8 +820,7 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
     auto outcome = callApiRetValue(
         "get_node_info",
         CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_get_node_info, deliveryCtx,
-                    LogosdeliveryGetNodeInfoReq{.nodeInfoId = "Metrics"}));
+        bindApiCall(logosdelivery_ctx_get_node_info, deliveryCtxHandle, "Metrics"));
 
     if (!outcome.success || !outcome.value.is_string()) {
         fprintf(stderr, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",
