@@ -67,18 +67,10 @@ RlnBridge::RlnBridge() = default;
 
 RlnBridge::~RlnBridge()
 {
-    {
-        std::lock_guard<std::mutex> lock(m_lock);
-        m_stopping = true;
-    }
-    m_slow.cv.notify_all();
-    m_fast.cv.notify_all();
-    if (m_slow.worker.joinable()) {
-        m_slow.worker.join();
-    }
-    if (m_fast.worker.joinable()) {
-        m_fast.worker.join();
-    }
+    // lp_client_destroy waits for a reply callback that is mid-flight to
+    // finish, then guarantees no further callback fires. A call still in
+    // flight loses its callback and leaks its small Pending — bounded, once,
+    // at shutdown.
     if (m_client) {
         lp_client_destroy(m_client);
     }
@@ -102,12 +94,15 @@ std::string RlnBridge::enable()
     if (!m_typed) {
         return "rln bridge has no typed client";
     }
-    std::lock_guard<std::mutex> lock(m_lock);
-    if (!m_lanesRunning) {
-        m_slow.worker = std::thread(&RlnBridge::laneLoop, this, &m_slow);
-        m_fast.worker = std::thread(&RlnBridge::laneLoop, this, &m_fast);
-        m_lanesRunning = true;
+    if (!m_client) {
+        return "rln bridge has no lp client";
     }
+    // No contact with the RLN module here: at enable() time (createNode) the
+    // registry connection is not up yet, so acquiring the remote object would
+    // fail. First contact is deferred to the first real call, by which point
+    // the registry is connected. Those calls arrive on a library thread, so
+    // the acquire is handed off to the lp owner thread rather than blocking
+    // the caller.
     m_enabled.store(true, std::memory_order_release);
     return {};
 }
