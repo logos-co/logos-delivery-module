@@ -11,7 +11,9 @@ jobs:
     uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
     secrets: inherit
     with:
-      # Validate the deployable module tree, including its bundled runtime DLLs.
-      # The module has no standalone executable, so the shared workflow provides
-      # compile-time PE and import-closure coverage without a smoke command.
-      targets: default
+      # Stage the module's complete DLL closure, installable layout, and CLI host.
+      targets: default install-portable windows-logoscore
+      assemble: '{"install-portable": ["default/lib", "windows-logoscore/bin"]}'
+      # Exercise the RLN-off load/createNode calls from the runtime doctest.
+      smoke-file: scripts/windows-smoke.sh
+      wine-smoke: false

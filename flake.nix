@@ -172,6 +172,18 @@
       packages = builtins.mapAttrs (system: pkgs: pkgs // {
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
-      }) module.packages;
+      } // (if system == "x86_64-windows" then {
+        # The Windows smoke job loads this module with a real logoscore.
+        # Fixed source hash avoids importing the CI-only runtime's large lock
+        # graph. Its GUI/SQL Qt plugins are unused by this headless smoke test;
+        # omit them so the shared PE gate checks only the files we run.
+        windows-logoscore = ((builtins.getFlake
+          "github:logos-co/logos-logoscore-cli/f404cabba5106d874686ce3f0bf248449f02cce2?narHash=sha256-Tu86IUL7ELo9MTNZoEbZkdLFcK25uinCeuNXWHe4CDw%3D")
+          .packages.${system}.cli-bundle-dir).overrideAttrs (old: {
+            postInstall = (old.postInstall or "") + ''
+              rm -rf "$out/lib/qt-6/plugins"
+            '';
+          });
+      } else {})) module.packages;
     };
 }
