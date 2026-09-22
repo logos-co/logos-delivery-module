@@ -26,7 +26,11 @@ intro: |
   through a real `logoscore` daemon, a green run is real evidence that this change
   keeps the delivery module loadable and callable.
 
-what_you_build: "This `delivery_module`, packaged as `.lgx`, installed with `lgpm`, and called through a `logoscore` daemon."
+  On Windows, CI cross-builds the module and runs the RLN-off calls with a staged
+  native `logoscore` host. That leg uses an offline config and stops before
+  `start`, which requires network access.
+
+what_you_build: "This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows."
 
 what_you_learn:
   - How to build the `logoscore` runtime and the `lgpm` package manager from their flakes
@@ -36,6 +40,7 @@ what_you_learn:
   - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
   - How to create and start a delivery node with `createNode` and `start`
   - How to shut the daemon down and confirm it has exited
+  - How to load and call the RLN-off module on Windows
 
 prerequisites:
   - |
@@ -47,10 +52,11 @@ prerequisites:
     ```
 
     Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
-  - "**A Linux or macOS machine.**"
+  - "**A Linux or macOS machine for the package walkthrough.** The Windows section runs in CI against staged cross-built artifacts."
 
 sections:
   - title: "Build logoscore"
+    platform: [linux, macos]
     step: true
     text: |
       Build the `logoscore` CLI from its published flake. The result is symlinked to
@@ -69,6 +75,7 @@ sections:
           modules).
 
   - title: "Build the lgpm package manager"
+    platform: [linux, macos]
     step: true
     text: |
       `lgpm` installs `.lgx` packages into a modules directory and scans what is
@@ -81,6 +88,7 @@ sections:
         post_text: "The executable is at `./lgpm/bin/lgpm`."
 
   - title: "Build and install this delivery module"
+    platform: [linux, macos]
     step: true
     text: |
       Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
@@ -159,6 +167,7 @@ sections:
         check_file: "modules/delivery_module/manifest.json"
 
   - title: "Run the daemon and call the module"
+    platform: [linux, macos]
     step: true
     text: |
       Start `logoscore` in daemon mode pointed at `./modules`, then use the client
@@ -304,3 +313,76 @@ sections:
         code_block: "logoscore status"
         expect_contains:
           - '"status":"not_running"'
+
+  - title: "Run the RLN-off module on Windows"
+    platform: windows
+    step: true
+    text: |
+      CI stages the Windows module, its DLLs, and a native `logoscore` host.
+      Copy the module into the host's scan directory, then use a private daemon
+      configuration directory and an offline node config. The shared Windows
+      runner provides `run` to launch each staged executable.
+    steps:
+      - title: "Stage the delivery module"
+        run: |
+          test ! -e windows-logoscore/modules/delivery_module &&
+            cp -R install-portable/modules/delivery_module windows-logoscore/modules/delivery_module
+        check_file: windows-logoscore/modules/delivery_module/manifest.json
+
+      - title: "Write an offline node config"
+        file:
+          path: windows-smoke-node.json
+          language: json
+          content: |
+            {"logLevel":"INFO"}
+
+      - title: "Start the Windows daemon"
+        run: |
+          ./windows-logoscore/bin/logoscore.exe -D -m ./windows-logoscore/modules --config-dir ./windows-smoke-config > windows-smoke-daemon.log 2>&1 &
+
+      - title: "Wait for the daemon"
+        run: |
+          ready=0
+          for attempt in $(seq 1 20); do
+            if run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config status | grep -qF '"status":"running"'; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -eq 1 ]; then echo 'daemon ready'; else cat windows-smoke-daemon.log; false; fi
+        expect_contains:
+          - "daemon ready"
+
+      - title: "Discover the module"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config list-modules"
+        expect_contains:
+          - '"name":"delivery_module"'
+
+      - title: "Load the module without RLN"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config load-module delivery_module"
+        expect_contains:
+          - '"status":"ok"'
+          - '"module":"liblogos_rln_module"'
+          - '"reason":"not_installed"'
+
+      - title: "Inspect the module methods"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config module-info delivery_module"
+        expect_contains:
+          - '"name":"delivery_module"'
+          - '"name":"createNode"'
+
+      - title: "Create an offline delivery node"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json"
+        expect_contains:
+          - '"success":true'
+
+      - title: "Confirm RLN remains disabled"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module rlnState"
+        expect_contains:
+          - '"state":"Disabled"'
+
+      - title: "Stop the Windows daemon"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config stop"
+        expect_contains:
+          - '"status":"ok"'

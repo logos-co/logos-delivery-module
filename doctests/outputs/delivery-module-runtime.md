@@ -23,7 +23,11 @@ Because the module is built from the commit under test and then loaded and calle
 through a real `logoscore` daemon, a green run is real evidence that this change
 keeps the delivery module loadable and callable.
 
-**What you'll build:** This `delivery_module`, packaged as `.lgx`, installed with `lgpm`, and called through a `logoscore` daemon.
+On Windows, CI cross-builds the module and runs the RLN-off calls with a staged
+native `logoscore` host. That leg uses an offline config and stops before
+`start`, which requires network access.
+
+**What you'll build:** This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows.
 
 **What you'll learn:**
 
@@ -34,6 +38,7 @@ keeps the delivery module loadable and callable.
 - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
 - How to create and start a delivery node with `createNode` and `start`
 - How to shut the daemon down and confirm it has exited
+- How to load and call the RLN-off module on Windows
 
 ## Prerequisites
 
@@ -46,7 +51,7 @@ echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
 
 Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
 
-- **A Linux or macOS machine.**
+- **A Linux or macOS machine for the package walkthrough.** The Windows section runs in CI against staged cross-built artifacts.
 
 ---
 
@@ -340,4 +345,85 @@ non-zero, so we add `|| true` to let the doc-test assert on the output:
 
 ```bash
 logoscore status
+```
+
+---
+
+## Step 5: Run the RLN-off module on Windows
+
+CI stages the Windows module, its DLLs, and a native `logoscore` host.
+Copy the module into the host's scan directory, then use a private daemon
+configuration directory and an offline node config. The shared Windows
+runner provides `run` to launch each staged executable.
+
+### 5.1 Stage the delivery module
+
+```bash
+test ! -e windows-logoscore/modules/delivery_module &&
+  cp -R install-portable/modules/delivery_module windows-logoscore/modules/delivery_module
+
+```
+
+### 5.2 Write an offline node config
+
+```json
+{"logLevel":"INFO"}
+```
+
+### 5.3 Start the Windows daemon
+
+```bash
+./windows-logoscore/bin/logoscore.exe -D -m ./windows-logoscore/modules --config-dir ./windows-smoke-config > windows-smoke-daemon.log 2>&1 &
+
+```
+
+### 5.4 Wait for the daemon
+
+```bash
+ready=0
+for attempt in $(seq 1 20); do
+  if run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config status | grep -qF '"status":"running"'; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$ready" -eq 1 ]; then echo 'daemon ready'; else cat windows-smoke-daemon.log; false; fi
+
+```
+
+### 5.5 Discover the module
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config list-modules
+```
+
+### 5.6 Load the module without RLN
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config load-module delivery_module
+```
+
+### 5.7 Inspect the module methods
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config module-info delivery_module
+```
+
+### 5.8 Create an offline delivery node
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json
+```
+
+### 5.9 Confirm RLN remains disabled
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module rlnState
+```
+
+### 5.10 Stop the Windows daemon
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config stop
 ```

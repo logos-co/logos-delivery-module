@@ -16,7 +16,7 @@ name: delivery-module Doc-Tests
 #      the gh-pages branch on its first run.)
 #   2. Nothing else — GITHUB_TOKEN already has the permissions granted below.
 #
-# Each run publishes the two-column HTML report to:
+# Each run publishes the two-column HTML reports to:
 #   https://<owner>.github.io/<repo>/pr-<N>/<os>/      (pull requests)
 #   https://<owner>.github.io/<repo>/main/<os>/        (pushes to main/master)
 # and (for PRs) posts/updates a comment with the links.
@@ -134,9 +134,19 @@ jobs:
           done
           echo "Generated markdown successfully"
 
+  windows:
+    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
+    secrets: inherit
+    with:
+      # Stage the module's DLL closure, installable layout, and CLI host.
+      targets: default install-portable windows-logoscore
+      assemble: '{"install-portable": ["default/lib", "windows-logoscore/bin"]}'
+      doctest-spec: doctests/delivery-module-runtime.test.yaml
+      doctest-artifact: delivery-doctest-report
+
   publish-report:
     name: Publish report to GitHub Pages
-    needs: doctests
+    needs: [doctests, windows]
     # Run even when tests fail — a failing run is exactly when you want to open
     # the report. Skip on forks, where GITHUB_TOKEN can't push or comment.
     if: ${{ always() && github.event.pull_request.head.repo.fork != true }}
@@ -156,7 +166,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          # No `name:` → downloads every artifact into artifacts/<name>/...
+          pattern: delivery-doctest-report-*
 
       - name: Arrange site directory
         id: arrange
@@ -172,7 +182,7 @@ jobs:
 
           mkdir -p "site/$BASE"
           found=""
-          for os in ubuntu-latest macos-15; do
+          for os in ubuntu-latest macos-15 windows-latest; do
             src="artifacts/delivery-doctest-report-$os/index.html"
             if [ -f "$src" ]; then
               mkdir -p "site/$BASE/$os"
@@ -189,7 +199,7 @@ jobs:
             echo "<style>body{font:16px system-ui;margin:40px;max-width:640px}a{color:#2563eb}</style>"
             echo "<h1>delivery-module doc-test reports</h1>"
             echo "<p><strong>$BASE</strong> · commit <code>${GITHUB_SHA::7}</code></p><ul>"
-            for os in ubuntu-latest macos-15; do
+            for os in ubuntu-latest macos-15 windows-latest; do
               if [ -d "site/$BASE/$os" ]; then
                 echo "<li><a href=\"./$os/\">$os</a></li>"
               fi
@@ -222,8 +232,8 @@ jobs:
             const body =
               `${marker}\n` +
               `### 📊 delivery-module doc-test report\n\n` +
-              `This commit of the delivery module, packaged as an \`.lgx\` and run ` +
-              `through a logoscore daemon — rendered alongside the commands actually ` +
+              `This commit of the delivery module, run through a logoscore daemon ` +
+              `on each platform — rendered alongside the commands actually ` +
               `run and their output (updated each run, commit \`${context.sha.slice(0,7)}\`):\n\n` +
               `${links}\n\n` +
               `_Pages can take a minute to update after the run finishes._`;
