@@ -374,6 +374,11 @@ private:
     // the context is destroyed, which happens in this class's destructor.
     std::unique_ptr<DeliveryServiceDiscoveryPlugin> discoPlugin;
 
+    /// Frees discoPlugin once no entry point is running, or leaks it rather
+    /// than freeing it under an abandoned thread that is still inside it.
+    void releaseServiceDiscoveryPlugin();
+    static constexpr std::chrono::seconds kQuiesceTimeout{5};
+
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
 
     /**

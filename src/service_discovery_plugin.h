@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -65,6 +67,19 @@ public:
     /// The vtable to hand to logosdelivery_install_service_discovery_plugin.
     const LdServiceDiscoveryPlugin* vtable() const { return &vtable_; }
 
+    /**
+     * @brief Waits for entry points to drain before the object may be freed.
+     *
+     * A call that outran the node's timeout leaves its thread abandoned but
+     * still inside this object (see the calling model in
+     * logosdelivery_service_discovery.h). Destroying it then would pull
+     * pluginCtx out from under a live thread, so the owner asks first and
+     * leaks the object rather than freeing it when the answer is no.
+     *
+     * @return true when no entry point is in flight, false on timeout.
+     */
+    bool quiesce(std::chrono::milliseconds timeout);
+
 private:
     /**
      * @brief Brings libp2p up, once, on first use.
@@ -119,6 +134,9 @@ private:
     std::string libp2pConfig_;
     bool backendReady_;
     bool nodeCreated_;
+    std::atomic<int> inFlight_{0};
+        ///< Entry points currently executing. Guarded by InFlightGuard so a
+        ///< thread cannot leave without decrementing, and read by quiesce.
     LdServiceDiscoveryPlugin vtable_;
 
     // --- vtable trampolines; pluginCtx is always `this` ---------------------
