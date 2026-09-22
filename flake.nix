@@ -10,6 +10,7 @@
 
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
+    logos-logoscore-cli.url = "github:logos-co/logos-logoscore-cli";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
@@ -173,13 +174,10 @@
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
       } // (if system == "x86_64-windows" then {
-        # The Windows smoke job loads this module with a real logoscore.
-        # Fixed source hash avoids importing the CI-only runtime's large lock
-        # graph. Its GUI/SQL Qt plugins are unused by this headless smoke test;
-        # omit them so the shared PE gate checks only the files we run.
-        windows-logoscore = ((builtins.getFlake
-          "github:logos-co/logos-logoscore-cli/f404cabba5106d874686ce3f0bf248449f02cce2?narHash=sha256-Tu86IUL7ELo9MTNZoEbZkdLFcK25uinCeuNXWHe4CDw%3D")
-          .packages.${system}.cli-bundle-dir).overrideAttrs (old: {
+        # The CLI is a normal flake input now that its lock graph is bounded.
+        # This headless test does not use the bundled GUI/SQL Qt plugins, so
+        # leave them out of the staged PE closure.
+        windows-logoscore = inputs.logos-logoscore-cli.packages.${system}.cli-bundle-dir.overrideAttrs (old: {
             installPhase = (old.installPhase or "true") + "\n" + ''
               rm -rf "$out/lib/qt-6/plugins"
             '';
