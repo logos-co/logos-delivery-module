@@ -1,0 +1,17 @@
+name: Windows
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  windows:
+    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
+    secrets: inherit
+    with:
+      # Validate the deployable module tree, including its bundled runtime DLLs.
+      # The module has no standalone executable, so the shared workflow provides
+      # compile-time PE and import-closure coverage without a smoke command.
+      targets: install-portable
