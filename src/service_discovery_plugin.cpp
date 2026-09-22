@@ -7,6 +7,7 @@
 #include <ctime>
 #include <algorithm>
 #include <cctype>
+#include <thread>
 
 #include <nlohmann/json.hpp>
 
@@ -89,6 +90,17 @@ bool isCallTimeout(const logos::CallError& err)
     };
     return mentionsTimeout(err.code) || mentionsTimeout(err.message);
 }
+
+/// Counts one entry point in and out again, so an owner about to free this
+/// object can tell whether a thread is still inside it. Scope-based, because
+/// every entry point has several return paths.
+struct InFlightGuard {
+    std::atomic<int>& n;
+    explicit InFlightGuard(std::atomic<int>& counter) : n(counter) { n.fetch_add(1); }
+    ~InFlightGuard() { n.fetch_sub(1); }
+    InFlightGuard(const InFlightGuard&) = delete;
+    InFlightGuard& operator=(const InFlightGuard&) = delete;
+};
 
 void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
 {
@@ -182,6 +194,20 @@ std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
         return k.substr(kServicePrefixLen);
     }
     return k;
+}
+
+bool DeliveryServiceDiscoveryPlugin::quiesce(std::chrono::milliseconds timeout)
+{
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (inFlight_.load() > 0) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            trace("quiesce                  TIMEOUT  %d call(s) still in flight",
+                  inFlight_.load());
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return true;
 }
 
 int DeliveryServiceDiscoveryPlugin::requireBackend(char* errBuf, size_t errBufLen)
@@ -338,6 +364,7 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
 
 int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     // Brings libp2p up on first use -- the first call that reaches us on the
     // discovery thread, which is where it can be contacted at all (see
     // ensureBackend). Beyond that this verb does not touch libp2p at all.
@@ -363,6 +390,7 @@ int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBu
 
 int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     // No-op, mirroring cStart: libp2p's discovery is shared and outlives this
     // node, so stopping it here would cut it out from under every other
     // consumer -- and it was never ours to start. Interests registered by this
@@ -377,6 +405,7 @@ int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBuf
 int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t limit,
                                             char** outJson, char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
     if (ready != LD_DISCO_OK) {
         return ready;
@@ -412,6 +441,7 @@ int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t 
 int DeliveryServiceDiscoveryPlugin::cRandomLookup(void* ctx, char** outJson,
                                                   char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
     if (ready != LD_DISCO_OK) {
         return ready;
@@ -449,6 +479,7 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
                                                       const uint8_t* record, size_t recordLen,
                                                       char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
     if (ready != LD_DISCO_OK) {
         return ready;
@@ -492,6 +523,7 @@ int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key
 int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
                                                      char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
     if (ready != LD_DISCO_OK) {
         return ready;
@@ -508,6 +540,7 @@ int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
 int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key,
                                                       char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
     if (ready != LD_DISCO_OK) {
         return ready;
@@ -524,6 +557,7 @@ int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key
 int DeliveryServiceDiscoveryPlugin::cUnregisterInterest(void* ctx, const char* key,
                                                         char* errBuf, size_t errBufLen)
 {
+    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
     const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
     if (ready != LD_DISCO_OK) {
         return ready;

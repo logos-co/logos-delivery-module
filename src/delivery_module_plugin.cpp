@@ -95,8 +95,29 @@ DeliveryModuleImpl::DeliveryModuleImpl() : deliveryCtx(nullptr), deliveryCtxHand
     fprintf(stderr, "DeliveryModuleImpl: Initialized successfully\n");
 }
 
+void DeliveryModuleImpl::releaseServiceDiscoveryPlugin()
+{
+    if (!discoPlugin) {
+        return;
+    }
+    // A call that outran the node's timeout leaves its thread abandoned but
+    // still inside the plugin, and nothing on the node side can interrupt it.
+    // Freeing the object then would pull pluginCtx out from under that thread,
+    // so wait briefly and, failing that, leak it on purpose: a leak at
+    // teardown costs a few hundred bytes, the alternative is a use-after-free.
+    if (discoPlugin->quiesce(kQuiesceTimeout)) {
+        discoPlugin.reset();
+        return;
+    }
+    fprintf(stderr,
+            "DeliveryModuleImpl: service discovery plugin still in use; "
+            "leaking it rather than freeing it under a live thread\n");
+    (void)discoPlugin.release();
+}
+
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
+    releaseServiceDiscoveryPlugin();
     if (deliveryCtxHandle) {
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
@@ -440,7 +461,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         // A node configured for plugin discovery cannot start without a
         // registered plugin, so a half-built context is worse than none:
         // tear it down and report, rather than failing later at start().
-        discoPlugin.reset();
+        releaseServiceDiscoveryPlugin();
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
         deliveryCtxHandle = nullptr;
         deliveryCtx = nullptr;
