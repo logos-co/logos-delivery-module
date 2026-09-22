@@ -346,7 +346,7 @@ LOGOS_TEST(integration_rln_callbacks_register_and_clear) {
 
 // Blocks until any rln*Request event with the given op fires (or times out).
 // The library awaits each response per the RLN module's time budgets (10s for
-// local calls, 95s for registry-reading calls) before synthesizing a TRANSIENT
+// local calls, 80s for registry-reading calls) before synthesizing a TRANSIENT
 // failure, so requests appear well inside this window when the chain is live.
 static bool waitForRlnRequestOp(const char* op, int timeoutMs = 5000) {
     const auto deadline =
@@ -445,11 +445,12 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
     LOGOS_ASSERT_TRUE(stateReq.registryId.find("logos:testnet:") != std::string::npos);
     const int64_t startReqId = stateReq.reqId;
 
-    // Give the request time to complete library-side: the bridge answers it
-    // (with a transport failure when no RLN module is reachable), and the
-    // library's 10 s budget for local ops backstops even that. Afterwards an
-    // external response must be rejected through the real in-flight list.
-    std::this_thread::sleep_for(std::chrono::seconds(11));
+    // The membership probe gates node start and is awaited with the library's
+    // registry-read budget (80 s), not the 10 s local one — a fixed sleep
+    // races a slow or unreachable chain. nodeStarted firing means the gate
+    // resolved (answered or timed out), so only then is the request out of
+    // the in-flight list and an external response must be rejected.
+    LOGOS_ASSERT_TRUE(waitForNodeStarted(90000));
     LOGOS_ASSERT_FALSE(
         impl.rlnRespond(startReqId, R"({"success":true,"value":{}})").success);
 
