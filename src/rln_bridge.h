@@ -70,9 +70,10 @@ public:
     std::string startBackend(std::string configJson);
     std::string stopBackend();
 
-    // Op entry points (any thread; copy + enqueue, return immediately). The
-    // registry and identifier are this module's own configuration: they do not
-    // come from the delivery library, which is agnostic of them.
+    // Op entry points (any thread; return immediately — the reply reaches the
+    // library later via logosdelivery_rln_response). The registry and
+    // identifier are this module's own configuration: they do not come from
+    // the delivery library, which is agnostic of them.
     void getMembershipState(uint64_t reqId, std::string registryId,
                             std::string rlnIdentifier);
     void getEpochQuota(uint64_t reqId, std::string registryId,
@@ -104,6 +105,26 @@ private:
         std::condition_variable cv;
         std::thread worker;
     };
+
+    // Per-call context for the async lp reply path. Owned by onLpReply, or by
+    // the sender when lp_invoke_async never accepts the call. Holds no pointer
+    // back to the bridge: a reply landing during shutdown must not touch
+    // bridge state, and lp_client_destroy waits for running callbacks — a
+    // callback taking a bridge lock could deadlock against the destructor.
+    struct Pending {
+        uint64_t reqId = 0;
+        Op op = Op::Start;
+    };
+    // lp completion callback: reshape the reply, respond, delete the Pending.
+    static void onLpReply(int ok, const char* jsonText, void* userData);
+    // Fires one lp call and returns; onLpReply answers the reqId when the
+    // reply lands. Failure to even send is answered immediately with a
+    // transport failure, from the calling thread.
+    void sendAsync(Op op, uint64_t reqId, const std::string& method,
+                   const std::string& argsJson, int timeoutMs);
+    // Single reshape point for module replies: transport-failure shaping,
+    // tstr string unwrap, dispatch-refusal detection.
+    static std::string reshapeReply(Op op, bool ok, const char* jsonText);
 
     static bool isSlowOp(Op op);
     static bool isTstrOp(Op op);

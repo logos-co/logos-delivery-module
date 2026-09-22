@@ -168,6 +168,73 @@ std::string RlnBridge::transportFail(Op op, const std::string& cls,
     return json{{"success", false}, {"error", errorObj.dump()}}.dump();
 }
 
+std::string RlnBridge::reshapeReply(Op op, bool ok, const char* jsonText)
+{
+    const std::string body = jsonText ? jsonText : "";
+    if (!ok) {
+        // lp reports failure via the flag; its error json carries
+        // {"code","message","origin"}.
+        json err = json::parse(body, nullptr, /*allow_exceptions=*/false);
+        const std::string msg =
+            err.is_object() && err.contains("message") && err["message"].is_string()
+                ? err["message"].get<std::string>()
+                : body;
+        return transportFail(op, "transient", "rln_bridge_transport",
+                             std::string(opName(op)) + ": " + msg);
+    }
+    // A tstr method's lp result is a JSON string holding the module's compact
+    // reply — forward the CONTENT (the library's parsers tolerate one leftover
+    // string layer either way).
+    json parsed = json::parse(body, nullptr, /*allow_exceptions=*/false);
+    std::string content = body;
+    if (parsed.is_string()) {
+        content = parsed.get<std::string>();
+        parsed = json::parse(content, nullptr, /*allow_exceptions=*/false);
+    }
+    // A dispatch rejection arrives as success=false with NO error text, while
+    // every genuine module failure carries a message. Treat the empty refusal
+    // as a retryable transport failure, not as the module's answer.
+    if (parsed.is_object() && parsed.value("success", true) == false) {
+        const auto err = parsed.value("error", json());
+        if (err.is_null() || (err.is_string() && err.get<std::string>().empty())) {
+            return transportFail(op, "transient", "rln_bridge_transport",
+                std::string(opName(op)) + ": dispatch rejected (refusal with no message)");
+        }
+    }
+    return content; // the module's reply, verbatim
+}
+
+void RlnBridge::onLpReply(int ok, const char* jsonText, void* userData)
+{
+    std::unique_ptr<Pending> call(static_cast<Pending*>(userData));
+    if (!call) {
+        return;
+    }
+    const std::string out = reshapeReply(call->op, ok != 0, jsonText);
+    // Non-zero: the library already timed out this reqId — nothing to do.
+    (void)logosdelivery_rln_response(call->reqId, out.c_str());
+}
+
+void RlnBridge::sendAsync(Op op, uint64_t reqId, const std::string& method,
+                          const std::string& argsJson, int timeoutMs)
+{
+    if (!m_client) {
+        const std::string out = transportFail(op, "transient", "rln_bridge_transport",
+            method + ": lp client not initialized");
+        (void)logosdelivery_rln_response(reqId, out.c_str());
+        return;
+    }
+    auto* call = new Pending{reqId, op};
+    const int rc = lp_invoke_async(m_client, method.c_str(), argsJson.c_str(),
+                                   timeoutMs, &onLpReply, call);
+    if (rc != LP_OK) {
+        delete call; // callback will never fire
+        const std::string out = transportFail(op, "transient", "rln_bridge_transport",
+            method + ": lp_invoke_async rc=" + std::to_string(rc));
+        (void)logosdelivery_rln_response(reqId, out.c_str());
+    }
+}
+
 void RlnBridge::enqueue(Job job)
 {
     Lane& lane = isSlowOp(job.op) ? m_slow : m_fast;
@@ -236,53 +303,39 @@ std::string RlnBridge::stopBackend()
 void RlnBridge::getMembershipState(uint64_t reqId, std::string registryId,
                                    std::string rlnIdentifier)
 {
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::GetState;
-    j.registryId = std::move(registryId);
-    j.rlnIdentifier = std::move(rlnIdentifier);
-    enqueue(std::move(j));
+    const json args = json::array({registryId, rlnIdentifier});
+    sendAsync(Op::GetState, reqId, "get_membership_state", args.dump(), kReadMs);
 }
 
 void RlnBridge::getEpochQuota(uint64_t reqId, std::string registryId,
                               std::string rlnIdentifier, uint64_t timestamp)
 {
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::GetQuota;
-    j.registryId = std::move(registryId);
-    j.rlnIdentifier = std::move(rlnIdentifier);
-    j.timestamp = timestamp;
-    enqueue(std::move(j));
+    // module wants the timestamp as a STRING
+    const json args = json::array({registryId, rlnIdentifier,
+                                   std::to_string(timestamp)});
+    sendAsync(Op::GetQuota, reqId, "get_epoch_quota", args.dump(),
+              budgetMsFor(Op::GetQuota));
 }
 
 void RlnBridge::generateProof(uint64_t reqId, std::string registryId,
                               std::string rlnIdentifier, std::string signalHex,
                               uint64_t timestamp)
 {
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::Generate;
-    j.registryId = std::move(registryId);
-    j.rlnIdentifier = std::move(rlnIdentifier);
-    j.signalHex = std::move(signalHex);
-    j.timestamp = timestamp;
-    enqueue(std::move(j));
+    // module wants the timestamp as a STRING
+    const json args = json::array({registryId, rlnIdentifier, signalHex,
+                                   std::to_string(timestamp)});
+    sendAsync(Op::Generate, reqId, "generate_proof", args.dump(), kReadMs);
 }
 
 void RlnBridge::validateProof(uint64_t reqId, std::string registryId,
                               std::string rlnIdentifier, std::string signalHex,
                               uint64_t timestamp, std::string proofJson)
 {
-    Job j;
-    j.reqId = reqId;
-    j.op = Op::Validate;
-    j.registryId = std::move(registryId);
-    j.rlnIdentifier = std::move(rlnIdentifier);
-    j.signalHex = std::move(signalHex);
-    j.timestamp = timestamp;
-    j.proofJson = std::move(proofJson);
-    enqueue(std::move(j));
+    // module wants the timestamp as a STRING
+    const json args = json::array({registryId, rlnIdentifier, signalHex,
+                                   std::to_string(timestamp), proofJson});
+    sendAsync(Op::Validate, reqId, "validate_proof", args.dump(),
+              budgetMsFor(Op::Validate));
 }
 
 // --- serving -----------------------------------------------------------------
