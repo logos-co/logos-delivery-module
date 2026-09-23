@@ -17,9 +17,8 @@ extern "C" {
 }
 
 namespace {
-// The one reply shape of the generated C ABI; every per-call typedef aliases
-// it. Note that `reply` points AT the result string rather than being it:
-// nim-ffi decodes the CBOR reply into a local and hands over its address.
+// The reply shape every generated logosdelivery_ctx_* call shares: `reply`
+// points at the decoded result on success, `errMsg` carries a failure.
 using DeliveryReplyFn = void (*)(int, const char* const*, const char*, void*);
 
 struct CallbackContext {
@@ -70,15 +69,10 @@ void forgetCall(void* ticket)
     pendingCalls().erase(ticket);
 }
 
-// RET_STALE_WARN is a progress tick that fires every ~5s on a long call and is
-// always followed by a terminal code, so the trampoline ignores it instead of
-// completing the call.
+// The generated trampolines already drop the RET_STALE_WARN progress ticks, so
+// every call here is terminal.
 void replyTrampoline(int errCode, const char* const* reply, const char* errMsg, void* userData)
 {
-    if (errCode == RET_STALE_WARN) {
-        return;
-    }
-
     auto context = claimCall(userData);
     if (!context) {
         return;
@@ -92,19 +86,13 @@ void replyTrampoline(int errCode, const char* const* reply, const char* errMsg, 
     context->sem.release();
 }
 
-// Binds a generated logosdelivery_ctx_* wrapper to its arguments. The signature
-// is func(ctx, <the call's own arguments>, onReply, userData) and the wrapper
-// CBOR-encodes the request itself, so there is no request struct to build and
-// no separate form for the calls that take nothing. String arguments borrow the
-// caller's storage, which must outlive the bound call - it does, since the call
-// runs to completion inside callApiRetValue below.
-//
-// deliveryCtxHandle is the LogosDeliveryCtx* its owner keeps as void* so that
-// header's includers need no C ABI header; the cast belongs here instead.
+// Binds a generated wrapper, func(ctx, args..., onReply, userData), to its
+// arguments. The wrapper CBOR-encodes them before returning, so borrowed
+// strings need only outlive the call - they do, since it runs inside
+// callApiRetValue below.
 template <typename Func, typename... Args>
-auto bindApiCall(Func func, void* deliveryCtxHandle, Args... args)
+auto bindApiCall(Func func, const LogosDeliveryCtx* ctx, Args... args)
 {
-    const auto* ctx = static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle);
     return [func, ctx, args...](void* ticket) {
         return func(ctx, args..., static_cast<DeliveryReplyFn>(replyTrampoline), ticket);
     };
@@ -128,7 +116,10 @@ StdLogosResult callApiRetValue(
 
     if (invoke(ticket) != RET_OK) {
         forgetCall(ticket);
-        return {false, {}, "failed to initiate " + operationName};
+        // A local failure (encode, allocation) was already reported through
+        // the reply callback, before the wrapper returned.
+        return {false, {}, context->message.empty() ? "failed to initiate: " + operationName
+                                                    : context->message};
     }
 
     if (!context->sem.try_acquire_for(timeout)) {

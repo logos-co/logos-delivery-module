@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(DeliveryModuleTests LANGUAGES CXX)
+project(DeliveryModuleTests LANGUAGES C CXX)
 
 include(LogosTest)
 
@@ -10,12 +10,15 @@ logos_test(
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
         ../src/service_discovery_plugin.cpp
+        ../src/rln_bridge.cpp
+        ../src/rln_presets.cpp
         mocks/delivery_module_events_stub.cpp
     TEST_SOURCES
         main.cpp
         test_delivery_module.cpp
     MOCK_C_SOURCES
         mocks/mock_liblogosdelivery.cpp
+        mocks/mock_logos_protocol.cpp
     EXTRA_INCLUDES
         stubs/lib
 )
@@ -34,17 +37,26 @@ find_library(LIBLOGOSDELIVERY_PATH
 if(LIBLOGOSDELIVERY_PATH)
     message(STATUS "[DeliveryTests] liblogosdelivery found: ${LIBLOGOSDELIVERY_PATH} - building integration tests")
 
+    # The real generated binding needs TinyCBOR, staged by flake.nix.
+    file(GLOB TINYCBOR_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../lib/tinycbor/*.c)
+
     logos_test(
         NAME delivery_module_integration_tests
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
             ../src/service_discovery_plugin.cpp
+            ../src/rln_bridge.cpp
+            ../src/rln_presets.cpp
             mocks/delivery_module_events_stub.cpp
+            ${TINYCBOR_SOURCES}
         TEST_SOURCES
             main.cpp
             test_delivery_integration.cpp
+        MOCK_C_SOURCES
+            mocks/mock_logos_protocol.cpp
         EXTRA_INCLUDES
             ../lib
+            stubs/lib
         EXTRA_LINK_LIBS
             ${LIBLOGOSDELIVERY_PATH}
     )

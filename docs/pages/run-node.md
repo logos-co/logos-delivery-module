@@ -118,7 +118,12 @@ directly on the host.
 ### Build the runtime and module
 
 Build the `logoscore` CLI (the headless runtime) and the `lgpm` package
-manager from their flakes, then build and install this module's `.lgx`:
+manager from their flakes, then build and install this module's `.lgx`.
+`liblogos_rln_module` is an optional dependency, so a node whose preset has
+RLN off needs nothing else; an RLN-enabled one also needs
+`liblogos_rln_module` and `liblogos_lez_rln_module`. This flake
+re-exports their `.lgx`s from its own locked inputs, so they match the revs
+the module was built against:
 
 ```bash
 git clone https://github.com/logos-co/logos-delivery-module.git
@@ -131,10 +136,16 @@ nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
 # This module, built from the current checkout
 nix build '.#lgx' -o delivery-lgx
 
+# Its RLN dependency chain
+nix build '.#liblogos_rln_module-lgx' -o rln-lgx
+nix build '.#liblogos_lez_rln_module-lgx' -o lez-rln-lgx
+
 # Seed the modules dir with the bundled capability module, then install
 mkdir -p modules
 cp -RL ./logos/modules/. ./modules/
-./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx
+for pkg in lez-rln-lgx rln-lgx delivery-lgx; do
+  ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file "$pkg"/*.lgx
+done
 ```
 
 The first build compiles the whole runtime stack through Nix — allow

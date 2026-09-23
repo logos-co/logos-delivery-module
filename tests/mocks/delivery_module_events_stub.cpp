@@ -15,12 +15,16 @@
 namespace delivery_test_events {
 NodeLifecycleEvent g_lastNodeStarted{};
 NodeLifecycleEvent g_lastNodeStopped{};
+RlnRequestEvent g_lastRlnRequest{};
+RlnStateEvent g_lastRlnState{};
+std::mutex g_rlnStateMutex;
 } // namespace delivery_test_events
 
+void DeliveryModuleImpl::messageQueued(const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageSent(const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageError(const std::string&, const std::string&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::messagePropagated(const std::string&, const std::string&, int64_t) {}
-void DeliveryModuleImpl::messageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, int64_t) {}
+void DeliveryModuleImpl::messageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::connectionStateChanged(const std::string&, int64_t) {}
 void DeliveryModuleImpl::channelMessageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, int64_t) {}
 void DeliveryModuleImpl::channelMessageSent(const std::string&, const std::string&, int64_t) {}
@@ -31,4 +35,67 @@ void DeliveryModuleImpl::nodeStarted(bool success, const std::string& message, i
 }
 void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, int64_t timestamp) {
     delivery_test_events::g_lastNodeStopped = {success, message, timestamp, true};
+}
+
+void DeliveryModuleImpl::rlnStateChanged(const std::string& state, const std::string& message, int64_t) {
+    std::lock_guard<std::mutex> lock(delivery_test_events::g_rlnStateMutex);
+    delivery_test_events::g_lastRlnState.state = state;
+    delivery_test_events::g_lastRlnState.message = message;
+    delivery_test_events::g_lastRlnState.transitions++;
+}
+
+void DeliveryModuleImpl::dispatchRlnGetMembershipStateRequestEvent(int64_t reqId, const std::string& registryId,
+                                                        const std::string& rlnIdentifier,
+                                                        int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "get_membership_state";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::dispatchRlnGetEpochQuotaRequestEvent(int64_t reqId, const std::string& registryId,
+                                                 const std::string& rlnIdentifier,
+                                                 int64_t epochTimestamp, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "get_epoch_quota";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.epochTimestamp = epochTimestamp;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::dispatchRlnGenerateProofRequestEvent(int64_t reqId, const std::string& registryId,
+                                                 const std::string& rlnIdentifier,
+                                                 const std::string& signalHex,
+                                                 int64_t epochTimestamp, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "generate_proof";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.signalHex = signalHex;
+    e.epochTimestamp = epochTimestamp;
+    e.timestamp = timestamp;
+}
+
+void DeliveryModuleImpl::dispatchRlnValidateProofRequestEvent(int64_t reqId, const std::string& registryId,
+                                                 const std::string& rlnIdentifier,
+                                                 const std::string& signalHex, int64_t epochTimestamp,
+                                                 const std::string& proofJson, int64_t timestamp) {
+    auto& e = delivery_test_events::g_lastRlnRequest;
+    e = {};
+    e.op = "validate_proof";
+    e.reqId = reqId;
+    e.registryId = registryId;
+    e.rlnIdentifier = rlnIdentifier;
+    e.signalHex = signalHex;
+    e.epochTimestamp = epochTimestamp;
+    e.proofJson = proofJson;
+    e.timestamp = timestamp;
 }

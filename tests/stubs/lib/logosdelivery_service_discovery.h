@@ -86,28 +86,42 @@ extern "C"
   } LdServiceDiscoveryPlugin;
 
   /* Generated entry points, declared here because the stub set has no
-   * generated/ directory of its own. */
-  int logosdelivery_set_service_discovery_plugin(void *ctx,
-                                                 LogosDeliveryScalarRawFn callback,
-                                                 void *user_data,
-                                                 uint64_t pluginPtr);
+   * generated/ directory of its own. Shapes mirror the real generated header
+   * under nim-ffi's CBOR ABI: a logosdelivery_ctx_* wrapper per call, taking
+   * the handle and the call's own arguments, replying with
+   * (err_code, const char* const* reply, err_msg, user_data). */
+  typedef void (*LogosDeliveryServiceDiscoveryReplyFn)(int err_code,
+                                                       const char *const *reply,
+                                                       const char *err_msg,
+                                                       void *user_data);
 
-  int logosdelivery_clear_service_discovery_plugin(void *ctx,
-                                                   LogosDeliveryScalarRawFn callback,
-                                                   void *user_data);
+  int logosdelivery_ctx_set_service_discovery_plugin(
+      const LogosDeliveryCtx *ctx,
+      uint64_t pluginPtr,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data);
 
-  int logosdelivery_get_discovery_requirements(void *ctx,
-                                               LogosDeliveryScalarRawFn callback,
-                                               void *user_data);
+  int logosdelivery_ctx_clear_service_discovery_plugin(
+      const LogosDeliveryCtx *ctx,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data);
 
+  int logosdelivery_ctx_get_discovery_requirements(
+      const LogosDeliveryCtx *ctx,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data);
+
+  /* Installs (or replaces) the plugin of the node `ctx`. Typed wrapper over
+   * logosdelivery_ctx_set_service_discovery_plugin, which takes the plugin
+   * address as a uint64_t. */
   static inline int logosdelivery_install_service_discovery_plugin(
-      void *ctx,
+      const LogosDeliveryCtx *ctx,
       const LdServiceDiscoveryPlugin *plugin,
-      LogosDeliveryScalarRawFn callback,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
       void *user_data)
   {
-    return logosdelivery_set_service_discovery_plugin(
-        ctx, callback, user_data, (uint64_t)(uintptr_t)plugin);
+    return logosdelivery_ctx_set_service_discovery_plugin(
+        ctx, (uint64_t)(uintptr_t)plugin, on_reply, user_data);
   }
 
 #ifdef __cplusplus

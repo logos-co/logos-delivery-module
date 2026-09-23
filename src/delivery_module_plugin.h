@@ -5,12 +5,25 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
 
 class DeliveryServiceDiscoveryPlugin;
+class RlnBridge;
+
+// Everything the delivery library no longer knows about RLN. Resolved from
+// the createNode config's network preset (see src/rln_presets.h), never
+// carried in the config itself.
+struct DeliveryRlnConfig {
+    bool enabled = false;
+    std::string registryId;
+    std::string rlnIdentifier;
+    uint64_t epochSizeSec = 0;
+    uint64_t maxEpochGap = 0;
+};
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -80,6 +93,13 @@ public:
      * }
      * @endcode
      *
+     * Other overrides worth naming: `backfillEnabled` (default `true`) runs
+     * Store catch-up for the messages missed while the node was down, and
+     * `backfillRequestTimeoutSeconds` bounds one Store query (default 10,
+     * range 1–300); see @ref messageReceived for what catch-up delivers.
+     * `nat` selects public-address discovery — `"any"` (default), `"none"`,
+     * `"upnp"`, `"pmp"` or `"extip:<IP>"`.
+     *
      * **Node operator** — kernel-only service node on a public network. `mode`
      * is not applied on this layer, so protocol flags are set explicitly in
      * `kernelConf`:
@@ -127,11 +147,12 @@ public:
     /**
      * @brief Sends a message over the active node.
      *
-     * Builds a JSON envelope expected by `logosdelivery_send`:
+     * Builds a JSON envelope expected by `logosdelivery_ctx_send`:
      * `{ "contentTopic": string, "payload": base64, "ephemeral": false }`.
      *
      * Returns a requestId on success. Async results come via typed events:
      * - `messageError` emitted if the module can't send the message
+     * - `messageQueued` emitted if the send waits for rate-limit budget
      * - `messagePropagated` emitted if the message has hit the network
      * - `messageSent` emitted after the message is validated by the network
      *
@@ -159,7 +180,7 @@ public:
      * @brief Runs a Store (historical message) query against a specific store
      *        service peer.
      *
-     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`waku_store_query`,
+     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`logosdelivery_ctx_waku_store_query`,
      * `liblogosdelivery_kernel.h`), which is subject to change at any point
      * without a deprecation cycle. This method's JSON contract follows it.
      *
@@ -221,7 +242,7 @@ public:
     /**
      * @brief Sends a message on a reliable channel.
      *
-     * Builds the JSON envelope expected by `logosdelivery_channel_send`:
+     * Builds the JSON envelope expected by `logosdelivery_ctx_channel_send`:
      * `{ "payload": base64, "ephemeral": false }`.
      *
      * Returns a requestId on success. Async results come via typed events:
@@ -297,6 +318,73 @@ public:
      */
     std::string collectOpenMetricsText();
 
+    /**
+     * @brief Completes an outstanding RLN request (see the `rln*Request` events).
+     *
+     * The delivery library outsources RLN operations to an external RLN
+     * module; this module facilitates that message passing. When the delivery
+     * library makes an RLN request, this module emits the matching
+     * `rln*Request` event. This method takes the reqId of the original
+     * request along with the response and passes it on to the library
+     * verbatim — the wire schema is owned by the RLN module and the delivery
+     * library, not modelled here.
+     *
+     * On a node running lez RLN the in-process bridge (see
+     * @ref rlnBridgeEnable) answers each request itself; only the first
+     * response per reqId is accepted, so a second caller of this method is
+     * rejected as a duplicate.
+     *
+     * There is no response deadline to manage on this side: if no response
+     * arrives in time, the delivery library synthesizes a TRANSIENT failure
+     * itself. A response for a request that already timed out (or was never
+     * issued) fails with an error.
+     *
+     * @param reqId Request id from the `rln*Request` event. Ids >= 2^63 appear
+     *        negative here (int64 view of the library's uint64 id); they are
+     *        passed through bit-exactly, so echo them back unchanged.
+     */
+    StdLogosResult rlnRespond(int64_t reqId, const std::string& resultJson);
+
+    /**
+     * @brief Enables the in-process RLN bridge.
+     *
+     * Once enabled, each `rln*Request` is answered inside this module: the
+     * bridge's worker threads call the co-loaded `liblogos_rln_module` and
+     * pass its reply back unchanged. The events keep emitting for
+     * observability, but an external responder must not also answer an
+     * enabled node: its second response per reqId is rejected. Idempotent;
+     * call any time before @ref start. A preset that enables RLN does this
+     * automatically. Calling it directly is mainly for test purposes.
+     */
+    StdLogosResult rlnBridgeEnable();
+
+    /**
+     * @brief Where this node's RLN stands.
+     *
+     * RLN is not configured by a caller: @ref createNode reads the network
+     * `preset` and brings RLN up for deployments whose preset enables it.
+     * The chain-touching part of that runs off the @ref createNode thread, so
+     * a node is created before RLN is usable and this reports the progress.
+     *
+     * | State | Meaning |
+     * |---|---|
+     * | `Disabled` | No node yet, or the node's preset carries no RLN |
+     * | `Initializing` | Plugin installed, backend still coming up |
+     * | `Ready` | The in-process bridge answers requests |
+     * | `Failed` | Bring-up failed; `message` carries the reason |
+     *
+     * `Ready` means the backend started and the bridge answers. It does not
+     * promise the RLN module's valid-root window is warm — that is a
+     * background refresh the module does not currently expose.
+     *
+     * @return Value `{"state": "<state>", "message": "<detail>"}`, plus
+     *         `registryId`, `rlnIdentifier` and `epochSizeSec` once a preset
+     *         has enabled RLN — the resolved deployment, so a caller can name
+     *         or query it without a second copy of the preset table.
+     * @see rlnStateChanged for the same transitions as an event.
+     */
+    StdLogosResult rlnState();
+
     std::string name() const { return "delivery_module"; }
 
 /** @} */
@@ -312,6 +400,16 @@ public:
  */
 
 logos_events:
+    /**
+     * @brief Emitted when a send is held back because the epoch's rate-limit
+     *        budget is spent.
+     *
+     * Not a failure: the message stays queued and goes out once the budget
+     * refills, so @ref messagePropagated and @ref messageSent still follow.
+     * Emitted at most once per send, the first time the message is held back.
+     */
+    void messageQueued(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+
     /**
      * @brief Emitted when the network has validated a sent message.
      *
@@ -331,10 +429,23 @@ logos_events:
      *
      * `payload` is delivered as raw bytes, already decoded from the wire
      * encoding.
+     *
+     * `source` is `"live"` when the message was delivered as it was published,
+     * or `"history"` when Store catch-up recovered it — at startup, or after a
+     * connectivity gap. Catch-up is on by default, so a restart replays what
+     * was missed while the node was down. Upstream suppresses duplicates only
+     * for a few minutes and only in memory, so a consumer that needs each
+     * message once must deduplicate by `messageHash`.
      */
-    void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, int64_t timestamp);
+    void messageReceived(const std::string& messageHash, const std::string& contentTopic, const std::vector<uint8_t>& payload, const std::string& source, int64_t timestamp);
 
-    /** @brief Emitted when the node's connectivity changes. */
+    /**
+     * @brief Emitted when the node's connectivity changes.
+     *
+     * A node configured with `anonymityLevel` above `"None"` reports
+     * disconnected until a mix exit is ready, since it cannot send anonymously
+     * before that.
+     */
     void connectionStateChanged(const std::string& connectionStatus, int64_t timestamp);
 
     /**
@@ -357,16 +468,134 @@ logos_events:
     /** @brief Emitted when @ref stop finishes; `message` carries the reason when `success` is false. */
     void nodeStopped(bool success, const std::string& message, int64_t timestamp);
 
+    /**
+     * @brief Emitted on every RLN bring-up transition.
+     *
+     * `state` is one of `Disabled`, `Initializing`, `Ready` or `Failed`, and
+     * `message` carries the reason on `Failed`. See @ref rlnState for what
+     * each one means and when they occur.
+     */
+    void rlnStateChanged(const std::string& state, const std::string& message, int64_t timestamp);
+
+    /**
+     * @brief RLN request events, one per ABI function
+     * (`liblogosdelivery_rln.h`).
+     *
+     * Answer each via @ref rlnRespond with the same `reqId`. The JSON args are
+     * opaque to this module (RLN module wire schema). `epochTimestamp` is the
+     * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
+     * local emission time, as on every other event.
+     */
+    void dispatchRlnGetMembershipStateRequestEvent(int64_t reqId, const std::string& registryId,
+                                        const std::string& rlnIdentifier, int64_t timestamp);
+    void dispatchRlnGetEpochQuotaRequestEvent(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier,
+                                 int64_t epochTimestamp, int64_t timestamp);
+    void dispatchRlnGenerateProofRequestEvent(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, int64_t timestamp);
+    void dispatchRlnValidateProofRequestEvent(int64_t reqId, const std::string& registryId,
+                                 const std::string& rlnIdentifier, const std::string& signalHex,
+                                 int64_t epochTimestamp, const std::string& proofJson,
+                                 int64_t timestamp);
+
 /** @} */
 
 private:
+    // Wires the bridge to the co-loaded RLN module on first use — modules()
+    // is only valid once the framework has handed the context over — then
+    // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
+    // path) funnel through here. Returns an error string, or empty.
+    std::string bringUpRlnBridge();
+
+    /**
+     * @brief Installs the delivery library's RLN plugin for `cfg`.
+     *
+     * RLN is this module's business, not the delivery library's: the
+     * library's plugin is implementation-agnostic — it carries no
+     * configuration, names no registry or membership, and does not start the
+     * backend. Everything it lacks is supplied from here.
+     *
+     * Runs before the library creates the node — an installed plugin is what
+     * makes it mount RLN, and it reads that at node creation — so this half
+     * of RLN configuration cannot be deferred. It is also purely local.
+     *
+     * @return Empty on success, a description of the problem otherwise.
+     */
+    std::string installRlnPlugin(const DeliveryRlnConfig& cfg);
+
+    /**
+     * @brief Brings the bridge up and starts the co-loaded RLN module.
+     *
+     * The other half of RLN configuration, split from @ref installRlnPlugin
+     * because this one reaches the chain: @ref createNode runs it on its own
+     * thread so node creation does not wait for a registry round trip.
+     *
+     * @return Empty on success, a description of the problem otherwise.
+     */
+    std::string startRlnBackend();
+
+    // Publishes an RLN state transition: stores it and emits
+    // rlnStateChanged. A repeat of the current state is not re-emitted.
+    void setRlnState(const char* state, const std::string& message);
+
+    // Joins a finished bring-up thread, if any. Call under createNodeMutex.
+    void joinRlnBringUp();
+
+    // Undoes installRlnPlugin: clears the library's RLN plugin and resets both
+    // copies of the RLN config. A no-op unless this instance installed it.
+    // Publishes no state transition; that is the caller's call.
+    void abortRln();
+
+    // Releases whatever createNode acquired, in reverse. Each step is a no-op
+    // when that step never ran, so the destructor and every createNode failure
+    // exit share it.
+    void releaseNode();
+
+    // createNode's failure exit: releaseNode(), then report RLN as Disabled if
+    // it had been installed.
+    StdLogosResult releaseAndFail(std::string reason);
+
+    // Guards the published RLN state against the bring-up thread.
+    mutable std::mutex rlnStateMutex;
+    std::string rlnStateName{"Disabled"};
+    std::string rlnStateMessage;
+    // The resolved deployment, published so a caller can query the same
+    // registry this node answers for without resolving the preset itself.
+    DeliveryRlnConfig rlnStateConfig;
+
+    // Runs startRlnBackend() for a node whose preset enables RLN.
+    std::thread rlnBringUpThread;
+
+    // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
+    // and started by bringUpRlnBridge().
+    std::unique_ptr<RlnBridge> rlnBridge;
+
+    // Everything the delivery library no longer knows about RLN (see
+    // DeliveryRlnConfig).
+    // Never null. Replaced, never mutated: a writer publishes a new snapshot.
+    std::shared_ptr<const DeliveryRlnConfig> rlnConfig =
+        std::make_shared<const DeliveryRlnConfig>();
+    // Guards the rlnConfig pointer. Read by the RLN trampolines on a library
+    // thread, written by installRlnPlugin and abortRln on ours -- and a callback
+    // already executing is never joined, so a reader copies the pointer under
+    // the lock and keeps that snapshot alive for the rest of the call. Reads
+    // ordered against every writer by joinRlnBringUp (stop, and startRlnBackend
+    // on the bring-up thread) need no lock.
+    mutable std::mutex rlnConfigMutex;
+
+    // Copies the rlnConfig pointer under rlnConfigMutex. For readers not
+    // ordered against the writers -- the RLN trampolines.
+    std::shared_ptr<const DeliveryRlnConfig> rlnConfigSnapshot() const;
+
     // Raw FFI context: what the event registry takes. Every other call goes
     // through the generated logosdelivery_ctx_* wrappers, which want the handle
     // below instead.
     void* deliveryCtx;
-    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), held
-    // as void* so the C ABI header stays out of this header's includers.
-    // Released with logosdelivery_ctx_destroy.
+    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), which
+    // every logosdelivery_ctx_* call takes. Held as void* so the C ABI header
+    // stays out of this header's includers. Released with
+    // logosdelivery_ctx_destroy.
     void* deliveryCtxHandle;
 
     std::mutex createNodeMutex;
@@ -415,8 +644,24 @@ private:
     // Both take the generated reply shape -- `reply` points at the result on
     // success, `errMsg` carries the reason otherwise -- and ignore
     // RET_STALE_WARN, the non-terminal progress tick a long start/stop emits.
-    static void start_callback(
-        int callerRet, const char* const* reply, const char* errMsg, void* userData);
-    static void stop_callback(
-        int callerRet, const char* const* reply, const char* errMsg, void* userData);
+    static void start_callback(int errCode, const char* const* reply, const char* errMsg,
+                               void* userData);
+    static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
+                              void* userData);
+
+    // RLN plugin slots installed before createNode, one per ABI function
+    // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
+    // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
+    // for the duration of the call. userData is the DeliveryModuleImpl*.
+    //
+    // The library's plugin carries no registry or membership, so each
+    // trampoline adds this module's own rlnConfig before forwarding.
+    static void rln_get_membership_state_callback(uint64_t reqId, void* userData);
+    static void rln_get_epoch_quota_callback(uint64_t reqId, uint64_t timestamp,
+                                             void* userData);
+    static void rln_generate_proof_callback(uint64_t reqId, const char* signalHex,
+                                            uint64_t timestamp, void* userData);
+    static void rln_validate_proof_callback(uint64_t reqId, const char* signalHex,
+                                            uint64_t timestamp, const char* proofJson,
+                                            void* userData);
 };

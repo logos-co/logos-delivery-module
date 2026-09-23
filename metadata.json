@@ -1,6 +1,6 @@
 {
     "name": "delivery_module",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "description": "Logos Delivery Module - High-level message-delivery API",
     "author": "Logos Core Team",
     "type": "core",
@@ -11,6 +11,7 @@
         "impl_header": "delivery_module_plugin.h"
     },
     "dependencies": ["libp2p_module"],
+    "optional_dependencies": ["liblogos_rln_module"],
     "include": [
         "liblogosdelivery.so",
         "liblogosdelivery.dylib",
@@ -27,7 +28,7 @@
     "capabilities": [],
     "nix": {
         "packages": {
-            "runtime": ["postgresql", "nlohmann_json"]
+            "runtime": ["libpq", "nlohmann_json"]
         },
         "external_libraries": [
             {

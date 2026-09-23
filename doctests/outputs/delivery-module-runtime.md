@@ -13,7 +13,8 @@ delivery-module commit end-to-end through the headless `logoscore` runtime:
    its own flake's `#lgx` output, **pinned to the commit under test** — so the
    module you run is built from exactly what is checked out here, not the latest
    published release.
-3. Install the `.lgx` into a `./modules` directory with `lgpm`.
+3. Install the `.lgx` into a `./modules` directory with `lgpm`, together with
+   the RLN modules `delivery_module` depends on.
 4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
    it with `module-info`, call `createNode` with a Waku node config, then call
    `start` — verifying the module actually runs and boots a delivery node.
@@ -22,16 +23,23 @@ Because the module is built from the commit under test and then loaded and calle
 through a real `logoscore` daemon, a green run is real evidence that this change
 keeps the delivery module loadable and callable.
 
-**What you'll build:** This `delivery_module`, packaged as `.lgx`, installed with `lgpm`, and called through a `logoscore` daemon.
+On Windows, CI cross-builds the module and uses a staged native `logoscore`
+host to create a node without RLN (Rate Limiting Nullifier), the optional
+rate-limiting feature. That leg uses an offline config, verifies RLN stays
+disabled, and stops before `start`, which requires network access.
+
+**What you'll build:** This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows.
 
 **What you'll learn:**
 
 - How to build the `logoscore` runtime and the `lgpm` package manager from their flakes
 - How a module's flake exposes a ready-to-install `.lgx` via its `#lgx` output
 - How to install an `.lgx` into a modules directory with `lgpm`
+- How a module's declared dependencies have to be installed alongside it
 - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
 - How to create and start a delivery node with `createNode` and `start`
 - How to shut the daemon down and confirm it has exited
+- How to load the module and create a node on Windows without its optional RLN rate-limiting dependency
 
 ## Prerequisites
 
@@ -44,7 +52,7 @@ echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
 
 Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
 
-- **A Linux or macOS machine.**
+- **A Linux or macOS machine for the package walkthrough.** The Windows section runs in CI against staged cross-built artifacts.
 
 ---
 
@@ -86,8 +94,8 @@ The executable is at `./lgpm/bin/lgpm`.
 ## Step 3: Build and install this delivery module
 
 Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
-output and install it into a local `./modules` directory with `lgpm`. Every
-module built with
+output and install it into a local `./modules` directory with `lgpm`, along
+with the RLN modules it depends on. Every module built with
 [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
 exposes a ready-to-install `#lgx`.
 
@@ -113,7 +121,34 @@ The `.lgx` package is now under `./delivery-lgx/`:
 ls delivery-lgx/*.lgx
 ```
 
-### 3.2 Seed the modules directory with the bundled capability module
+### 3.2 Build the RLN dependency chain
+
+`liblogos_rln_module` is an optional dependency of `delivery_module`:
+a node whose preset has RLN off loads without it. A node on an
+RLN-enabled preset needs the whole chain installed alongside it —
+`liblogos_rln_module` → `liblogos_lez_rln_module` — so
+this walkthrough installs it too.
+
+Each is built at the rev this module's `flake.lock` pins for it, so
+the RLN modules you install are the ones the delivery module was
+built against. From a clone, this flake re-exports the same two
+packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
+`liblogos_lez_rln_module` — which reads the pins
+straight out of the lock.
+
+```bash
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=65697028baffc072e1aeebaec7c7e35e7e12cab1&dir=logos-rln-module#lgx' -o rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=9583801fae795b6d5fd5bfe8d4f407d14d859b9f&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+
+```
+
+Two more `.lgx` packages, one per module in the chain:
+
+```bash
+ls rln-lgx/*.lgx lez-rln-lgx/*.lgx
+```
+
+### 3.3 Seed the modules directory with the bundled capability module
 
 `delivery_module` is loaded through the host's capability layer, so the
 modules directory also needs the `capability_module` that ships with
@@ -125,19 +160,22 @@ cp -RL ./logos/modules/. ./modules/
 
 ```
 
-### 3.3 Install the .lgx with lgpm
+### 3.4 Install the .lgx packages with lgpm
 
-Install the freshly-built package into `./modules`. `delivery_module` is
-a `core` module, so it goes to `--modules-dir`. The package is unsigned
-(a local dev build), so we pass `--allow-unsigned`.
+Install the freshly-built packages into `./modules`. These are all
+`core` modules, so they go to `--modules-dir`. The packages are
+unsigned (local dev builds), so we pass `--allow-unsigned`.
 
 ```bash
+./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file lez-rln-lgx/*.lgx
+./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file rln-lgx/*.lgx
 ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx
+
 ```
 
-### 3.4 Confirm the install
+### 3.5 Confirm the install
 
-Scan the directory and confirm the module landed:
+Scan the directory and confirm all four modules landed:
 
 ```bash
 ./lgpm/bin/lgpm --modules-dir ./modules list
@@ -231,7 +269,8 @@ logoscore list-modules
 
 ### 4.6 Load the module
 
-Load `delivery_module` into the running daemon:
+Load `delivery_module` into the running daemon. Its RLN dependency is
+optional, so the host loads this module alone:
 
 ```bash
 logoscore load-module delivery_module
@@ -307,4 +346,85 @@ non-zero, so we add `|| true` to let the doc-test assert on the output:
 
 ```bash
 logoscore status
+```
+
+---
+
+## Step 5: Create a Windows node without the optional RLN module
+
+CI stages the Windows module, its DLLs, and a native `logoscore` host.
+Copy the module into the host's scan directory, then use a private daemon
+configuration directory and an offline node config. The shared Windows
+runner provides `run` to launch each staged executable.
+
+### 5.1 Stage the delivery module
+
+```bash
+test ! -e windows-logoscore/modules/delivery_module &&
+  cp -R install-portable/modules/delivery_module windows-logoscore/modules/delivery_module
+
+```
+
+### 5.2 Write an offline node config
+
+```json
+{"logLevel":"INFO"}
+```
+
+### 5.3 Start the Windows daemon
+
+```bash
+./windows-logoscore/bin/logoscore.exe -D -m ./windows-logoscore/modules --config-dir ./windows-smoke-config > windows-smoke-daemon.log 2>&1 &
+
+```
+
+### 5.4 Wait for the daemon
+
+```bash
+ready=0
+for attempt in $(seq 1 20); do
+  if run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config status | grep -qF '"status":"running"'; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$ready" -eq 1 ]; then echo 'daemon ready'; else cat windows-smoke-daemon.log; false; fi
+
+```
+
+### 5.5 Discover the module
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config list-modules
+```
+
+### 5.6 Load the module without its optional RLN dependency
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config load-module delivery_module
+```
+
+### 5.7 Inspect the module methods
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config module-info delivery_module
+```
+
+### 5.8 Create an offline delivery node
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json
+```
+
+### 5.9 Confirm RLN remains disabled
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module rlnState
+```
+
+### 5.10 Stop the Windows daemon
+
+```bash
+run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config stop
 ```

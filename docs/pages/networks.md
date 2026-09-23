@@ -40,6 +40,11 @@ The two are separate clusters, so nodes on one do not see nodes on the other.
 Cluster ID and entry nodes are the only differences. Both names also accept a
 dotless spelling (`logosdev`, `logostest`).
 
+The preset also selects the node's RLN settings — registry, epoch size and
+application identifier — which is why RLN needs no configuration of its own.
+Both fleets run with it off; see [`rln.md`](./rln.md) for how a preset turns
+it on and how a local deployment supplies its own.
+
 The live node list and status for both fleets is at
 [fleets.logos.co](https://fleets.logos.co/).
 

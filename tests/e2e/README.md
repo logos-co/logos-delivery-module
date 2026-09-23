@@ -46,8 +46,8 @@ We assert `messagePropagated`, not `messageSent`: with relay-only / no store pee
 `delivery_module`'s public methods are **synchronous** — `client.call(...)` returns
 the `StdLogosResult` `{success, value, error}` directly; there are no per-call
 result events. Only message delivery is async, via the typed events
-`messageReceived` / `messagePropagated` / `messageSent` / `messageError` /
-`connectionStateChanged`.
+`messageReceived` / `messageQueued` / `messagePropagated` / `messageSent` /
+`messageError` / `connectionStateChanged`.
 
 The logoscore CLI serializes a typed event as `{"event": <name>, "data": {"arg0":
 <1st arg>, "arg1": <2nd arg>, ...}}` — each codegen event arg lands at `argN` by
@@ -58,6 +58,10 @@ position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTop
 `vector<uint8_t>` `payload` arg's serialization is **not yet asserted** — if you
 extend the receive checks to the payload, read `messageReceived payload: …` from
 the logs and confirm the decoding in `libs/helpers.py` first.
+
+`source` (`arg3`) is `"live"` or `"history"`. A node that has been down and
+comes back can replay what it missed as `"history"`, so a test asserting on a
+freshly published message should pin `arg3` to `"live"`.
 
 ## Prerequisites
 
