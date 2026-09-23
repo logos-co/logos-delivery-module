@@ -291,21 +291,58 @@ StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
+    releaseNode();
+}
+
+void DeliveryModuleImpl::abortRln()
+{
+    // Only this thread writes rlnConfig, so reading it here needs no lock.
+    if (!rlnConfig->enabled) {
+        return;
+    }
+    logosdelivery_rln_set_plugin(nullptr, nullptr);
+    {
+        std::lock_guard<std::mutex> lock(rlnConfigMutex);
+        rlnConfig = std::make_shared<const DeliveryRlnConfig>();
+    }
+    {
+        std::lock_guard<std::mutex> lock(rlnStateMutex);
+        rlnStateConfig = DeliveryRlnConfig{};
+    }
+}
+
+void DeliveryModuleImpl::releaseNode()
+{
     // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
-    // run while it is still in flight.
+    // run while it is still in flight. A no-op when no thread was started.
     joinRlnBringUp();
 
+    // Before ctx_destroy on purpose: clearing the RLN surface fails all
+    // in-flight RLN requests, so no new RLN callback is dispatched into this
+    // object while the node goes away. (A callback already executing on the
+    // library thread is not joined; it holds its own rlnConfig snapshot.)
+    // Guarded on rlnConfig->enabled because the library's plugin is
+    // process-global -- clearing it unconditionally would disarm another
+    // instance's RLN.
+    abortRln();
+
     if (deliveryCtxHandle) {
-        // Clear the RLN surface first: fails all in-flight RLN requests so no
-        // new RLN callback is dispatched into this object during destruction.
-        // (A callback already executing on the library thread is not joined.)
-        logosdelivery_rln_set_plugin(nullptr, nullptr);
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
         logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
         deliveryCtxHandle = nullptr;
         deliveryCtx = nullptr;
     }
+}
+
+StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
+{
+    const bool rlnWasInstalled = rlnConfig->enabled;
+    releaseNode();
+    if (rlnWasInstalled) {
+        setRlnState("Disabled", {});
+    }
+    return {false, {}, std::move(reason)};
 }
 
 void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
@@ -581,22 +618,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         setRlnState("Initializing", {});
     }
 
-    auto abortRln = [this, &rlnPreset]() {
-        if (!rlnPreset.enabled) {
-            return;
-        }
-        logosdelivery_rln_set_plugin(nullptr, nullptr);
-        {
-            std::lock_guard<std::mutex> lock(rlnConfigMutex);
-            rlnConfig = std::make_shared<const DeliveryRlnConfig>();
-        }
-        {
-            std::lock_guard<std::mutex> lock(rlnStateMutex);
-            rlnStateConfig = DeliveryRlnConfig{};
-        }
-        setRlnState("Disabled", {});
-    };
-
     // logosdelivery_ctx_create encodes the config and turns the context address
     // the FFI reports back into a LogosDeliveryCtx handle.
     struct CreateContext {
@@ -661,8 +682,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts.erase(callbackKey);
 
         fprintf(stderr, "DeliveryModuleImpl: Failed to initiate createNode\n");
-        abortRln();
-        return {false, {}, "Failed to initiate createNode"};
+        return releaseAndFail("Failed to initiate createNode");
     }
 
     fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
@@ -672,8 +692,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         pendingContexts.erase(callbackKey);
 
         fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
-        abortRln();
-        return {false, {}, "Timeout waiting for createNode callback"};
+        return releaseAndFail("Timeout waiting for createNode callback");
     }
 
     if (callbackCtx->callerRet != RET_OK || callbackCtx->ctx == nullptr
@@ -687,8 +706,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
 
         fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
-        abortRln();
-        return {false, {}, "Failed to create Delivery context"};
+        return releaseAndFail("Failed to create Delivery context");
     }
 
     deliveryCtxHandle = callbackCtx->ctx;

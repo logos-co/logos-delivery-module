@@ -541,6 +541,20 @@ private:
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
 
+    // Undoes installRlnPlugin: clears the library's RLN plugin and resets both
+    // copies of the RLN config. A no-op unless this instance installed it.
+    // Publishes no state transition; that is the caller's call.
+    void abortRln();
+
+    // Releases whatever createNode acquired, in reverse. Each step is a no-op
+    // when that step never ran, so the destructor and every createNode failure
+    // exit share it.
+    void releaseNode();
+
+    // createNode's failure exit: releaseNode(), then report RLN as Disabled if
+    // it had been installed.
+    StdLogosResult releaseAndFail(std::string reason);
+
     // Guards the published RLN state against the bring-up thread.
     mutable std::mutex rlnStateMutex;
     std::string rlnStateName{"Disabled"};
