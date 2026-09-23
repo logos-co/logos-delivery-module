@@ -138,13 +138,18 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void*
         return;
     }
     try {
+        std::shared_ptr<const DeliveryRlnConfig> cfg;
+        {
+            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
+            cfg = impl->rlnConfig;
+        }
         if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->getMembershipState(reqId, impl->rlnConfig.registryId,
-                                                impl->rlnConfig.rlnIdentifier);
+            impl->rlnBridge->getMembershipState(reqId, cfg->registryId,
+                                                cfg->rlnIdentifier);
         }
         impl->dispatchRlnGetMembershipStateRequestEvent(static_cast<int64_t>(reqId),
-                                             impl->rlnConfig.registryId,
-                                             impl->rlnConfig.rlnIdentifier,
+                                             cfg->registryId,
+                                             cfg->rlnIdentifier,
                                              currentTimestampNs());
     } catch (const std::exception& e) {
         fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_membership_state request %llu: %s\n",
@@ -164,13 +169,18 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t t
         return;
     }
     try {
+        std::shared_ptr<const DeliveryRlnConfig> cfg;
+        {
+            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
+            cfg = impl->rlnConfig;
+        }
         if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->getEpochQuota(reqId, impl->rlnConfig.registryId,
-                                           impl->rlnConfig.rlnIdentifier, timestamp);
+            impl->rlnBridge->getEpochQuota(reqId, cfg->registryId,
+                                           cfg->rlnIdentifier, timestamp);
         }
         impl->dispatchRlnGetEpochQuotaRequestEvent(static_cast<int64_t>(reqId),
-                                      impl->rlnConfig.registryId,
-                                      impl->rlnConfig.rlnIdentifier,
+                                      cfg->registryId,
+                                      cfg->rlnIdentifier,
                                       static_cast<int64_t>(timestamp), currentTimestampNs());
     } catch (const std::exception& e) {
         fprintf(stderr, "DeliveryModuleImpl: dropped RLN get_epoch_quota request %llu: %s\n",
@@ -190,14 +200,19 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
         return;
     }
     try {
+        std::shared_ptr<const DeliveryRlnConfig> cfg;
+        {
+            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
+            cfg = impl->rlnConfig;
+        }
         if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->generateProof(reqId, impl->rlnConfig.registryId,
-                                           impl->rlnConfig.rlnIdentifier,
+            impl->rlnBridge->generateProof(reqId, cfg->registryId,
+                                           cfg->rlnIdentifier,
                                            toStringOrEmpty(signalHex), timestamp);
         }
         impl->dispatchRlnGenerateProofRequestEvent(static_cast<int64_t>(reqId),
-                                      impl->rlnConfig.registryId,
-                                      impl->rlnConfig.rlnIdentifier,
+                                      cfg->registryId,
+                                      cfg->rlnIdentifier,
                                       toStringOrEmpty(signalHex),
                                       static_cast<int64_t>(timestamp), currentTimestampNs());
     } catch (const std::exception& e) {
@@ -219,15 +234,20 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
         return;
     }
     try {
+        std::shared_ptr<const DeliveryRlnConfig> cfg;
+        {
+            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
+            cfg = impl->rlnConfig;
+        }
         if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->validateProof(reqId, impl->rlnConfig.registryId,
-                                           impl->rlnConfig.rlnIdentifier,
+            impl->rlnBridge->validateProof(reqId, cfg->registryId,
+                                           cfg->rlnIdentifier,
                                            toStringOrEmpty(signalHex), timestamp,
                                            toStringOrEmpty(proofJson));
         }
         impl->dispatchRlnValidateProofRequestEvent(static_cast<int64_t>(reqId),
-                                      impl->rlnConfig.registryId,
-                                      impl->rlnConfig.rlnIdentifier,
+                                      cfg->registryId,
+                                      cfg->rlnIdentifier,
                                       toStringOrEmpty(signalHex),
                                       static_cast<int64_t>(timestamp),
                                       toStringOrEmpty(proofJson), currentTimestampNs());
@@ -566,7 +586,10 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             return;
         }
         logosdelivery_rln_set_plugin(nullptr, nullptr);
-        rlnConfig = DeliveryRlnConfig{};
+        {
+            std::lock_guard<std::mutex> lock(rlnConfigMutex);
+            rlnConfig = std::make_shared<const DeliveryRlnConfig>();
+        }
         {
             std::lock_guard<std::mutex> lock(rlnStateMutex);
             rlnStateConfig = DeliveryRlnConfig{};
@@ -724,7 +747,7 @@ StdLogosResult DeliveryModuleImpl::stop()
     // This module started the RLN backend, so it stops it too. Stopping one
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
-    if (rlnConfig.enabled && rlnBridge->enabled()) {
+    if (rlnConfig->enabled && rlnBridge->enabled()) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
@@ -1063,18 +1086,23 @@ std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
         .validate_proof = rln_validate_proof_callback,
     };
 
-    rlnConfig = cfg;
-    rlnConfig.enabled = true;
+    auto next = std::make_shared<DeliveryRlnConfig>(cfg);
+    next->enabled = true;
+    {
+        std::lock_guard<std::mutex> lock(rlnConfigMutex);
+        rlnConfig = std::move(next);
+    }
     // The setter is no nim-ffi entry point, so it does not bring the Nim runtime
     // up; before that its lock is uninitialized (fatal on Windows). This call does.
     (void)logosdelivery_version();
     if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
-        rlnConfig = DeliveryRlnConfig{};
+        std::lock_guard<std::mutex> lock(rlnConfigMutex);
+        rlnConfig = std::make_shared<const DeliveryRlnConfig>();
         return "failed to install the RLN plugin";
     }
     {
         std::lock_guard<std::mutex> lock(rlnStateMutex);
-        rlnStateConfig = rlnConfig;
+        rlnStateConfig = *rlnConfig;
     }
     return {};
 }
@@ -1093,12 +1121,12 @@ std::string DeliveryModuleImpl::startRlnBackend()
     // The delivery library no longer starts the backend, so this module does:
     // a node that mounts RLN over a stopped module would Ignore every inbound
     // RLN message.
-    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig.registryId})}};
-    if (rlnConfig.epochSizeSec != 0) {
-        startCfg["epoch_size_sec"] = rlnConfig.epochSizeSec;
+    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig->registryId})}};
+    if (rlnConfig->epochSizeSec != 0) {
+        startCfg["epoch_size_sec"] = rlnConfig->epochSizeSec;
     }
-    if (rlnConfig.maxEpochGap != 0) {
-        startCfg["max_epoch_gap"] = rlnConfig.maxEpochGap;
+    if (rlnConfig->maxEpochGap != 0) {
+        startCfg["max_epoch_gap"] = rlnConfig->maxEpochGap;
     }
     const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
     if (!startFailure.empty()) {

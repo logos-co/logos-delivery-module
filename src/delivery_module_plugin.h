@@ -558,7 +558,16 @@ private:
 
     // Everything the delivery library no longer knows about RLN (see
     // DeliveryRlnConfig).
-    DeliveryRlnConfig rlnConfig;
+    // Never null. Replaced, never mutated: a writer publishes a new snapshot.
+    std::shared_ptr<const DeliveryRlnConfig> rlnConfig =
+        std::make_shared<const DeliveryRlnConfig>();
+    // Guards the rlnConfig pointer. Read by the RLN trampolines on a library
+    // thread, written by installRlnPlugin and abortRln on ours -- and a callback
+    // already executing is never joined, so a reader copies the pointer under
+    // the lock and keeps that snapshot alive for the rest of the call. Reads
+    // ordered against every writer by joinRlnBringUp (stop, and startRlnBackend
+    // on the bring-up thread) need no lock.
+    mutable std::mutex rlnConfigMutex;
 
     // Raw FFI context: what the event registry takes.
     void* deliveryCtx;
