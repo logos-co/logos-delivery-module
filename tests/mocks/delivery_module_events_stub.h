@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 namespace delivery_test_events {
@@ -37,7 +38,8 @@ struct RlnRequestEvent {
 extern RlnRequestEvent g_lastRlnRequest;
 
 // Last rlnStateChanged payload; `transitions` counts every emission, so a
-// test can tell a repeated state from a re-entered one.
+// test can tell a repeated state from a re-entered one. Emitted from the RLN
+// bring-up thread, so read it through lastRlnState(), never directly.
 struct RlnStateEvent {
     std::string state;
     std::string message;
@@ -45,6 +47,12 @@ struct RlnStateEvent {
 };
 
 extern RlnStateEvent g_lastRlnState;
+extern std::mutex g_rlnStateMutex;
+
+inline RlnStateEvent lastRlnState() {
+    std::lock_guard<std::mutex> lock(g_rlnStateMutex);
+    return g_lastRlnState;
+}
 
 inline void resetNodeLifecycleEvents() {
     g_lastNodeStarted = NodeLifecycleEvent{};
@@ -56,6 +64,7 @@ inline void resetRlnRequestEvent() {
 }
 
 inline void resetRlnStateEvent() {
+    std::lock_guard<std::mutex> lock(g_rlnStateMutex);
     g_lastRlnState = RlnStateEvent{};
 }
 

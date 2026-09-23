@@ -74,6 +74,19 @@ static std::string settledRlnState(DeliveryModuleImpl& impl) {
     return "Initializing";
 }
 
+// rlnState() changes before rlnStateChanged fires, so a settled state does not
+// mean the event has been recorded yet: wait for the event itself.
+static delivery_test_events::RlnStateEvent awaitRlnStateEvents(int transitions) {
+    for (int i = 0; i < 500; ++i) {
+        const auto event = delivery_test_events::lastRlnState();
+        if (event.transitions >= transitions) {
+            return event;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return delivery_test_events::lastRlnState();
+}
+
 // Without a framework context the bridge cannot come up, so bring-up settles
 // on Failed. The plugin is installed synchronously either way, which is what
 // the RLN callback tests below need.
@@ -670,9 +683,10 @@ LOGOS_TEST(an_rln_preset_installs_the_plugin_and_reports_bring_up) {
 
     // No framework context in a unit test, so the bridge cannot come up.
     LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
-    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnState.state, std::string("Failed"));
     // Initializing, then Failed.
-    LOGOS_ASSERT_EQ(delivery_test_events::g_lastRlnState.transitions, 2);
+    const auto event = awaitRlnStateEvents(2);
+    LOGOS_ASSERT_EQ(event.state, std::string("Failed"));
+    LOGOS_ASSERT_EQ(event.transitions, 2);
 }
 
 // kRlnPresetTable with validation disabled.

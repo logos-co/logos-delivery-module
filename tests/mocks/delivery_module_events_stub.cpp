@@ -17,6 +17,7 @@ NodeLifecycleEvent g_lastNodeStarted{};
 NodeLifecycleEvent g_lastNodeStopped{};
 RlnRequestEvent g_lastRlnRequest{};
 RlnStateEvent g_lastRlnState{};
+std::mutex g_rlnStateMutex;
 } // namespace delivery_test_events
 
 void DeliveryModuleImpl::messageQueued(const std::string&, const std::string&, int64_t) {}
@@ -37,6 +38,7 @@ void DeliveryModuleImpl::nodeStopped(bool success, const std::string& message, i
 }
 
 void DeliveryModuleImpl::rlnStateChanged(const std::string& state, const std::string& message, int64_t) {
+    std::lock_guard<std::mutex> lock(delivery_test_events::g_rlnStateMutex);
     delivery_test_events::g_lastRlnState.state = state;
     delivery_test_events::g_lastRlnState.message = message;
     delivery_test_events::g_lastRlnState.transitions++;
