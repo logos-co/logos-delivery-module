@@ -583,6 +583,10 @@ private:
     // on the bring-up thread) need no lock.
     mutable std::mutex rlnConfigMutex;
 
+    // Copies the rlnConfig pointer under rlnConfigMutex. For readers not
+    // ordered against the writers -- the RLN trampolines.
+    std::shared_ptr<const DeliveryRlnConfig> rlnConfigSnapshot() const;
+
     // Raw FFI context: what the event registry takes.
     void* deliveryCtx;
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), which

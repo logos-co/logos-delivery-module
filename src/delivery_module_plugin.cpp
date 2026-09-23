@@ -138,11 +138,7 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void*
         return;
     }
     try {
-        std::shared_ptr<const DeliveryRlnConfig> cfg;
-        {
-            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
-            cfg = impl->rlnConfig;
-        }
+        const auto cfg = impl->rlnConfigSnapshot();
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->getMembershipState(reqId, cfg->registryId,
                                                 cfg->rlnIdentifier);
@@ -169,11 +165,7 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t t
         return;
     }
     try {
-        std::shared_ptr<const DeliveryRlnConfig> cfg;
-        {
-            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
-            cfg = impl->rlnConfig;
-        }
+        const auto cfg = impl->rlnConfigSnapshot();
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->getEpochQuota(reqId, cfg->registryId,
                                            cfg->rlnIdentifier, timestamp);
@@ -200,11 +192,7 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
         return;
     }
     try {
-        std::shared_ptr<const DeliveryRlnConfig> cfg;
-        {
-            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
-            cfg = impl->rlnConfig;
-        }
+        const auto cfg = impl->rlnConfigSnapshot();
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->generateProof(reqId, cfg->registryId,
                                            cfg->rlnIdentifier,
@@ -234,11 +222,7 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
         return;
     }
     try {
-        std::shared_ptr<const DeliveryRlnConfig> cfg;
-        {
-            std::lock_guard<std::mutex> lock(impl->rlnConfigMutex);
-            cfg = impl->rlnConfig;
-        }
+        const auto cfg = impl->rlnConfigSnapshot();
         if (impl->rlnBridge->enabled()) {
             impl->rlnBridge->validateProof(reqId, cfg->registryId,
                                            cfg->rlnIdentifier,
@@ -292,6 +276,12 @@ StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
     releaseNode();
+}
+
+std::shared_ptr<const DeliveryRlnConfig> DeliveryModuleImpl::rlnConfigSnapshot() const
+{
+    std::lock_guard<std::mutex> lock(rlnConfigMutex);
+    return rlnConfig;
 }
 
 void DeliveryModuleImpl::abortRln()
