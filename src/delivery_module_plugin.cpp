@@ -768,19 +768,19 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // resolved: ask it, then bring the plugin in when it says so. libp2p's own
     // options come from its own channel (LIBP2P_MODULE_CONFIG), preserved
     // underneath the node's answer.
-    const StdLogosResult requirements = callApiRetValue(
+    const StdLogosResult result = callApiRetValue(
         "get_discovery_requirements", CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_ctx_get_discovery_requirements, asCtx(deliveryCtxHandle)));
     delivery_discovery::PluginRequest discovery;
     std::string failure;
-    if (!requirements.success) {
-        failure = "discovery requirements: " + requirements.error;
+    if (!result.success) {
+        failure = "discovery requirements: " + result.error;
     } else {
-        const std::string reply = requirements.value.is_string()
-            ? requirements.value.get<std::string>()
-            : requirements.value.dump();
+        const std::string requirements = result.value.is_string()
+            ? result.value.get<std::string>()
+            : result.value.dump();
         failure = delivery_discovery::fromRequirements(
-            reply, delivery_discovery::libp2pEnvConfig(), discovery);
+            requirements, delivery_discovery::libp2pEnvConfig(), discovery);
     }
     if (failure.empty() && discovery.enabled) {
         failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
