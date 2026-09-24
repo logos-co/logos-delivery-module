@@ -1,19 +1,8 @@
 #pragma once
 
-// Plugin-discovery setup from the node's own answer.
-//
-// The createNode config is logos-delivery's alone; this module forwards it and
-// reads nothing discovery-related out of it. After createNode the node is
-// asked (logosdelivery_get_discovery_requirements) whether service discovery
-// is to come from a plugin and which DHT peers its configuration, presets
-// included, resolved. This header turns that reply into the options the
-// plugin hands to libp2p_module's createNode.
-//
-// libp2p_module keeps its own configuration channel, the LIBP2P_MODULE_CONFIG
-// environment variable (inline JSON or a file path; see its README). A
-// call-time createNode replaces those options wholesale on the libp2p side, so
-// the plugin overlays the node's answer on that config rather than discarding
-// it: listen addresses, transport and key stay the operator's.
+// Turns the node's discovery requirements into libp2p_module's createNode
+// options, laid over LIBP2P_MODULE_CONFIG: a call-time createNode replaces
+// libp2p's options wholesale, so the operator's settings are kept.
 
 #include <cstdio>
 #include <cstdlib>
@@ -34,9 +23,8 @@ struct PluginRequest {
 
 namespace detail {
 
-/// libp2p wants the peer id separate from the transport addresses
-/// ({peerId, addrs[]}); nim-libp2p raiseAsserts on an unparseable entry rather
-/// than returning an error, so the shape is checked before anything is sent.
+/// Checks the {peerId, addrs[]} shape up front: nim-libp2p asserts on a bad
+/// entry instead of returning an error.
 inline std::string checkBootstrapNodes(const nlohmann::json& nodes)
 {
     if (!nodes.is_array()) {
@@ -59,9 +47,8 @@ inline std::string checkBootstrapNodes(const nlohmann::json& nodes)
 
 } // namespace detail
 
-/// libp2p_module's own configuration, read the way the module reads it
-/// (LIBP2P_MODULE_CONFIG: inline JSON when it starts with '{', otherwise a
-/// file path). An empty object when unset, unreadable or not a JSON object.
+/// LIBP2P_MODULE_CONFIG as libp2p_module reads it (inline JSON or a file
+/// path); an empty object when unset or unusable.
 inline nlohmann::json libp2pEnvConfig()
 {
     const char* cfg = std::getenv("LIBP2P_MODULE_CONFIG");
@@ -107,11 +94,9 @@ inline bool splitBootstrapAddress(const std::string& multiaddr, nlohmann::json& 
     return true;
 }
 
-/// Turns the node's requirements reply
-///   {"externalServiceDiscovery": bool, "bootstrapNodes": ["/dns4/.../p2p/..."]}
-/// into the plugin request: `base` (libp2p_module's own config, see
-/// libp2pEnvConfig) with the node's bootstrap peers and the two mount flags
-/// set on top. Returns the failure reason, empty on success.
+/// Turns {"externalServiceDiscovery": bool, "bootstrapNodes": [...]} into the
+/// plugin request: `base` plus the bootstrap peers and mount flags. Returns
+/// the failure reason, empty on success.
 inline std::string fromRequirements(const std::string& reply, const nlohmann::json& base,
                                     PluginRequest& out)
 {

@@ -232,10 +232,6 @@ int logosdelivery_rln_set_plugin(const LogosDeliveryRlnPlugin* cbs, void* user_d
 // simulate an unknown / already-completed reqId:
 //   t.mockCFunction("logosdelivery_rln_response").returns(1);
 // --- service discovery -------------------------------------------------
-//
-// The module asks the node what discovery it needs, then installs a plugin
-// when the answer says so. Both go through the ctx wrappers, so the mock
-// implements those directly.
 
 int logosdelivery_ctx_get_discovery_requirements(const void* /*ctx*/,
                                                  logosdelivery_reply onReply,

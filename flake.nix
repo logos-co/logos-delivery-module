@@ -18,10 +18,8 @@
       url = "github:logos-messaging/nim-ffi/4c1218626bbbf89e19836845b690937cd255c3f0";
       flake = false;
     };
-    # The input name must match the metadata.json#dependencies entry verbatim:
-    # logos-module-builder resolves each declared dependency by looking up a
-    # flake input of the same name (buildCppPlugin.nix, `moduleInputs`) and uses
-    # its headers-qt/headers-std package for codegen.
+    # The name is load-bearing: the builder resolves the metadata.json
+    # dependency of the same name, here via its dependency_overrides entry.
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
     # The name is load-bearing: the builder resolves each optional_dependencies
     # entry as the input of that name and generates bindings from its LIDL.
@@ -168,10 +166,8 @@
         '';
       };
 
-      # The optional module dependencies, re-exported from this flake's own
-      # locked inputs: libp2p_module, for a node configured for external
-      # service discovery, and the RLN chain, for a node whose preset enables
-      # RLN.
+      # The optional module dependencies (libp2p, the RLN chain), re-exported
+      # at the revs this flake locks.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
     in

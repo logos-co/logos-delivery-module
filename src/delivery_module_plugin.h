@@ -542,10 +542,8 @@ private:
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
 
-    // stop()'s RLN half: joins the bring-up thread, then stops the RLN
-    // backend this module started. Also run by the stop after a failed start,
-    // on its own thread and possibly while stop() runs on ours -- so it is
-    // serialized: two concurrent joins of one std::thread are undefined.
+    // stop()'s RLN half, also run by the stop after a failed start. Serialized
+    // because both may join the bring-up thread at once.
     void stopRlnBackend();
     std::mutex rlnBackendStopMutex;
 
@@ -620,19 +618,10 @@ private:
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
 
     /**
-     * @brief Brings libp2p_module up and installs the discovery vtable.
+     * @brief Installs the discovery vtable for a node configured with
+     *        `pluginKadDiscovery`; runs in createNode, before start.
      *
-     * Private, so it is not part of the module's exposed API: hosting the
-     * plugin is an implementation detail of how this module satisfies a node
-     * configured with `pluginKadDiscovery`, not something a caller drives.
-     *
-     * Runs inside createNode, after the context exists and before the node is
-     * started -- logos-delivery only accepts a registration while discovery is
-     * stopped, and refuses to start a node configured for plugin discovery
-     * without one.
-     *
-     * @param libp2pConfig JSON for libp2p's own createNode, built from the
-     *        node's discovery requirements (see discovery_config.h).
+     * @param libp2pConfig JSON for libp2p's createNode (see discovery_config.h).
      * @return the failure reason, or empty on success.
      */
     std::string installServiceDiscoveryPlugin(const std::string& libp2pConfig);
@@ -656,11 +645,8 @@ private:
     static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
                               void* userData);
 
-    // A failed start leaves the node half up: the library marks it started
-    // before external service discovery comes up, and a discovery failure
-    // after that does not undo it. So start_callback has the node stopped
-    // again, from a thread of ours: the callback runs on the library's own
-    // thread, which refuses a request into its own context.
+    // A failed start leaves the node half up, so start_callback stops it
+    // again -- from our own thread, as the library's refuses re-entrant calls.
     void stopAfterFailedStart();
     // Disarms stopAfterFailedStart and joins a stop it already issued. start()
     // calls it before arming a new one, releaseNode() before the context goes.

@@ -297,11 +297,8 @@ void DeliveryModuleImpl::releaseServiceDiscoveryPlugin()
     if (!discoPlugin) {
         return;
     }
-    // A call that outran the node's timeout leaves its thread abandoned but
-    // still inside the plugin, and nothing on the node side can interrupt it.
-    // Freeing the object then would pull pluginCtx out from under that thread,
-    // so wait briefly and, failing that, leak it on purpose: a leak at
-    // teardown costs a few hundred bytes, the alternative is a use-after-free.
+    // A timed-out call may leave a thread inside the plugin; leak the object
+    // rather than free it under that thread.
     if (discoPlugin->quiesce(kQuiesceTimeout)) {
         discoPlugin.reset();
         return;
@@ -367,14 +364,9 @@ void DeliveryModuleImpl::releaseNode()
         deliveryCtx = nullptr;
     }
 
-    // After ctx_destroy on purpose, the opposite of RLN's ordering above.
-    // Destroying the node stops discovery and joins its worker -- the only
-    // thread that calls into the plugin -- so from here on no new call can
-    // arrive. Freeing the plugin first would leave that window open: quiesce()
-    // only proves nothing is in flight at the instant it looks, and a running
-    // node's lookup loop would land its next call on a freed object. What
-    // ctx_destroy cannot stop, a thread abandoned inside a plugin call, is what
-    // quiesce() and the deliberate leak in releaseServiceDiscoveryPlugin cover.
+    // After ctx_destroy, unlike RLN above: destroying the node joins the
+    // discovery worker, the only caller of the plugin, so no new call can
+    // arrive once it returns.
     releaseServiceDiscoveryPlugin();
 }
 
@@ -763,11 +755,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
     }
 
-    // The node, not this module, knows whether discovery is to come from a
-    // plugin and which DHT peers its configuration (presets included)
-    // resolved: ask it, then bring the plugin in when it says so. libp2p's own
-    // options come from its own channel (LIBP2P_MODULE_CONFIG), preserved
-    // underneath the node's answer.
+    // Only the node knows whether it wants a discovery plugin and which DHT
+    // peers its config resolved; ask it.
     const StdLogosResult result = callApiRetValue(
         "get_discovery_requirements", CALLBACK_TIMEOUT,
         bindApiCall(logosdelivery_ctx_get_discovery_requirements, asCtx(deliveryCtxHandle)));
@@ -812,12 +801,8 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
         return "context not initialized";
     }
 
-    // libp2p is NOT contacted here: this runs on the Qt main thread inside an
-    // inbound createNode dispatch, from which outbound calls cannot complete.
-    // The plugin brings it up on its first verb instead, on the discovery
-    // thread -- see DeliveryServiceDiscoveryPlugin::ensureBackend.
-    // Without a framework (unit tests) modules() would dereference an unset
-    // pointer; the plugin reports a null client on first use instead.
+    // libp2p is not contacted here: outbound calls fail on the Qt main thread.
+    // Without a framework (unit tests) there is no modules(); pass null.
     Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
     discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2p, libp2pConfig);
 

@@ -1,11 +1,6 @@
-// Stub header for logos-delivery's service-discovery plugin ABI - mirrors
-// library/logosdelivery_service_discovery.h so the module compiles during unit
-// tests without the real library. Keep in sync with the real header when
-// bumping the logos-delivery flake input.
-//
-// The real header pulls in "generated/logosdelivery.h" for the registration
-// entry point; the stub set folds the generated surface into liblogosdelivery.h,
-// so that is what is included here instead.
+// Stub of logos-delivery's library/logosdelivery_service_discovery.h for unit
+// tests; keep in sync when bumping logos-delivery. The generated entry points
+// come from the stub liblogosdelivery.h instead of generated/.
 
 #pragma once
 #ifndef __logosdelivery_service_discovery__
@@ -85,11 +80,7 @@ extern "C"
     LdDiscoUnregisterInterestFn unregisterInterest;
   } LdServiceDiscoveryPlugin;
 
-  /* Generated entry points, declared here because the stub set has no
-   * generated/ directory of its own. Shapes mirror the real generated header
-   * under nim-ffi's CBOR ABI: a logosdelivery_ctx_* wrapper per call, taking
-   * the handle and the call's own arguments, replying with
-   * (err_code, const char* const* reply, err_msg, user_data). */
+  /* Generated logosdelivery_ctx_* entry points, in nim-ffi's CBOR ABI shape. */
   typedef void (*LogosDeliveryServiceDiscoveryReplyFn)(int err_code,
                                                        const char *const *reply,
                                                        const char *err_msg,

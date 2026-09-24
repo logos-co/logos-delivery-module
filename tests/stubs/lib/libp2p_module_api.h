@@ -1,16 +1,6 @@
-// Stub of the codegen-generated libp2p_module client, for unit tests.
-//
-// The real header is emitted into generated_code/include at build time by
-// logos-cpp-generator from metadata.json#optional_dependencies — the std/LIDL variant,
-// which speaks nlohmann::json over the logos-protocol client and never touches
-// Qt. The unit tests build the module sources without that codegen step, so
-// this stand-in provides the subset of `Libp2pModule` that
-// src/service_discovery_plugin.cpp calls, with inline no-op bodies. The one
-// exception is createNode, which a test can make fail at the transport the way
-// an absent libp2p_module does (see createNodeErrorCode).
-//
-// Keep the signatures in sync with the generated header when bumping the
-// libp2p_module flake input.
+// Stub of the generated libp2p_module client for unit tests: the subset
+// service_discovery_plugin.cpp calls, as no-ops except createNode (see
+// createNodeErrorCode). Keep signatures in sync with the generated header.
 
 #pragma once
 #ifndef __libp2p_module_api_stub__
