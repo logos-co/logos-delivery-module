@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Assert that the RLN dependency revs pinned in the runtime doc-test match
-# flake.lock. The doc-test runner executes every step in a scratch directory
+# Assert that the dependency revs (libp2p_module and the RLN chain) pinned in
+# the runtime doc-test match flake.lock. The doc-test runner executes every step in a scratch directory
 # with no access to this repo, so the spec has to name the revs literally
 # instead of resolving them from the lock; this keeps the two in step.
 #
@@ -16,8 +16,10 @@ SPEC="doctests/delivery-module-runtime.test.yaml"
 rln=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
 lez=$(jq -r --arg n "$rln" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
 
+libp2p=$(jq -r '.nodes[.root].inputs.libp2p_module' flake.lock)
+
 status=0
-for node in "$rln" "$lez"; do
+for node in "$libp2p" "$rln" "$lez"; do
   rev=$(jq -r --arg n "$node" '.nodes[$n].locked.rev' flake.lock)
   if ! grep -q "$rev" "$SPEC"; then
     echo "$SPEC does not pin $node at $rev (flake.lock)" >&2
@@ -26,8 +28,8 @@ for node in "$rln" "$lez"; do
 done
 
 if [ "$status" -ne 0 ]; then
-  echo "Update the 'Build the RLN dependency chain' step to the locked revs." >&2
+  echo "Update the 'Build the libp2p dependency' and 'Build the RLN dependency chain' steps to the locked revs." >&2
   exit 1
 fi
 
-echo "RLN pins in $SPEC match flake.lock"
+echo "Dependency pins in $SPEC match flake.lock"

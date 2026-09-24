@@ -17,7 +17,7 @@ intro: |
      module you run is built from exactly what is checked out here, not the latest
      published release.
   3. Install the `.lgx` into a `./modules` directory with `lgpm`, together with
-     the RLN modules `delivery_module` depends on.
+     the `libp2p_module` and RLN modules `delivery_module` depends on.
   4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
      it with `module-info`, call `createNode` with a Waku node config, then call
      `start` — verifying the module actually runs and boots a delivery node.
@@ -94,7 +94,7 @@ sections:
     text: |
       Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
       output and install it into a local `./modules` directory with `lgpm`, along
-      with the RLN modules it depends on. Every module built with
+      with the `libp2p_module` and RLN modules it depends on. Every module built with
       [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
       exposes a ready-to-install `#lgx`.
 
@@ -115,6 +115,18 @@ sections:
         post_text: "The `.lgx` package is now under `./delivery-lgx/`:"
         extra_run:
           run: "ls delivery-lgx/*.lgx"
+
+      - title: "Build the libp2p dependency"
+        text: |
+          `libp2p_module` is a required dependency of `delivery_module`: it
+          backs the service-discovery plugin, and `logoscore` refuses to load
+          `delivery_module` without it. Build it at the rev this module's
+          `flake.lock` pins for it.
+        run: |
+          nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=7d78bb772b8c728ca3ea881158057f6faf9eda24#lgx' -o libp2p-lgx
+        post_text: "One more `.lgx` package:"
+        extra_run:
+          run: "ls libp2p-lgx/*.lgx"
 
       - title: "Build the RLN dependency chain"
         text: |
@@ -153,6 +165,7 @@ sections:
           `core` modules, so they go to `--modules-dir`. The packages are
           unsigned (local dev builds), so we pass `--allow-unsigned`.
         run: |
+          ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file libp2p-lgx/*.lgx
           ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file lez-rln-lgx/*.lgx
           ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file rln-lgx/*.lgx
           ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx
@@ -160,10 +173,11 @@ sections:
           - "Installed to:"
 
       - title: "Confirm the install"
-        text: "Scan the directory and confirm all four modules landed:"
+        text: "Scan the directory and confirm all five modules landed:"
         run: "./lgpm/bin/lgpm --modules-dir ./modules list"
         expect_contains:
           - "delivery_module"
+          - "libp2p_module"
           - "liblogos_rln_module"
         check_file: "modules/delivery_module/manifest.json"
 
