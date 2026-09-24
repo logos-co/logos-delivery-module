@@ -28,7 +28,7 @@
     "capabilities": [],
     "nix": {
         "packages": {
-            "runtime": ["libpq", "nlohmann_json"]
+            "runtime": ["nlohmann_json"]
         },
         "external_libraries": [
             {

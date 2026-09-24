@@ -79,7 +79,7 @@ result/
 - logos-liblogos (provided via Nix)
 - logos-cpp-sdk (provided via Nix)
 - logos-delivery / liblogosdelivery — target (provided via Nix)
-- PostgreSQL (libpq) — runtime dependency bundled by the Nix build
+- PostgreSQL (libpq) — runtime dependency, bundled from the logos-delivery package
 
 All dependencies are automatically handled by the Nix flake configuration.
 
