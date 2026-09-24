@@ -18,6 +18,8 @@
 #include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
 #include "mocks/mock_rln_state.h"
+#include "rln_bridge.h"
+#include "liblogos_rln_module_api.h"
 
 // ---------------------------------------------------------------------------
 // Helper: create an impl that has a valid delivery context (createNode called).
@@ -884,4 +886,134 @@ LOGOS_TEST(name_returns_delivery_module) {
     auto t = LogosTestContext("delivery_module");
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_EQ(impl.name(), std::string("delivery_module"));
+}
+
+// ---------------------------------------------------------------------------
+// RlnBridge, driven directly.
+//
+// The bridge is reachable here for the first time: it now calls the typed
+// client, whose stub answers from the calling thread with whatever stubError()
+// says, so a request op's whole reply path runs inside the test with no host,
+// no chain and no waiting. What these pin is the SHAPE the delivery library
+// receives — the two error dialects, and the classification that decides
+// whether the library retries.
+// ---------------------------------------------------------------------------
+
+// A bridge wired to a stub client and enabled, which is all an op entry point
+// needs — bringUpRlnBridge's context gate is a DeliveryModuleImpl concern.
+struct BridgeFixture {
+    LiblogosRlnModule client{"delivery_module"};
+    RlnBridge bridge;
+
+    BridgeFixture() {
+        liblogos_rln_module_stub::resetStubError();
+        delivery_test_rln::resetRlnMockState();
+        bridge.init(&client);
+    }
+    ~BridgeFixture() { liblogos_rln_module_stub::resetStubError(); }
+};
+
+LOGOS_TEST(rln_bridge_tstr_transport_failure_answers_the_bare_error_object) {
+    auto t = LogosTestContext("delivery_module");
+    BridgeFixture f;
+    LOGOS_ASSERT_EQ(f.bridge.enable(), std::string());
+
+    f.bridge.getMembershipState(7, "reg", "rln-id");
+
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_responseFired);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(7));
+    const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
+    // tstr dialect: the error object sits at the top level, with no envelope.
+    LOGOS_ASSERT_FALSE(reply.contains("success"));
+    LOGOS_ASSERT_EQ(reply["error"]["class"].get<std::string>(),
+                    std::string("transient"));
+    LOGOS_ASSERT_EQ(reply["error"]["kind"].get<std::string>(),
+                    std::string("rln_bridge_transport"));
+}
+
+LOGOS_TEST(rln_bridge_result_transport_failure_answers_the_envelope) {
+    auto t = LogosTestContext("delivery_module");
+    BridgeFixture f;
+    LOGOS_ASSERT_EQ(f.bridge.enable(), std::string());
+
+    f.bridge.getEpochQuota(8, "reg", "rln-id", 1700000000);
+
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(8));
+    const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
+    // result dialect: success=false, and the error arm is a JSON-ENCODED object.
+    LOGOS_ASSERT_FALSE(reply["success"].get<bool>());
+    const auto inner = nlohmann::json::parse(reply["error"].get<std::string>());
+    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("transient"));
+}
+
+LOGOS_TEST(rln_bridge_provider_refusal_is_permanent) {
+    auto t = LogosTestContext("delivery_module");
+    BridgeFixture f;
+    LOGOS_ASSERT_EQ(f.bridge.enable(), std::string());
+    // A refusal is the module declining the call itself — a contract mismatch
+    // no retry fixes, unlike every other CallError the bridge sees.
+    liblogos_rln_module_stub::stubError() = logos::CallError{
+        "invalid_args", "rate_limit is not a string", "liblogos_rln_module"};
+
+    f.bridge.generateProof(9, "reg", "rln-id", "deadbeef", 1700000000);
+
+    const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
+    const auto inner = nlohmann::json::parse(reply["error"].get<std::string>());
+    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("permanent"));
+    LOGOS_ASSERT_EQ(inner["kind"].get<std::string>(),
+                    std::string("rln_bridge_dispatch"));
+}
+
+LOGOS_TEST(rln_bridge_disabled_still_answers_the_request) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnBridge bridge; // never init()ed, so never enabled
+
+    bridge.validateProof(10, "reg", "rln-id", "deadbeef", 1700000000, "{}");
+
+    // The library is owed an answer for every reqId it raises, including the
+    // ones this bridge cannot serve — an unserved request only goes quiet and
+    // expires against the library's own budget.
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_responseFired);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(10));
+    const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
+    const auto inner = nlohmann::json::parse(reply["error"].get<std::string>());
+    // Permanent: enable() happens once, at createNode. Retrying cannot help.
+    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("permanent"));
+    LOGOS_ASSERT_EQ(inner["kind"].get<std::string>(),
+                    std::string("rln_bridge_disabled"));
+}
+
+LOGOS_TEST(rln_bridge_enable_refuses_without_a_client) {
+    auto t = LogosTestContext("delivery_module");
+    RlnBridge bridge; // no init(): nothing to call
+
+    // The op entry points dereference the client without checking it, which is
+    // safe only because this refusal holds: an un-enabled bridge is never
+    // asked, since the plugin gates every callback on enabled().
+    LOGOS_ASSERT_FALSE(bridge.enable().empty());
+    LOGOS_ASSERT_FALSE(bridge.enabled());
+}
+
+LOGOS_TEST(rln_bridge_start_backend_reports_the_call_error) {
+    auto t = LogosTestContext("delivery_module");
+    BridgeFixture f;
+    LOGOS_ASSERT_EQ(f.bridge.enable(), std::string());
+
+    // Lifecycle answers the caller, not the library: text on failure, empty on
+    // success.
+    const std::string err = f.bridge.startBackend(R"({"registries":[]})");
+    LOGOS_ASSERT_FALSE(err.empty());
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_responseFired);
+}
+
+LOGOS_TEST(rln_bridge_start_backend_refuses_before_enable) {
+    auto t = LogosTestContext("delivery_module");
+    liblogos_rln_module_stub::resetStubError();
+    LiblogosRlnModule client{"delivery_module"};
+    RlnBridge bridge;
+    bridge.init(&client);
+
+    LOGOS_ASSERT_EQ(bridge.startBackend("{}"),
+                    std::string("rln bridge is not enabled"));
 }

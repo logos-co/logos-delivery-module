@@ -6,15 +6,20 @@ implementation-agnostic: it never names a registry or a membership, carries
 no configuration and never starts the backend. All of that lives here. This
 module answers those requests in-process: `src/rln_bridge.cpp` adds the
 registry id and rln identifier from the node's preset, calls the co-loaded
-`liblogos_rln_module` and feeds each reply back unchanged. Every request is
-also emitted as an `rln*Request` event for observability; `rlnRespond`
-exists to answer a request from outside, but on a bridge-enabled node the
-bridge answers first and a second response per reqId is rejected.
+`liblogos_rln_module` through its generated typed client and feeds each reply
+back. Every request is also emitted as an `rln*Request` event for
+observability; `rlnRespond` exists to answer a request from outside, but on a
+bridge-enabled node the bridge answers first and a second response per reqId
+is rejected.
 
-Replies cross verbatim — the wire schema is owned by the RLN module and the
-delivery library, not modelled here. The only replies the bridge fabricates
-are transport failures. If nothing answers a request at all, the library
-times it out itself and everything non-RLN keeps working.
+A `get_membership_state` reply crosses verbatim. The other three answer the
+result envelope, which the typed client decodes and the bridge re-emits field
+for field — the schema is still the RLN module's and the delivery library's,
+not modelled here. The only replies the bridge fabricates are failures: a
+transport problem is TRANSIENT, and a provider refusal — the module declining
+the call itself — is PERMANENT, because retrying a contract mismatch cannot
+fix it. If nothing answers a request at all, the library times it out itself
+and everything non-RLN keeps working.
 
 ## Turning RLN on
 
@@ -99,8 +104,10 @@ log — `<run dir>/session/logs/daemon.log` — carries the library's log lines.
 
 The library gives each request a budget before synthesizing a TRANSIENT
 failure itself: 80 s for the registry reads (`get_membership_state`,
-`generate_proof`), 10 s for the rest. Each request op fires one lp call
-carrying its own timeout — 70 s for the reads (just under the library's
-budget), 10 s for `get_epoch_quota` and `validate_proof` — and the reply
-arrives on lp's completion callback. `start` and `stop` are synchronous
-typed-client calls with no library clock behind them.
+`generate_proof`), 10 s for the rest. Each request op is one
+`<name>AsyncResult` call on the generated client carrying its own deadline —
+70 s for the reads (just under the library's budget, so the bridge's answer
+lands first), 10 s for `get_epoch_quota` and `validate_proof` — and the reply
+arrives on the client's completion callback. `start` and `stop` are
+synchronous typed-client calls with no library clock behind them; they carry
+20 s, which is what the protocol default already gave them.

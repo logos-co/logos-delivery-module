@@ -17,7 +17,6 @@ logos_test(
         test_delivery_module.cpp
     MOCK_C_SOURCES
         mocks/mock_liblogosdelivery.cpp
-        mocks/mock_logos_protocol.cpp
     EXTRA_INCLUDES
         stubs/lib
 )
@@ -50,8 +49,6 @@ if(LIBLOGOSDELIVERY_PATH)
         TEST_SOURCES
             main.cpp
             test_delivery_integration.cpp
-        MOCK_C_SOURCES
-            mocks/mock_logos_protocol.cpp
         EXTRA_INCLUDES
             ../lib
             stubs/lib
