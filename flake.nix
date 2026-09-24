@@ -168,13 +168,15 @@
         '';
       };
 
-      # The RLN dependency chain, re-exported from this flake's own locked
-      # inputs, for a node whose preset enables RLN.
+      # The module dependencies, re-exported from this flake's own locked
+      # inputs: libp2p_module (required) and the RLN chain, for a node whose
+      # preset enables RLN.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
     in
     module // {
       packages = builtins.mapAttrs (system: pkgs: pkgs // {
+        "libp2p_module-lgx" = inputs.libp2p_module.packages.${system}.lgx;
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
       }) module.packages;

@@ -121,7 +121,9 @@ sections:
           `libp2p_module` is a required dependency of `delivery_module`: it
           backs the service-discovery plugin, and `logoscore` refuses to load
           `delivery_module` without it. Build it at the rev this module's
-          `flake.lock` pins for it.
+          `flake.lock` pins for it. From a clone, this flake re-exports the
+          same package — `nix build '.#libp2p_module-lgx'` — which reads the
+          pin straight out of the lock.
         run: |
           nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=7d78bb772b8c728ca3ea881158057f6faf9eda24#lgx' -o libp2p-lgx
         post_text: "One more `.lgx` package:"
