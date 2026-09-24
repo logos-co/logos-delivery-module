@@ -309,6 +309,57 @@ LOGOS_TEST(discovery_start_reports_absent_libp2p_module) {
     LOGOS_ASSERT_TRUE(reason.find("internal discovery") != std::string::npos);
 }
 
+// libp2p's start outlives its own 10s call deadline while kademlia bootstraps,
+// and keeps running. A second start issued meanwhile runs a second switch start
+// alongside the first -- two accept loops on one TCP listener, which crashes
+// libp2p_module on the next inbound connection. So a timed-out start counts as
+// started, whichever layer's deadline it met, and is never issued again.
+LOGOS_TEST(discovery_start_timeout_is_a_notice_and_never_reissued) {
+    for (const bool atTransport : {false, true}) {
+        Libp2pModule::reset();
+        Libp2pModule::bringUpSucceeds = true;
+        if (atTransport) {
+            Libp2pModule::startErrorCode = "timeout";
+        } else {
+            Libp2pModule::startError = "Failed to start libp2p: timeout";
+        }
+        Libp2pModule libp2p("delivery_module");
+        DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+
+        char err[1024] = {};
+        const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+        const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
+        vt->registerInterest(vt->pluginCtx, "service:/logos/delivery", err, sizeof(err));
+        const int startCalls = Libp2pModule::startCalls;
+        Libp2pModule::reset();
+
+        LOGOS_ASSERT_EQ(rc, LD_DISCO_OK);
+        LOGOS_ASSERT_EQ(startCalls, 1);
+    }
+}
+
+// An explicit refusal is not a start in flight: the bring-up fails, and the
+// next call may try again.
+LOGOS_TEST(discovery_start_refusal_fails_the_bring_up) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule::startError = "Failed to start libp2p: address already in use";
+    Libp2pModule libp2p("delivery_module");
+    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+
+    char err[1024] = {};
+    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+    const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
+    const std::string reason(err);
+    vt->registerInterest(vt->pluginCtx, "service:/logos/delivery", err, sizeof(err));
+    const int startCalls = Libp2pModule::startCalls;
+    Libp2pModule::reset();
+
+    LOGOS_ASSERT_EQ(rc, LD_DISCO_ERROR);
+    LOGOS_ASSERT_TRUE(reason.find("address already in use") != std::string::npos);
+    LOGOS_ASSERT_EQ(startCalls, 2);
+}
+
 LOGOS_TEST(discovery_start_without_libp2p_client_fails_cleanly) {
     DeliveryServiceDiscoveryPlugin plugin(nullptr, "{}");
 

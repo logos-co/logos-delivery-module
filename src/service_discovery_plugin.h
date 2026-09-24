@@ -77,6 +77,7 @@ private:
     std::string libp2pConfig_;
     bool backendReady_;
     bool nodeCreated_;
+    bool startIssued_; ///< libp2p start succeeded or timed out; never issue it again.
     std::atomic<int> inFlight_{0}; ///< Entry points executing; read by quiesce.
     LdServiceDiscoveryPlugin vtable_;
 

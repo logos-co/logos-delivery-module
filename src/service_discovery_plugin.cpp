@@ -81,16 +81,18 @@ void trace(const char* fmt, ...)
     fputc('\n', f);
 }
 
+bool mentionsTimeout(const std::string& s)
+{
+    std::string lowered(s);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lowered.find("timeout") != std::string::npos;
+}
+
 /// Whether a transport error is a deadline expiring rather than a refusal.
 /// Matched on text: CallError has no typed code for it.
 bool isCallTimeout(const logos::CallError& err)
 {
-    const auto mentionsTimeout = [](const std::string& s) {
-        std::string lowered(s);
-        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return lowered.find("timeout") != std::string::npos;
-    };
     return mentionsTimeout(err.code) || mentionsTimeout(err.message);
 }
 
@@ -157,6 +159,7 @@ DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* lib
     , libp2pConfig_(std::move(libp2pConfig))
     , backendReady_(false)
     , nodeCreated_(false)
+    , startIssued_(false)
     , vtable_{}
 {
     vtable_.abiVersion = LD_DISCO_ABI_VERSION;
@@ -271,20 +274,32 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     }
 
     // libp2p's start() brings up a default node if createNode did not.
-    {
+    if (startIssued_) {
+        // A start that succeeded or is still running must not be issued
+        // again: nim-libp2p's double-start guard only trips once a start has
+        // finished, so a second one runs a second switch start beside the
+        // first -- two accept loops on one listener, and libp2p_module crashes
+        // on the next inbound connection.
+        trace("libp2p start             ALREADY ISSUED");
+    } else {
         logos::CallError err;
         const StdLogosResult r = libp2p_->start(&err);
-        if (!err.ok() && isCallTimeout(err)) {
-            // A notice, not a failure: the kademlia bootstrap inside start
-            // outlives libp2p's fixed 10s call deadline and keeps going. If it
-            // really failed, the verbs that follow say so.
-            trace("libp2p start             NOTICE  %s: %s (bring-up continues)",
-                  err.code.c_str(), err.message.c_str());
+        // A notice, not a failure: the kademlia bootstrap inside start outlives
+        // the call deadline and keeps going. libp2p reports its own 10s deadline
+        // in the result ("Failed to start libp2p: timeout"), the transport its
+        // deadline as a CallError. If the start really failed, the verbs that
+        // follow say so.
+        const bool timedOut =
+            err.ok() ? (!r.success && mentionsTimeout(r.error)) : isCallTimeout(err);
+        if (timedOut) {
+            const std::string why = err.ok() ? r.error : err.code + ": " + err.message;
+            trace("libp2p start             NOTICE  %s (bring-up continues)", why.c_str());
         } else if (!err.ok()) {
             diagnostics += "start: " + err.code + ": " + err.message + "; ";
         } else if (!r.success) {
             diagnostics += "start: " + (r.error.empty() ? std::string("failed") : r.error) + "; ";
         }
+        startIssued_ = timedOut || (err.ok() && r.success);
     }
 
     // No discoStart: the switch start already started service discovery.
