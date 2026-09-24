@@ -81,7 +81,13 @@ void trace(const char* fmt, ...)
     char stamp[32] = "";
     const std::time_t now = std::time(nullptr);
     std::tm tm{};
+#ifdef _WIN32
+    // MinGW declares localtime_r only under _POSIX_C_SOURCE; localtime_s is
+    // the same call with the arguments swapped, returning 0 on success.
+    if (localtime_s(&tm, &now) == 0) {
+#else
     if (localtime_r(&now, &tm)) {
+#endif
         std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &tm);
     }
     fprintf(f, "[%s] ", stamp);
