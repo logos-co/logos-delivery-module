@@ -124,8 +124,16 @@ sections:
           `flake.lock` pins for it. From a clone, this flake re-exports the
           same package — `nix build '.#libp2p_module-lgx'` — which reads the
           pin straight out of the lock.
+
+          The second command builds the module's `#lib` without linking it.
+          The `.lgx` is a development package: its libraries load their own
+          dependencies (on Linux, `libtinycbor`) from the Nix store rather
+          than carrying them. The package is compressed, so Nix cannot see
+          those references and never fetches them; building `#lib` brings
+          them into the store.
         run: |
           nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=7d78bb772b8c728ca3ea881158057f6faf9eda24#lgx' -o libp2p-lgx
+          nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=7d78bb772b8c728ca3ea881158057f6faf9eda24#lib' --no-link
         post_text: "One more `.lgx` package:"
         extra_run:
           run: "ls libp2p-lgx/*.lgx"
