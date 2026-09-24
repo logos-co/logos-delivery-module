@@ -94,6 +94,39 @@ void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
     }
     impl->nodeStarted(errCode == RET_OK, replyText(errCode, reply, errMsg),
                       currentTimestampNs());
+    if (errCode != RET_OK) {
+        impl->stopAfterFailedStart();
+    }
+}
+
+void DeliveryModuleImpl::stopAfterFailedStart()
+{
+    std::lock_guard<std::mutex> lock(failedStartStopMutex);
+    if (!failedStartStopArmed) {
+        return;
+    }
+    failedStartStopArmed = false;
+    // The same two halves as stop(): the node, then the RLN backend this
+    // module started for it.
+    failedStartStopThread = std::thread([this] {
+        if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
+            fprintf(stderr, "DeliveryModuleImpl: failed to stop the node after a failed start\n");
+            return;
+        }
+        stopRlnBackend();
+    });
+}
+
+void DeliveryModuleImpl::joinFailedStartStop()
+{
+    {
+        std::lock_guard<std::mutex> lock(failedStartStopMutex);
+        failedStartStopArmed = false;
+    }
+    // Disarmed under the lock, so no thread can be assigned after this point.
+    if (failedStartStopThread.joinable()) {
+        failedStartStopThread.join();
+    }
 }
 
 void DeliveryModuleImpl::stop_callback(int errCode, const char* const* reply,
@@ -309,6 +342,10 @@ void DeliveryModuleImpl::abortRln()
 
 void DeliveryModuleImpl::releaseNode()
 {
+    // A stop issued after a failed start holds the context handle, and joins
+    // the bring-up thread itself: finish it first, so that join is not racing
+    // the one below.
+    joinFailedStartStop();
     // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
     // run while it is still in flight. A no-op when no thread was started.
     joinRlnBringUp();
@@ -779,8 +816,10 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
     // inbound createNode dispatch, from which outbound calls cannot complete.
     // The plugin brings it up on its first verb instead, on the discovery
     // thread -- see DeliveryServiceDiscoveryPlugin::ensureBackend.
-    discoPlugin =
-        std::make_unique<DeliveryServiceDiscoveryPlugin>(&modules().libp2p_module, libp2pConfig);
+    // Without a framework (unit tests) modules() would dereference an unset
+    // pointer; the plugin reports a null client on first use instead.
+    Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
+    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2p, libp2pConfig);
 
     // The vtable is borrowed for the duration of the call and copied by the
     // node, but discoPlugin owns the object every entry point dispatches on,
@@ -811,9 +850,16 @@ StdLogosResult DeliveryModuleImpl::start()
         return {false, {}, "Context not initialized"};
     }
 
+    joinFailedStartStop();
+    {
+        std::lock_guard<std::mutex> lock(failedStartStopMutex);
+        failedStartStopArmed = true;
+    }
+
     // Node start can block for a long time (relay reconnect backoff), so return
     // once dispatched. Completion arrives via nodeStarted.
     if (logosdelivery_ctx_start_node(asCtx(deliveryCtxHandle), start_callback, this) != RET_OK) {
+        joinFailedStartStop();
         return {false, {}, "failed to initiate start"};
     }
     return {true, {}};
@@ -830,18 +876,23 @@ StdLogosResult DeliveryModuleImpl::stop()
     if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
+    stopRlnBackend();
+    return {true, {}};
+}
 
+void DeliveryModuleImpl::stopRlnBackend()
+{
+    std::lock_guard<std::mutex> lock(rlnBackendStopMutex);
     // This module started the RLN backend, so it stops it too. Stopping one
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
-    if (rlnConfig->enabled && rlnBridge->enabled()) {
+    if (rlnConfigSnapshot()->enabled && rlnBridge->enabled()) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
                     failure.c_str());
         }
     }
-    return {true, {}};
 }
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)

@@ -11,7 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
-// Generated at build time from metadata.json#dependencies.
+// Generated at build time from metadata.json#optional_dependencies.
 #include "libp2p_module_api.h"
 #include "base64.h"
 
@@ -28,9 +28,27 @@ constexpr size_t kMaxBootstrapNodes = 1;
 
 // Handed to logos-delivery in the vtable. It caps how long the node waits for
 // one verb; the value is only an upper bound, since nim-brokers' cross-thread
-// lane enforces its own (shorter) timeout on top. The generated std client
-// exposes no per-call deadline, so this is the only knob on our side.
+// lane enforces its own (shorter) timeout on top.
 constexpr uint32_t kRequestTimeoutMs = 15000;
+
+// Deadline for the first call to libp2p_module, which is also how its absence
+// is found. libp2p_module is an optional dependency, so nothing guarantees it
+// is loaded, and the transport waits 20s for a module that is not before
+// failing with object_unavailable. That is exactly logos-delivery's budget for
+// the plugin's `start` (PluginStartTimeout), so the node cancelled the verb
+// first and reported "Future operation cancelled" instead of the reason.
+// Measured: with this deadline the call fails after 5s with object_unavailable.
+constexpr int kFirstContactTimeoutMs = 5000;
+
+// What a node configured for external service discovery reports when there is
+// no libp2p_module to host it. It reaches the caller as the reason start()
+// failed, so it says what to do, not only what went wrong.
+constexpr const char* kLibp2pUnavailable =
+    "libp2p_module is not available (not installed or not loaded), but this "
+    "node is configured for external service discovery, which it hosts. "
+    "Install and load libp2p_module, or configure internal discovery instead "
+    "(e.g. discv5, without plugin-kad-discovery); on Windows internal "
+    "discovery is the only option";
 
 // Opt-in trace of the plugin boundary, written to the file named by
 // LD_DISCO_TRACE. There is no other way to watch these calls in a running node:
@@ -283,7 +301,13 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
         trace("libp2p createNode        ALREADY DONE  bootstrapNodes=%zu", bootstrapCount);
     } else {
         logos::CallError err;
-        const StdLogosResult r = libp2p_->createNode(cfg.dump(), &err);
+        const StdLogosResult r = libp2p_->createNode(cfg.dump(), &err, kFirstContactTimeoutMs);
+        if (err.code == "object_unavailable") {
+            // Not a failure to retry: no libp2p_module to talk to. Every call
+            // below would wait out the same deadline to learn the same thing.
+            trace("libp2p createNode        UNAVAILABLE  %s", err.message.c_str());
+            return kLibp2pUnavailable;
+        }
         trace("libp2p createNode        %s  bootstrapNodes=%zu",
               (!err.ok() ? "TRANSPORT-ERR" : (r.success ? "OK" : "REFUSED")),
               bootstrapCount);

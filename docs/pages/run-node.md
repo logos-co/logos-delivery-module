@@ -119,9 +119,9 @@ directly on the host.
 
 Build the `logoscore` CLI (the headless runtime) and the `lgpm` package
 manager from their flakes, then build and install this module's `.lgx`.
-`libp2p_module` is a required dependency — `logoscore` will not load
-`delivery_module` without it. `liblogos_rln_module` is an optional one, so a
-node whose preset has RLN off needs nothing else; an RLN-enabled one also needs
+Both of its dependencies are optional. `libp2p_module` hosts external service
+discovery: a node configured for it (`plugin-kad-discovery`) fails to start
+without it, any other node runs without it. An RLN-enabled preset also needs
 `liblogos_rln_module` and `liblogos_lez_rln_module`. This flake
 re-exports their `.lgx`s from its own locked inputs, so they match the revs
 the module was built against:
@@ -137,7 +137,7 @@ nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
 # This module, built from the current checkout
 nix build '.#lgx' -o delivery-lgx
 
-# Its required libp2p dependency
+# libp2p, for external service discovery
 nix build '.#libp2p_module-lgx' -o libp2p-lgx
 
 # Its RLN dependency chain

@@ -34,6 +34,7 @@ uint64_t g_lastResponseReqId = 0;
 std::string g_lastResponseJson;
 bool g_responseFired = false;
 std::string g_lastCreateConfigJson;
+std::string g_startNodeReplyError;
 } // namespace delivery_test_rln
 
 #define RET_OK  0
@@ -111,6 +112,13 @@ int logosdelivery_remove_event_listener(void* /*ctx*/, uint64_t /*listenerId*/) 
 
 int logosdelivery_ctx_start_node(const LogosDeliveryCtx* /*ctx*/, logosdelivery_reply onReply, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_start_node");
+    const std::string& failure = delivery_test_rln::g_startNodeReplyError;
+    if (!failure.empty()) {
+        if (onReply) {
+            onReply(RET_ERR, nullptr, failure.c_str(), userData);
+        }
+        return RET_OK;
+    }
     return dispatchCall("logosdelivery_ctx_start_node", onReply, userData);
 }
 

@@ -168,17 +168,22 @@
         '';
       };
 
-      # The module dependencies, re-exported from this flake's own locked
-      # inputs: libp2p_module (required) and the RLN chain, for a node whose
-      # preset enables RLN.
+      # The optional module dependencies, re-exported from this flake's own
+      # locked inputs: libp2p_module, for a node configured for external
+      # service discovery, and the RLN chain, for a node whose preset enables
+      # RLN.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
     in
     module // {
       packages = builtins.mapAttrs (system: pkgs: pkgs // {
-        "libp2p_module-lgx" = inputs.libp2p_module.packages.${system}.lgx;
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
-      }) module.packages;
+      } // (
+        # libp2p_module has no build for every system (none for Windows).
+        if inputs.libp2p_module.packages ? ${system}
+        then { "libp2p_module-lgx" = inputs.libp2p_module.packages.${system}.lgx; }
+        else { }
+      )) module.packages;
     };
 }

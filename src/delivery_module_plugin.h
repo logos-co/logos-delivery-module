@@ -542,6 +542,13 @@ private:
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
 
+    // stop()'s RLN half: joins the bring-up thread, then stops the RLN
+    // backend this module started. Also run by the stop after a failed start,
+    // on its own thread and possibly while stop() runs on ours -- so it is
+    // serialized: two concurrent joins of one std::thread are undefined.
+    void stopRlnBackend();
+    std::mutex rlnBackendStopMutex;
+
     // Undoes installRlnPlugin: clears the library's RLN plugin and resets both
     // copies of the RLN config. A no-op unless this instance installed it.
     // Publishes no state transition; that is the caller's call.
@@ -648,6 +655,19 @@ private:
                                void* userData);
     static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
                               void* userData);
+
+    // A failed start leaves the node half up: the library marks it started
+    // before external service discovery comes up, and a discovery failure
+    // after that does not undo it. So start_callback has the node stopped
+    // again, from a thread of ours: the callback runs on the library's own
+    // thread, which refuses a request into its own context.
+    void stopAfterFailedStart();
+    // Disarms stopAfterFailedStart and joins a stop it already issued. start()
+    // calls it before arming a new one, releaseNode() before the context goes.
+    void joinFailedStartStop();
+    std::mutex failedStartStopMutex;
+    bool failedStartStopArmed{false};
+    std::thread failedStartStopThread;
 
     // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by

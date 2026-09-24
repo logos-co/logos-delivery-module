@@ -25,6 +25,10 @@ extern bool g_responseFired;
 // Config JSON the module handed to logosdelivery_create_node.
 extern std::string g_lastCreateConfigJson;
 
+// When non-empty, logosdelivery_ctx_start_node dispatches but its reply is a
+// failure carrying this reason, as a start that failed inside the node.
+extern std::string g_startNodeReplyError;
+
 inline void resetRlnMockState() {
     g_callbacks = LogosDeliveryRlnPlugin{};
     g_userData = nullptr;
@@ -34,6 +38,7 @@ inline void resetRlnMockState() {
     g_lastResponseJson.clear();
     g_responseFired = false;
     g_lastCreateConfigJson.clear();
+    g_startNodeReplyError.clear();
 }
 
 } // namespace delivery_test_rln

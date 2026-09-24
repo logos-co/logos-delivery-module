@@ -21,23 +21,22 @@ class Libp2pModule;
  * class implements that vtable by forwarding each verb to `libp2p_module`'s
  * `disco*` API.
  *
- * ## The dependency is declared, so the calls are typed
+ * ## The dependency is optional, and the calls are typed
  *
- * `libp2p_module` is listed in `metadata.json#dependencies`, which is the only
- * way to get a typed client: at build time logos-module-builder resolves the
- * dependency from the like-named flake input, and logos-cpp-generator emits
- * `libp2p_module_api.h` (a `Libp2pModule` class) plus the `LogosModules`
- * aggregate behind `LogosModuleContext::modules()`. logos-core itself generates
- * nothing -- it only loads the built plugins at runtime.
+ * `libp2p_module` is listed in `metadata.json#optional_dependencies`: at build
+ * time logos-module-builder generates the typed `libp2p_module_api.h` (a
+ * `Libp2pModule` class) and its `LogosModules` member from libp2p's contract,
+ * but the loader never requires the module. So a node without external service
+ * discovery -- and every node on Windows, where libp2p_module has no build --
+ * loads and runs without it.
  *
- * What declaring it costs, and why the sibling branch
- * `poc-apply-discovery-plugin` does not: logos-core then auto-loads
- * libp2p_module alongside this one on every run, and `LogosModules` constructs
- * each declared dependency's client eagerly in its constructor. There is no
- * "declared but skipped" state, so discovery stops being decidable per node
- * config. Declaring it buys codegen, auto-load and load ordering -- and
- * authorizes nothing, since capability_module mints a token for any requesting
- * pair without consulting either list.
+ * The contract comes from a `dependency_overrides` entry naming libp2p's own
+ * impl header, not from its published `packages.<system>.lidl`: the header is
+ * the same on every platform, so Windows builds get the same typed client.
+ *
+ * A node that IS configured for external service discovery needs the module,
+ * and finds out on first contact: ensureBackend bounds that call and turns
+ * `object_unavailable` into a start failure saying so.
  *
  * ## Threading
  *

@@ -17,7 +17,7 @@ intro: |
      module you run is built from exactly what is checked out here, not the latest
      published release.
   3. Install the `.lgx` into a `./modules` directory with `lgpm`, together with
-     the `libp2p_module` and RLN modules `delivery_module` depends on.
+     the optional `libp2p_module` and RLN modules `delivery_module` can use.
   4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
      it with `module-info`, call `createNode` with a Waku node config, then call
      `start` — verifying the module actually runs and boots a delivery node.
@@ -28,8 +28,9 @@ intro: |
 
   On Windows, CI cross-builds the module and uses a staged native `logoscore`
   host to create a node without RLN (Rate Limiting Nullifier), the optional
-  rate-limiting feature. That leg uses an offline config, verifies RLN stays
-  disabled, and stops before `start`, which requires network access.
+  rate-limiting feature, and without `libp2p_module`, which has no Windows
+  build. That leg uses an offline config, verifies RLN stays disabled, and
+  stops before `start`, which requires network access.
 
 what_you_build: "This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows."
 
@@ -94,7 +95,7 @@ sections:
     text: |
       Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
       output and install it into a local `./modules` directory with `lgpm`, along
-      with the `libp2p_module` and RLN modules it depends on. Every module built with
+      with the optional `libp2p_module` and RLN modules. Every module built with
       [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
       exposes a ready-to-install `#lgx`.
 
@@ -118,10 +119,11 @@ sections:
 
       - title: "Build the libp2p dependency"
         text: |
-          `libp2p_module` is a required dependency of `delivery_module`: it
-          backs the service-discovery plugin, and `logoscore` refuses to load
-          `delivery_module` without it. Build it at the rev this module's
-          `flake.lock` pins for it. From a clone, this flake re-exports the
+          `libp2p_module` is an optional dependency of `delivery_module`: it
+          hosts external service discovery. A node configured for that
+          (`plugin-kad-discovery`) fails to start without it; any other node
+          runs without it. Build it at the rev this module's `flake.lock` pins
+          for it. From a clone, this flake re-exports the
           same package — `nix build '.#libp2p_module-lgx'` — which reads the
           pin straight out of the lock.
 
@@ -268,8 +270,9 @@ sections:
 
       - title: "Load the module"
         text: |
-          Load `delivery_module` into the running daemon. Its RLN dependency is
-          optional, so the host loads this module alone:
+          Load `delivery_module` into the running daemon. Its dependencies are
+          all optional, so the host loads this module plus whichever of them are
+          installed:
         run: "./logos/bin/logoscore load-module delivery_module"
         code_block: "logoscore load-module delivery_module"
         expect_contains:

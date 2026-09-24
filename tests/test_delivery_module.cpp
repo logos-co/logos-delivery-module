@@ -19,6 +19,8 @@
 #include "delivery_module_plugin.h"
 #include "base64.h"
 #include "discovery_config.h"
+#include "service_discovery_plugin.h"
+#include "libp2p_module_api.h"
 #include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
 #include "mocks/mock_rln_state.h"
@@ -253,6 +255,67 @@ LOGOS_TEST(stop_returns_false_when_dispatch_fails) {
     LOGOS_ASSERT_FALSE(delivery_test_events::g_lastNodeStopped.fired);
 
     delete impl;
+}
+
+// The library marks a node started before external service discovery comes
+// up, so a discovery failure leaves it half up. The module stops it again.
+LOGOS_TEST(failed_start_stops_the_half_started_node) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_events::resetNodeLifecycleEvents();
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    delivery_test_rln::g_startNodeReplyError = "failed to start external service discovery";
+    LOGOS_ASSERT_TRUE(impl->start().success);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStarted.fired);
+    LOGOS_ASSERT_FALSE(delivery_test_events::g_lastNodeStarted.success);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStarted.message ==
+                      "failed to start external service discovery");
+
+    delete impl; // joins the stop, which runs on a thread of the module's own
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_stop_node"), 1);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStopped.fired);
+    delivery_test_rln::resetRlnMockState();
+}
+
+LOGOS_TEST(successful_start_does_not_stop_the_node) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_events::resetNodeLifecycleEvents();
+    delivery_test_rln::resetRlnMockState();
+    auto* impl = createInitializedImpl(t);
+
+    LOGOS_ASSERT_TRUE(impl->start().success);
+    LOGOS_ASSERT_TRUE(delivery_test_events::g_lastNodeStarted.success);
+
+    delete impl;
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_stop_node"), 0);
+}
+
+// libp2p_module is optional. A node configured for external service discovery
+// without it must fail its discovery start saying so, not with a timeout.
+LOGOS_TEST(discovery_start_reports_absent_libp2p_module) {
+    Libp2pModule libp2p("delivery_module");
+    Libp2pModule::createNodeErrorCode = "object_unavailable";
+    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+
+    char err[1024] = {};
+    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+    const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
+    Libp2pModule::createNodeErrorCode.clear();
+
+    LOGOS_ASSERT_EQ(rc, LD_DISCO_ERROR);
+    const std::string reason(err);
+    LOGOS_ASSERT_TRUE(reason.find("libp2p_module is not available") != std::string::npos);
+    LOGOS_ASSERT_TRUE(reason.find("internal discovery") != std::string::npos);
+}
+
+LOGOS_TEST(discovery_start_without_libp2p_client_fails_cleanly) {
+    DeliveryServiceDiscoveryPlugin plugin(nullptr, "{}");
+
+    char err[256] = {};
+    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+    LOGOS_ASSERT_EQ(vt->start(vt->pluginCtx, err, sizeof(err)), LD_DISCO_ERROR);
+    LOGOS_ASSERT_TRUE(std::string(err).find("no libp2p_module client") != std::string::npos);
 }
 
 // send
@@ -577,6 +640,25 @@ LOGOS_TEST(createNode_installs_rln_plugin) {
     LOGOS_ASSERT(delivery_test_rln::g_callbacks.validate_proof != nullptr);
 
     delete impl;
+}
+
+// The stop after a failed start and an explicit stop() both stop the RLN
+// backend, and both join the bring-up thread on the way -- from different
+// threads, possibly at once. They must not race that join.
+LOGOS_TEST(failed_start_and_explicit_stop_share_the_rln_teardown) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    delivery_test_events::resetNodeLifecycleEvents();
+    RlnPresetsFile presets(kRlnPresetTable);
+    auto* impl = createRlnImpl(t);
+
+    delivery_test_rln::g_startNodeReplyError = "failed to start external service discovery";
+    LOGOS_ASSERT_TRUE(impl->start().success);
+    LOGOS_ASSERT_TRUE(impl->stop().success);
+
+    delete impl;
+    LOGOS_ASSERT_EQ(t.cFunctionCallCount("logosdelivery_ctx_stop_node"), 2);
+    delivery_test_rln::resetRlnMockState();
 }
 
 LOGOS_TEST(rln_generate_proof_callback_emits_typed_event_with_verbatim_args) {

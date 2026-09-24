@@ -72,10 +72,11 @@ jobs:
         run: |
           nix build -L .#install-portable
 
-      # delivery_module declares libp2p_module and liblogos_rln_module as dependencies
-      # in metadata.json, and logoscore refuses to load a module whose dependency
-      # chain is absent from the modules dir. install-portable bundles only the
-      # module's own lib, so stage libp2p_module and the whole RLN chain
+      # delivery_module declares libp2p_module and liblogos_rln_module as optional
+      # dependencies in metadata.json: logoscore loads them when they sit in the
+      # modules dir, and a node configured for external service discovery or an
+      # RLN preset needs them. install-portable bundles only the module's own
+      # lib, so stage libp2p_module and the whole RLN chain
       # (liblogos_rln_module -> liblogos_lez_rln_module) next to it. Every pin is
       # walked out of flake.lock, so none of them can drift from the flake inputs.
       - name: Stage dependency modules
