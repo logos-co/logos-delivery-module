@@ -13,7 +13,7 @@
 #include <logos_module_context.h>
 #include <logos_result.h>
 
-class PollPump;
+namespace nim_ffi { class Host; }
 class RlnBridge;
 
 // Everything the delivery library no longer knows about RLN. Resolved from
@@ -572,9 +572,10 @@ private:
 
     // Raw FFI context: what the event registry takes.
     // The delivery context and its message queue, pumped on this module's
-    // thread (src/poll_pump.h): replies, events and the library's RLN
-    // questions all arrive through it. Nothing here owns a thread for it.
-    std::unique_ptr<PollPump> pump;
+    // thread by nim-ffi's host (lib/nim_ffi_host.hpp): replies, events and
+    // the library's RLN questions all arrive through it. No thread of ours.
+    std::unique_ptr<nim_ffi::Host> host;
+    std::shared_ptr<void> pollNotifier;  // the QSocketNotifier on host->fd(), when a Qt loop runs
     void onEvent(uint64_t nameId, const nlohmann::json& payload);
     void onReverseCall(uint64_t callId, uint64_t nameId, const nlohmann::json& args);
 

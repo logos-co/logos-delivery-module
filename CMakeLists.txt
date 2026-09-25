@@ -25,8 +25,6 @@ logos_module(
         src/delivery_module_plugin.cpp
         src/rln_bridge.h
         src/rln_bridge.cpp
-        src/poll_pump.h
-        src/poll_pump.cpp
         src/rln_presets.h
         src/rln_presets.cpp
         ${TINYCBOR_SOURCES}

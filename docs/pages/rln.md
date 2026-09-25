@@ -3,7 +3,7 @@
 The delivery library (liblogosdelivery) does not implement RLN itself — it
 asks an external RLN module for every RLN operation. It asks through nim-ffi
 **reverse calls**: each question is a `REVERSE_CALL` message the module reads
-off the library's poll queue (`src/poll_pump.cpp`), and the answer goes back
+off the library's poll queue (nim-ffi's `nim_ffi::Host`, `lib/nim_ffi_host.hpp`), and the answer goes back
 through `logosdelivery_reverse_reply`. The library is implementation-agnostic:
 it never names a registry or a membership, carries no configuration and never
 starts the backend. All of that lives here. This module answers each question

@@ -8,7 +8,7 @@
 // events and reverse calls through mock_rln_state.h to play the library.
 //
 // Return values and reply texts are controlled via LogosCMockStore. For the
-// int-returning exports the return value is the *dispatch* code (0 / RET_OK by
+// int-returning exports the return value is the *dispatch* code (0 / NIMFFI_RET_OK by
 // default); set a non-zero value to simulate a refused submit, in which case
 // no reply is queued:
 //   t.mockCFunction("logosdelivery_start_node").returns(1);  // refused
@@ -79,20 +79,20 @@ void push(uint32_t kind, uint64_t id, uint64_t nameId, int ret, std::vector<uint
 int method(const char* name, void* ctx, const uint8_t* req, size_t len, uint64_t* idOut,
            bool dispatchable = false)
 {
-    if (ctx != &s_fakeCtx || !idOut) return RET_INVALID_CTX;
+    if (ctx != &s_fakeCtx || !idOut) return NIMFFI_RET_INVALID_CTX;
     delivery_test_rln::g_lastRequestMethod = name;
     delivery_test_rln::g_lastRequest =
         len ? json::from_cbor(std::vector<uint8_t>(req, req + len), true, false) : json::object();
-    if (dispatchable && LogosCMockStore::instance().getReturn<int>(name) != 0) return RET_ERR;
+    if (dispatchable && LogosCMockStore::instance().getReturn<int>(name) != 0) return NIMFFI_RET_ERR;
     if (s_interpose) {
         s_interpose = false;
         delivery_test_rln::pushReverseCall(s_interposeWire.c_str(), s_interposeArgs);
     }
     const uint64_t id = s_nextId++;
     const char* text = LogosCMockStore::instance().getReturnString(name);
-    push(NIMFFI_MSG_REPLY, id, 0, RET_OK, json::to_cbor(json(text ? text : "")));
+    push(NIMFFI_MSG_REPLY, id, 0, NIMFFI_RET_OK, json::to_cbor(json(text ? text : "")));
     *idOut = id;
-    return RET_OK;
+    return NIMFFI_RET_OK;
 }
 
 } // namespace
@@ -111,14 +111,14 @@ int g_replyCount = 0;
 uint64_t pushReverseCall(const char* wire, const json& args)
 {
     const uint64_t id = s_nextId++;
-    push(NIMFFI_MSG_REVERSE_CALL, id, logosdelivery_name_id(wire), 0, json::to_cbor(args));
+    push(NIMFFI_MSG_REVERSE_CALL, id, nimffi_name_id(wire), 0, json::to_cbor(args));
     return id;
 }
 
 void pushEvent(const char* wire, const json& payload)
 {
     const std::string text = payload.dump();
-    push(NIMFFI_MSG_EVENT, 0, logosdelivery_name_id(wire), 0,
+    push(NIMFFI_MSG_EVENT, 0, nimffi_name_id(wire), 0,
          std::vector<uint8_t>(text.begin(), text.end()));
 }
 
@@ -161,34 +161,34 @@ int logosdelivery_create_node(const uint8_t* req, size_t len, void** ctxOut, uin
     delivery_test_rln::g_lastCreateRlnPlugin = delivery_test_rln::g_lastRequest.value("rlnPlugin", false);
     const int ok = LOGOS_CMOCK_RETURN(int, "logosdelivery_create_node");
     if (!ok || !ctxOut || !idOut) {
-        return RET_ERR;
+        return NIMFFI_RET_ERR;
     }
     *ctxOut = &s_fakeCtx;
     *idOut = s_nextId++;
-    push(NIMFFI_MSG_REPLY, *idOut, 0, RET_OK, json::to_cbor(json(true)));
-    return RET_OK;
+    push(NIMFFI_MSG_REPLY, *idOut, 0, NIMFFI_RET_OK, json::to_cbor(json(true)));
+    return NIMFFI_RET_OK;
 }
 
 int logosdelivery_destroy(void* ctx)
 {
     LOGOS_CMOCK_RECORD("logosdelivery_destroy");
-    if (ctx != &s_fakeCtx) return RET_INVALID_CTX;
+    if (ctx != &s_fakeCtx) return NIMFFI_RET_INVALID_CTX;
     s_queue.clear();
-    return RET_OK;
+    return NIMFFI_RET_OK;
 }
 
 int logosdelivery_shutdown(void)
 {
     LOGOS_CMOCK_RECORD("logosdelivery_shutdown");
-    return RET_OK;
+    return NIMFFI_RET_OK;
 }
 
 int logosdelivery_poll(void* ctx, int32_t /*timeoutMs*/, const NimFfiMsg** msg)
 {
-    if (ctx != &s_fakeCtx || !msg) return RET_INVALID_CTX;
+    if (ctx != &s_fakeCtx || !msg) return NIMFFI_RET_INVALID_CTX;
     if (s_queue.empty()) {
         *msg = nullptr;
-        return RET_TIMEOUT;
+        return NIMFFI_RET_TIMEOUT;
     }
     s_current = std::move(s_queue.front());
     s_queue.pop_front();
@@ -197,7 +197,7 @@ int logosdelivery_poll(void* ctx, int32_t /*timeoutMs*/, const NimFfiMsg** msg)
     char b;
     (void)!read(s_pipe[0], &b, 1);
     *msg = &s_current.msg;
-    return RET_OK;
+    return NIMFFI_RET_OK;
 }
 
 int logosdelivery_poll_fd(void* ctx)
@@ -210,17 +210,17 @@ int logosdelivery_poll_fd(void* ctx)
 int logosdelivery_reverse_reply(void* ctx, uint64_t callId, int ret, const uint8_t* payload, size_t len)
 {
     LOGOS_CMOCK_RECORD("logosdelivery_reverse_reply");
-    if (ctx != &s_fakeCtx) return RET_INVALID_CTX;
+    if (ctx != &s_fakeCtx) return NIMFFI_RET_INVALID_CTX;
     delivery_test_rln::g_lastReplyCallId = callId;
     delivery_test_rln::g_lastReplyRet = ret;
     ++delivery_test_rln::g_replyCount;
-    if (ret == RET_OK) {
+    if (ret == NIMFFI_RET_OK) {
         json v = json::from_cbor(std::vector<uint8_t>(payload, payload + len), true, false);
         delivery_test_rln::g_lastReplyJson = v.is_string() ? v.get<std::string>() : v.dump();
     } else {
         delivery_test_rln::g_lastReplyJson.assign(reinterpret_cast<const char*>(payload), len);
     }
-    return RET_OK;
+    return NIMFFI_RET_OK;
 }
 
 #define MOCK_METHOD(name, dispatchable)                                                \

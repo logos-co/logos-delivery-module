@@ -14,7 +14,15 @@
 #include <nlohmann/json.hpp>
 #include <boost/beast/core/detail/base64.hpp>
 
-#include "poll_pump.h"
+#include <nim_ffi_host.hpp>
+extern "C" {
+#include <liblogosdelivery_poll.h>
+}
+#if __has_include(<QSocketNotifier>)
+#include <QObject>
+#include <QSocketNotifier>
+#define DELIVERY_HAS_QT 1
+#endif
 #include "rln_bridge.h"
 #include "rln_presets.h"
 
@@ -59,7 +67,7 @@ std::string toStringOrEmpty(const char* s) {
 
 // The text a generated reply carries: the result on success, else the error.
 std::string replyText(int errCode, const char* const* reply, const char* errMsg) {
-    return toStringOrEmpty(errCode == RET_OK ? (reply ? *reply : nullptr) : errMsg);
+    return toStringOrEmpty(errCode == NIMFFI_RET_OK ? (reply ? *reply : nullptr) : errMsg);
 }
 
 // message_received and channel_message_received: base64 string.
@@ -76,48 +84,87 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
 // "eventType" that event_callback dispatches on. Upstream also emits
 // onTopicHealthChange, onConnectionChange and onReceivedMessage, which the
 // module does not surface.
+using Bytes = nim_ffi::Bytes;
+
+Bytes encode(const nlohmann::json& request)
+{
+    return nlohmann::json::to_cbor(request.is_null() ? nlohmann::json::object() : request);
+}
+
 // A method's outcome in the module's result shape. The library's reply value
 // is the result; a text reply stays text, as the old string-only ABI had it.
-StdLogosResult fromReply(const PollPump::Reply& r, bool wantValue)
+StdLogosResult fromReply(const nim_ffi::Reply& r, bool wantValue)
 {
-    if (r.ret != RET_OK) {
+    if (r.ret != NIMFFI_RET_OK) {
         return {false, {}, r.error.empty() ? "rc=" + std::to_string(r.ret) : r.error};
     }
     if (!wantValue) {
         return {true, {}};
     }
-    if (r.value.is_null()) {
+    if (r.payload.empty()) {
         return {true, std::string()};
     }
-    return {true, r.value.is_string() ? r.value : nlohmann::json(r.value.dump())};
+    nlohmann::json value = nlohmann::json::from_cbor(r.payload, /*strict=*/true, /*allow_exceptions=*/false);
+    if (value.is_null()) {
+        return {true, std::string()};
+    }
+    return {true, value.is_string() ? value : nlohmann::json(value.dump())};
 }
 
 // One method call: submit, pump until the reply, map it.
-StdLogosResult callApi(PollPump& pump, const char* name, PollPump::Method fn,
+StdLogosResult callApi(nim_ffi::Host& host, const char* name, nim_ffi::Method fn,
                        const nlohmann::json& req, std::chrono::seconds timeout, bool wantValue)
 {
-    return fromReply(pump.call(name, fn, req, timeout), wantValue);
+    nim_ffi::Reply r = host.call(fn, encode(req), timeout);
+    if (r.ret != NIMFFI_RET_OK && !r.error.empty()) {
+        r.error = std::string(name) + ": " + r.error;
+    }
+    return fromReply(r, wantValue);
+}
+
+// An event's payload is whatever the library enqueued: liblogosdelivery emits
+// its events as JSON text, so that is tried first; a CBOR value second.
+nlohmann::json decodeEvent(const uint8_t* payload, size_t len)
+{
+    if (len == 0) return nlohmann::json();
+    const auto* text = reinterpret_cast<const char*>(payload);
+    nlohmann::json j = nlohmann::json::parse(text, text + len, nullptr, /*allow_exceptions=*/false);
+    if (!j.is_discarded()) return j;
+    return nlohmann::json::from_cbor(std::vector<uint8_t>(payload, payload + len), true, false);
+}
+
+nlohmann::json decodeArgs(const uint8_t* args, size_t len)
+{
+    if (len == 0) return nlohmann::json::object();
+    return nlohmann::json::from_cbor(std::vector<uint8_t>(args, args + len), true, false);
+}
+
+// The five fixed exports nim-ffi's host needs, bound once.
+nim_ffi::Library deliveryLibrary()
+{
+    return {logosdelivery_create_node, logosdelivery_destroy, logosdelivery_poll, logosdelivery_poll_fd,
+            logosdelivery_reverse_reply};
 }
 
 } // namespace
 
 DeliveryModuleImpl::DeliveryModuleImpl()
-    : pump(std::make_unique<PollPump>())
+    : host(std::make_unique<nim_ffi::Host>(deliveryLibrary()))
     , rlnBridge(std::make_unique<RlnBridge>())
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
-    pump->setEventHandler([this](uint64_t nameId, const nlohmann::json& payload) {
-        onEvent(nameId, payload);
+    host->onEvent([this](uint64_t nameId, const uint8_t* payload, size_t len) {
+        onEvent(nameId, decodeEvent(payload, len));
     });
-    pump->setReverseHandler([this](uint64_t callId, uint64_t nameId, const nlohmann::json& args) {
-        onReverseCall(callId, nameId, args);
+    host->onReverseCall([this](uint64_t callId, uint64_t nameId, const uint8_t* args, size_t len) {
+        onReverseCall(callId, nameId, decodeArgs(args, len));
     });
     // The bridge's answers go back into the library as reverse replies; the
     // pump takes them from any thread.
     RlnBridge::setResponder([this](uint64_t callId, const std::string& replyJson) {
         fprintf(stderr, "DeliveryModuleImpl: rln answer for call %llu: %.160s\n",
                 static_cast<unsigned long long>(callId), replyJson.c_str());
-        pump->reverseReply(callId, RET_OK, nlohmann::json(replyJson));
+        host->reverseReply(callId, NIMFFI_RET_OK, nlohmann::json::to_cbor(nlohmann::json(replyJson)));
     });
 }
 
@@ -186,7 +233,8 @@ void DeliveryModuleImpl::releaseNode()
 
     // Destroys the context and stops the node. Once it is gone no question
     // can arrive, and a late RLN completion finds no context to answer into.
-    pump->destroy();
+    pollNotifier.reset();
+    host->destroy();
 }
 
 StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
@@ -309,10 +357,10 @@ void DeliveryModuleImpl::onReverseCall(uint64_t callId, uint64_t nameId, const n
     fprintf(stderr, "DeliveryModuleImpl: rln question name_id=%llx (call %llu)\n",
             static_cast<unsigned long long>(nameId), static_cast<unsigned long long>(callId));
     const auto now = currentTimestampNs();
-    static const uint64_t kGetState = logosdelivery_name_id("rln_get_membership_state");
-    static const uint64_t kGetQuota = logosdelivery_name_id("rln_get_epoch_quota");
-    static const uint64_t kGenerate = logosdelivery_name_id("rln_generate_proof");
-    static const uint64_t kValidate = logosdelivery_name_id("rln_validate_proof");
+    static const uint64_t kGetState = nimffi_name_id("rln_get_membership_state");
+    static const uint64_t kGetQuota = nimffi_name_id("rln_get_epoch_quota");
+    static const uint64_t kGenerate = nimffi_name_id("rln_generate_proof");
+    static const uint64_t kValidate = nimffi_name_id("rln_validate_proof");
     try {
         if (nameId == kGetState) {
             rlnBridge->getMembershipState(callId, cfg->registryId, cfg->rlnIdentifier);
@@ -333,10 +381,10 @@ void DeliveryModuleImpl::onReverseCall(uint64_t callId, uint64_t nameId, const n
                                                  str("proofJson"), now);
         } else {
             // Never leave the library waiting on a question nobody answers.
-            pump->reverseReply(callId, RET_ERR, nlohmann::json("unknown rln question"));
+            host->reverseReply(callId, NIMFFI_RET_ERR, std::string("unknown rln question"));
         }
     } catch (const std::exception& e) {
-        pump->reverseReply(callId, RET_ERR, nlohmann::json(std::string("rln question failed: ") + e.what()));
+        host->reverseReply(callId, NIMFFI_RET_ERR, std::string("rln question failed: ") + e.what());
     }
 }
 
@@ -460,7 +508,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 {
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
 
-    if (pump->alive()) {
+    if (host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
         return {false, {}, "Context already initialized"};
     }
@@ -510,11 +558,21 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     // logosdelivery_create_node encodes the config and turns the context address
     // the FFI reports back into a LogosDeliveryCtx handle.
-    const std::string error = pump->create(cfgWithPorts, rlnPreset.enabled, CALLBACK_TIMEOUT);
-    if (!error.empty()) {
-        fprintf(stderr, "DeliveryModuleImpl: %s\n", error.c_str());
-        return releaseAndFail("Failed to create Delivery context: " + error);
+    // `rlnPlugin` tells the library this module answers its RLN questions.
+    const nim_ffi::Reply ready = host->create(
+        encode(nlohmann::json{{"configJson", cfgWithPorts}, {"rlnPlugin", rlnPreset.enabled}}), CALLBACK_TIMEOUT);
+    if (ready.ret != NIMFFI_RET_OK) {
+        fprintf(stderr, "DeliveryModuleImpl: create_node: %s\n", ready.error.c_str());
+        return releaseAndFail("Failed to create Delivery context: " + ready.error);
     }
+#ifdef DELIVERY_HAS_QT
+    // Between calls, the Qt loop drains the library's queue as it fills.
+    if (const int fd = host->fd(); fd >= 0) {
+        auto notifier = std::make_shared<QSocketNotifier>(fd, QSocketNotifier::Read);
+        QObject::connect(notifier.get(), &QSocketNotifier::activated, [this](int) { host->drain(); });
+        pollNotifier = notifier;
+    }
+#endif
     if (rlnPreset.enabled) {
         rlnBringUpDone.store(false, std::memory_order_release);
         rlnBringUpThread = std::thread([this] {
@@ -536,7 +594,7 @@ StdLogosResult DeliveryModuleImpl::start()
     fprintf(stderr, "DeliveryModuleImpl::start called\n");
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         return {false, {}, "Context not initialized"};
     }
 
@@ -544,11 +602,11 @@ StdLogosResult DeliveryModuleImpl::start()
     // once dispatched. Completion arrives via nodeStarted.
     reapRlnBringUp();
     // start's outcome is its reply, reported as nodeStarted when pumped.
-    const int rc = pump->submit(logosdelivery_start_node, nlohmann::json::object(),
-        [this](const PollPump::Reply& r) {
-            nodeStarted(r.ret == RET_OK, r.ret == RET_OK ? std::string() : r.error, currentTimestampNs());
+    const int rc = host->submit(logosdelivery_start_node, encode(nlohmann::json::object()),
+        [this](const nim_ffi::Reply& r) {
+            nodeStarted(r.ret == NIMFFI_RET_OK, r.ret == NIMFFI_RET_OK ? std::string() : r.error, currentTimestampNs());
         });
-    if (rc != RET_OK) {
+    if (rc != NIMFFI_RET_OK) {
         return {false, {}, "failed to initiate start"};
     }
     return {true, {}};
@@ -559,15 +617,15 @@ StdLogosResult DeliveryModuleImpl::stop()
     fprintf(stderr, "DeliveryModuleImpl::stop called\n");
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         return {false, {}, "Context not initialized"};
     }
 
-    const int rc = pump->submit(logosdelivery_stop_node, nlohmann::json::object(),
-        [this](const PollPump::Reply& r) {
-            nodeStopped(r.ret == RET_OK, r.ret == RET_OK ? std::string() : r.error, currentTimestampNs());
+    const int rc = host->submit(logosdelivery_stop_node, encode(nlohmann::json::object()),
+        [this](const nim_ffi::Reply& r) {
+            nodeStopped(r.ret == NIMFFI_RET_OK, r.ret == NIMFFI_RET_OK ? std::string() : r.error, currentTimestampNs());
         });
-    if (rc != RET_OK) {
+    if (rc != NIMFFI_RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
 
@@ -589,7 +647,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
     fprintf(stderr, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -601,7 +659,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 
     std::string messageJson = messageObj.dump();
 
-    auto outcome = callApi(*pump, "send", logosdelivery_send, nlohmann::json{{"messageJson", messageJson}}, CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "send", logosdelivery_send, nlohmann::json{{"messageJson", messageJson}}, CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
@@ -620,12 +678,12 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
     fprintf(stderr, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApi(*pump, "subscribe", logosdelivery_subscribe, nlohmann::json{{"contentTopicStr", contentTopic}}, CALLBACK_TIMEOUT, false);
+    auto outcome = callApi(*host, "subscribe", logosdelivery_subscribe, nlohmann::json{{"contentTopicStr", contentTopic}}, CALLBACK_TIMEOUT, false);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
@@ -641,12 +699,12 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
     fprintf(stderr, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApi(*pump, "unsubscribe", logosdelivery_unsubscribe, nlohmann::json{{"contentTopicStr", contentTopic}}, CALLBACK_TIMEOUT, false);
+    auto outcome = callApi(*host, "unsubscribe", logosdelivery_unsubscribe, nlohmann::json{{"contentTopicStr", contentTopic}}, CALLBACK_TIMEOUT, false);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
@@ -664,7 +722,7 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
     fprintf(stderr, "DeliveryModuleImpl::storeQuery called with peerAddr: %s\n", peerAddr.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot run store query - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -675,7 +733,7 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
     auto callbackTimeout = std::max(
         CALLBACK_TIMEOUT, std::chrono::seconds(timeoutMs / 1000 + 5));
 
-    auto outcome = callApi(*pump, "store_query", waku_store_query, nlohmann::json{{"jsonQuery", jsonQuery}, {"peerAddr", peerAddr}, {"timeoutMs", static_cast<int32_t>(timeoutMs)}}, callbackTimeout, true);
+    auto outcome = callApi(*host, "store_query", waku_store_query, nlohmann::json{{"jsonQuery", jsonQuery}, {"peerAddr", peerAddr}, {"timeoutMs", static_cast<int32_t>(timeoutMs)}}, callbackTimeout, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Store query failed for peer: %s, reason: %s\n",
@@ -692,12 +750,12 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
             channelId.c_str(), contentTopic.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot create channel - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApi(*pump, "channel_create", logosdelivery_channel_create, nlohmann::json{{"channelIdStr", channelId}, {"contentTopicStr", contentTopic}, {"senderIdStr", senderId}, {"encryptFn", uint64_t{0}}, {"decryptFn", uint64_t{0}}, {"userData", uint64_t{0}}}, CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "channel_create", logosdelivery_channel_create, nlohmann::json{{"channelIdStr", channelId}, {"contentTopicStr", contentTopic}, {"senderIdStr", senderId}, {"encryptFn", uint64_t{0}}, {"decryptFn", uint64_t{0}}, {"userData", uint64_t{0}}}, CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
@@ -711,12 +769,12 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
     fprintf(stderr, "DeliveryModuleImpl::channelExists called with channelId: %s\n", channelId.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot query channel - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApi(*pump, "channel_exists", logosdelivery_channel_exists, nlohmann::json{{"channelIdStr", channelId}}, CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "channel_exists", logosdelivery_channel_exists, nlohmann::json{{"channelIdStr", channelId}}, CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel exists failed for id: %s, reason: %s\n",
@@ -730,7 +788,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
     fprintf(stderr, "DeliveryModuleImpl::channelSend called with channelId: %s\n", channelId.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send channel message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -741,7 +799,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
 
     std::string messageJson = messageObj.dump();
 
-    auto outcome = callApi(*pump, "channel_send", logosdelivery_channel_send, nlohmann::json{{"channelIdStr", channelId}, {"messageJson", messageJson}}, CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "channel_send", logosdelivery_channel_send, nlohmann::json{{"channelIdStr", channelId}, {"messageJson", messageJson}}, CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel send failed for id: %s, reason: %s\n",
@@ -760,12 +818,12 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
     fprintf(stderr, "DeliveryModuleImpl::channelClose called with channelId: %s\n", channelId.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot close channel - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApi(*pump, "channel_close", logosdelivery_channel_close, nlohmann::json{{"channelIdStr", channelId}}, CALLBACK_TIMEOUT, false);
+    auto outcome = callApi(*host, "channel_close", logosdelivery_channel_close, nlohmann::json{{"channelIdStr", channelId}}, CALLBACK_TIMEOUT, false);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel close failed for id: %s, reason: %s\n",
@@ -778,11 +836,11 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApi(*pump, "get_available_node_info_ids", logosdelivery_get_available_node_info_ids, nlohmann::json::object(), CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "get_available_node_info_ids", logosdelivery_get_available_node_info_ids, nlohmann::json::object(), CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
@@ -794,11 +852,11 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
     fprintf(stderr, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApi(*pump, "get_node_info", logosdelivery_get_node_info, nlohmann::json{{"nodeInfoId", nodeInfoId}}, CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "get_node_info", logosdelivery_get_node_info, nlohmann::json{{"nodeInfoId", nodeInfoId}}, CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
@@ -812,11 +870,11 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
 
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApi(*pump, "get_available_configs", logosdelivery_get_available_configs, nlohmann::json::object(), CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "get_available_configs", logosdelivery_get_available_configs, nlohmann::json::object(), CALLBACK_TIMEOUT, true);
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
@@ -828,13 +886,13 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
 std::string DeliveryModuleImpl::collectOpenMetricsText()
 {
     reapRlnBringUp();
-    if (!pump->alive()) {
+    if (!host->alive()) {
         // No node yet — empty document; the openmetrics scraper renders nothing
         // for this module rather than treating the scrape as a hard error.
         return "";
     }
 
-    auto outcome = callApi(*pump, "get_node_info", logosdelivery_get_node_info, nlohmann::json{{"nodeInfoId", "Metrics"}}, CALLBACK_TIMEOUT, true);
+    auto outcome = callApi(*host, "get_node_info", logosdelivery_get_node_info, nlohmann::json{{"nodeInfoId", "Metrics"}}, CALLBACK_TIMEOUT, true);
 
     if (!outcome.success || !outcome.value.is_string()) {
         fprintf(stderr, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",

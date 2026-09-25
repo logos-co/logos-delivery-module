@@ -30,8 +30,9 @@ messages actually travel is decided by
 
 `liblogosdelivery` is built on nim-ffi's **poll model**: every export answers
 with a message on one queue per node, and a file descriptor is readable while
-the queue holds something. This module never receives a callback. One pump
-(`src/poll_pump.cpp`) reads that queue on the module's own thread: a
+the queue holds something. This module never receives a callback. nim-ffi's own host-side queue reader
+(`nim_ffi::Host`, `lib/nim_ffi_host.hpp`, vendored from nim-ffi's `host/`)
+reads that queue on the module's own thread: a
 `QSocketNotifier` drains it from the Qt event loop between calls, and a method
 call pumps inline until its reply arrives — serving events and the library's
 RLN questions on the way, so nothing can deadlock waiting for something this
