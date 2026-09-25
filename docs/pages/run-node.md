@@ -1,7 +1,9 @@
 # Run a delivery node
 
-Runs a delivery node (`logoscore` daemon + `delivery_module`). There is no GUI
-or HTTP API — interaction is via the `logoscore` CLI. You can run it three ways:
+Runs a delivery node (a Logos Core daemon + `delivery_module` 0.3.0, for Logos
+Testnet v0.3). There is no GUI or HTTP API — interaction is via the daemon's
+CLI (`logosctl`, or `logoscore` in the Docker and Nix setups). You can run it
+three ways:
 
 - [With Docker](#with-docker) — quickest; everything runs in a container.
 - [Prebuilt binaries](#without-docker-prebuilt-binaries) — download release
@@ -9,7 +11,9 @@ or HTTP API — interaction is via the `logoscore` CLI. You can run it three way
 - [Build with Nix](#without-docker-build-with-nix) — build from source on any
   platform.
 
-All three connect the node to the `logos.test` fleet by default.
+All three connect the node to the `logos.test` fleet by default. A node that
+other peers should be able to dial also needs its
+[public address](#public-address) set.
 
 ## With Docker
 
@@ -25,23 +29,24 @@ cd logos-delivery-module
 docker compose up -d --build
 ```
 
-First build runs Nix and downloads release packages — allow ~30–45 min.
-Later starts are fast.
+The image is built from [logos-docker](https://github.com/logos-co/logos-docker)
+with `delivery_module` 0.3.0 from the Logos catalog. The first build runs Nix —
+allow ~30–45 min. Later starts are fast.
 
 ### Boot the node
 
 The daemon is running; load the module and start the node:
 
 ```bash
-docker exec logos-node logoscore load-module delivery_module --json
-docker exec logos-node logoscore call delivery_module createNode @/conf/logos-test.json --json
-docker exec logos-node logoscore call delivery_module start --json
+docker exec logos-node logoscore --config-dir /var/lib/logos/config load-module delivery_module --json
+docker exec logos-node logoscore --config-dir /var/lib/logos/config call delivery_module createNode @/conf/logos-test.json --json
+docker exec logos-node logoscore --config-dir /var/lib/logos/config call delivery_module start --json
 ```
 
 Verify:
 
 ```bash
-docker exec logos-node logoscore status --json
+docker exec logos-node logoscore --config-dir /var/lib/logos/config status --json
 ```
 
 ### Stop
@@ -50,38 +55,36 @@ docker exec logos-node logoscore status --json
 docker compose down
 ```
 
+Node data lives in the `logos-persistence` volume, so it survives `down` and
+rebuilds. `docker compose down -v` removes it.
+
 ## Without Docker: prebuilt binaries
 
 Run a node from released binaries — nothing to build, no repository clone. You
-need three CLIs from the Logos releases:
+need one CLI, [`logosctl`](https://github.com/logos-co/logos-logoscore-cli)
+0.3.0: the node daemon, its client, and the package manager in one binary. It
+is published for Linux (`x86_64` / `aarch64`) and macOS (Apple Silicon /
+`aarch64`).
 
-- **`logoscore`** — the node daemon ([logos-logoscore-cli](https://github.com/logos-co/logos-logoscore-cli))
-- **`lgpd`** — package downloader, fetches modules from the Logos catalog
-  ([logos-package-downloader](https://github.com/logos-co/logos-package-downloader))
-- **`lgpm`** — package manager, installs them locally
-  ([logos-package-manager](https://github.com/logos-co/logos-package-manager))
+### Install logosctl
 
-All three are published for Linux (`x86_64` / `aarch64`) and macOS (Apple
-Silicon / `aarch64`).
-
-### Install the tools
-
-This downloads `logoscore`, `lgpd`, and `lgpm` for your OS/arch into `./bin`
-(the script pins a known-good release of each — bump the `*_TAG` values in it to
-move to newer builds):
+This downloads `logosctl` for your OS/arch into `./bin` (the script pins a
+release — bump `LOGOSCTL_TAG` in it to move to a newer one):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/logos-co/logos-delivery-module/master/scripts/install-node-tools.sh | sh
 export PATH="$PWD/bin:$PATH"
 ```
 
-### Download the module and boot the node
+### Install the module and boot the node
 
 ```bash
-# Fetch delivery_module from the Logos catalog, then install it into ./modules
-mkdir -p packages modules
-lgpd download delivery_module --output ./packages
-lgpm install --dir ./packages --modules-dir ./modules
+# Start the daemon; --detach returns once it accepts commands
+logosctl daemon start --detach
+
+# Fetch delivery_module from the Logos catalog and install it
+logosctl catalog refresh
+logosctl package install delivery_module --version 0.3.0 --yes
 
 # logos.test node config (layered createNode shape — see Configuration below)
 cat > logos-test.json <<'JSON'
@@ -90,20 +93,25 @@ cat > logos-test.json <<'JSON'
   "messagingOverrides": {
     "logLevel": "DEBUG",
     "tcp-port": 30303,
-    "discv5-udp-port": 9000
+    "discv5-udp-port": 9000,
+    "nat": "extip:<public-ip>"
   }
 }
 JSON
 
-# Run the daemon (it binds capability_module automatically, so ./modules only
-# needs delivery_module), then boot the node
-logoscore -D -m ./modules > logs.txt &
-logoscore load-module delivery_module
-logoscore call delivery_module createNode @logos-test.json
-logoscore call delivery_module start
+logosctl module load delivery_module
+logosctl call delivery_module createNode @logos-test.json
+logosctl call delivery_module start
 ```
 
-Verify with `logoscore status`; stop with `logoscore stop`.
+Replace `<public-ip>` with the host's public IPv4 address, or drop the `nat`
+line for a node nobody needs to dial — see [Public address](#public-address).
+
+`logosctl` keeps everything — installed modules, logs, node data — in its
+session directory, `~/.logosctl` (`--config-dir` picks another). The daemon
+log is `~/.logosctl/logs/daemon.log`.
+
+Verify with `logosctl daemon status`; stop with `logosctl daemon stop`.
 
 ## Without Docker: build with Nix
 
@@ -128,12 +136,13 @@ the module was built against:
 ```bash
 git clone https://github.com/logos-co/logos-delivery-module.git
 cd logos-delivery-module
+git checkout v0.3.0
 
 # Runtime + package manager
 nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
 nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
 
-# This module, built from the current checkout
+# This module, built from the checkout
 nix build '.#lgx' -o delivery-lgx
 
 # Its RLN dependency chain
@@ -150,6 +159,10 @@ done
 
 The first build compiles the whole runtime stack through Nix — allow
 ~30–45 min. Later builds are fast.
+
+`.#lgx` is a development package that only the Nix-built runtime above can
+load. To install a local build into a released `logosctl` instead, build
+`.#lgx-portable` and pass it to `logosctl package install`.
 
 ### Start the daemon
 
@@ -185,6 +198,29 @@ logoscore stop
 > blocking Kademlia bootstrap in headless runs — see the
 > [runtime doc-test](https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md).
 
+## Check the node
+
+Once `start` returns, the node joins the network in the background. Within a
+few minutes it should report connected peers:
+
+```bash
+logosctl call delivery_module getNodeInfo Metrics --json \
+  | jq -r .result.value | grep '^libp2p_peers '
+# libp2p_peers 8.0
+```
+
+and advertise its public address in its ENR and listen addresses:
+
+```bash
+logosctl call delivery_module getNodeInfo MyMultiaddresses --json | jq -r .result.value
+# /ip4/<public-ip>/tcp/30303/p2p/16Uiu2…
+```
+
+With Docker, run the same calls through
+`docker exec logos-node logoscore --config-dir /var/lib/logos/config call …`;
+with the Nix build, through `logoscore call …`. See
+[`query-node.md`](./query-node.md) for everything else the node reports.
+
 ## Configuration
 
 The config uses the layered `createNode` shape: `preset` picks the network,
@@ -193,8 +229,8 @@ go in `messagingOverrides`. The repo ships it as
 [`conf/logos-test.json`](../../conf/logos-test.json): Docker mounts it into the
 container at `/conf` (`@/conf/logos-test.json`); with the Nix build, pass the
 path directly (`@conf/logos-test.json`). The prebuilt-binaries path above
-writes the same config inline. Edit it and re-run the boot steps to change
-settings.
+writes the same config inline, plus `nat`. Edit it and re-run the boot steps
+to change settings.
 
 Keep extra keys inside `messagingOverrides` / `channelsOverrides` /
 `kernelConf` — a bare top-level key (even `logLevel`) switches parsing to the
@@ -207,8 +243,80 @@ differ. The full config grammar, including kernel-only nodes
 (`"entryLayer": "kernel"`), is documented in the
 [API reference](api_reference.rst).
 
-The node is now connected to the `logos.test` network. See
-[`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.
+The node's local state goes to the runtime's per-instance persistence
+directory unless `localStoragePath` names another.
+
+### Public address
+
+The node advertises only addresses peers can actually dial. It no longer
+publishes `0.0.0.0` or a placeholder port: until it learns its public address,
+its ENR carries no IP at all and other nodes cannot connect to it.
+
+For a node others should reach, set the address explicitly:
+
+```json
+"messagingOverrides": {
+  "nat": "extip:<public-ip>"
+}
+```
+
+`nat` also takes `"any"` (the default: discover a UPnP or NAT-PMP gateway),
+`"upnp"`, `"pmp"` or `"none"`. Inside Docker, use `extip`. Open the
+TCP p2p port (`tcp-port`, 30303) and the UDP discovery port (`discv5-udp-port`,
+9000) on the host firewall.
+
+### QUIC
+
+QUIC runs next to TCP on its own UDP port. It is off by default; turn it on
+with:
+
+```json
+"messagingOverrides": {
+  "quic-support": true,
+  "quic-port": 60000
+}
+```
+
+Pin `quic-port`: unset, it is OS-assigned. Open that UDP port, and with
+Docker, add `"60000:60000/udp"` to the `ports` in
+[`docker-compose.yml`](../../docker-compose.yml). The node then listens on, and
+advertises, `/udp/60000/quic-v1` as well as TCP.
+
+Enable it only where the UDP port is reachable: peers dial QUIC before TCP,
+and a blocked QUIC port costs each of them a 10 s timeout before falling back.
+
+On Linux, raise the socket receive buffer limit, or the node logs
+`QUIC UDP receive buffer capped below requested size` at every start:
+
+```bash
+sudo sysctl -w net.core.rmem_max=8388608
+```
+
+### RLN
+
+RLN comes from the preset — there is nothing to configure. Both
+`logos.test` and `logos.dev` currently run with it off, so a node needs no
+RLN modules today; `module load` reports `liblogos_rln_module` as skipped and
+carries on. [`networks.md`](./networks.md) tracks each network's RLN state.
+
+On a preset with RLN on, install the RLN modules next to this one before
+`createNode`, or bring-up ends in `Failed`:
+
+- Prebuilt binaries — they are in a separate catalog:
+
+  ```bash
+  logosctl catalog add https://github.com/logos-co/logos-rln-modules/releases/download/index/logos-repo.json
+  logosctl catalog refresh
+  logosctl package install liblogos_rln_module --yes
+  ```
+
+- Nix — the build above already installs them.
+- Docker — set the `RLN_VERSION`, `LEZ_RLN_VERSION` and `LEZ_CORE_VERSION`
+  build args of the [logos-docker](https://github.com/logos-co/logos-docker)
+  image in [`docker-compose.yml`](../../docker-compose.yml).
+
+Follow bring-up with `rlnState`: `Disabled` → `Initializing` → `Ready` |
+`Failed`. See [`rln.md`](./rln.md) for the details.
 
 ## Metrics
 
