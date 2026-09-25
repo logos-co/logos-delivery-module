@@ -33,11 +33,12 @@ The two are separate clusters, so nodes on one do not see nodes on the other.
 | Max message size | 150 KiB | 150 KiB |
 | RLN | off | off |
 | Mix routing | on | on |
+| Mix nodes | the `logos.dev` fleet nodes | the `logos.test` fleet nodes |
 | P2P reliability | on | on |
 | discv5 | on | on |
 | Kademlia discovery | on | on |
 
-Cluster ID and entry nodes are the only differences. Both names also accept a
+Cluster ID, entry nodes and mix nodes are the only differences. Both names also accept a
 dotless spelling (`logosdev`, `logostest`).
 
 The preset also selects the node's RLN settings — registry, epoch size and

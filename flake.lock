@@ -4244,11 +4244,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1790252270,
-        "narHash": "sha256-iXcLPPtqn9hv4xOD5rCCfw2WB+LsLsxXuXoN7vKtDVE=",
+        "lastModified": 1790348933,
+        "narHash": "sha256-eHVlEeLIPptxOAZ0EbzO3XBadWGSy9p2epu4taUcYpQ=",
         "ref": "refs/heads/master",
-        "rev": "d4eb5a0992ff6f72b5c7259438d45e922b3b8a7c",
-        "revCount": 2550,
+        "rev": "6a4c3fda9179e8b2e2e9888343b511b01d9282a6",
+        "revCount": 2567,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
@@ -40846,17 +40846,17 @@
     "nim-ffi": {
       "flake": false,
       "locked": {
-        "lastModified": 1789743092,
-        "narHash": "sha256-PXCMAYcupVAObLZPd6xquL5jIcVWkdkWFSEGuQDZfZQ=",
+        "lastModified": 1790013241,
+        "narHash": "sha256-JOaIKblHnRZNYxS+wKEw0qYWI7KAQhVdPZKgAspH1u4=",
         "owner": "logos-messaging",
         "repo": "nim-ffi",
-        "rev": "b9c4d26de013bba098e810f70074cbba6c5b4c15",
+        "rev": "4c1218626bbbf89e19836845b690937cd255c3f0",
         "type": "github"
       },
       "original": {
         "owner": "logos-messaging",
         "repo": "nim-ffi",
-        "rev": "b9c4d26de013bba098e810f70074cbba6c5b4c15",
+        "rev": "4c1218626bbbf89e19836845b690937cd255c3f0",
         "type": "github"
       }
     },

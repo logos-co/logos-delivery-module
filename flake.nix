@@ -15,7 +15,7 @@
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
-      url = "github:logos-messaging/nim-ffi/b9c4d26de013bba098e810f70074cbba6c5b4c15";
+      url = "github:logos-messaging/nim-ffi/4c1218626bbbf89e19836845b690937cd255c3f0";
       flake = false;
     };
     # The name is load-bearing: the builder resolves each optional_dependencies

@@ -56,6 +56,8 @@ Every shipped preset has RLN **off** (see [`networks.md`](./networks.md)).
 the RLN module's valid-root window is warm — that is a background refresh
 the RLN module does not currently expose a probe for.
 
+Every send queries `get_epoch_quota` and is queued while `remaining` is 0.
+
 ### Presets for a test or local deployment
 
 `LOGOS_DELIVERY_RLN_PRESETS` names a JSON file whose entries are merged over
