@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -8,9 +9,11 @@
 #include <thread>
 #include <vector>
 
+#include <nlohmann/json_fwd.hpp>
 #include <logos_module_context.h>
 #include <logos_result.h>
 
+class PollPump;
 class RlnBridge;
 
 // Everything the delivery library no longer knows about RLN. Resolved from
@@ -319,32 +322,6 @@ public:
      */
     std::string collectOpenMetricsText();
 
-    /**
-     * @brief Completes an outstanding RLN request (see the `rln*Request` events).
-     *
-     * The delivery library outsources RLN operations to an external RLN
-     * module; this module facilitates that message passing. When the delivery
-     * library makes an RLN request, this module emits the matching
-     * `rln*Request` event. This method takes the reqId of the original
-     * request along with the response and passes it on to the library
-     * verbatim — the wire schema is owned by the RLN module and the delivery
-     * library, not modelled here.
-     *
-     * On a node running lez RLN the in-process bridge (see
-     * @ref rlnBridgeEnable) answers each request itself; only the first
-     * response per reqId is accepted, so a second caller of this method is
-     * rejected as a duplicate.
-     *
-     * There is no response deadline to manage on this side: if no response
-     * arrives in time, the delivery library synthesizes a TRANSIENT failure
-     * itself. A response for a request that already timed out (or was never
-     * issued) fails with an error.
-     *
-     * @param reqId Request id from the `rln*Request` event. Ids >= 2^63 appear
-     *        negative here (int64 view of the library's uint64 id); they are
-     *        passed through bit-exactly, so echo them back unchanged.
-     */
-    StdLogosResult rlnRespond(int64_t reqId, const std::string& resultJson);
 
     /**
      * @brief Enables the in-process RLN bridge.
@@ -482,7 +459,7 @@ logos_events:
      * @brief RLN request events, one per ABI function
      * (`liblogosdelivery_rln.h`).
      *
-     * Answer each via @ref rlnRespond with the same `reqId`. The JSON args are
+     * The module answers them itself (src/rln_bridge.h). The JSON args are
      * opaque to this module (RLN module wire schema). `epochTimestamp` is the
      * Unix-seconds epoch/quota timestamp; the trailing `timestamp` is the
      * local emission time, as on every other event.
@@ -567,6 +544,10 @@ private:
 
     // Runs startRlnBackend() for a node whose preset enables RLN.
     std::thread rlnBringUpThread;
+    // Set by the bring-up thread on its way out, so the next method can join
+    // it at once instead of leaving a finished thread around until stop.
+    std::atomic<bool> rlnBringUpDone{false};
+    void reapRlnBringUp();
 
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
     // and started by bringUpRlnBridge().
@@ -590,46 +571,14 @@ private:
     std::shared_ptr<const DeliveryRlnConfig> rlnConfigSnapshot() const;
 
     // Raw FFI context: what the event registry takes.
-    void* deliveryCtx;
-    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), which
-    // every logosdelivery_ctx_* call takes. Held as void* so the C ABI header
-    // stays out of this header's includers. Released with
-    // logosdelivery_ctx_destroy.
-    void* deliveryCtxHandle;
+    // The delivery context and its message queue, pumped on this module's
+    // thread (src/poll_pump.h): replies, events and the library's RLN
+    // questions all arrive through it. Nothing here owns a thread for it.
+    std::unique_ptr<PollPump> pump;
+    void onEvent(uint64_t nameId, const nlohmann::json& payload);
+    void onReverseCall(uint64_t callId, uint64_t nameId, const nlohmann::json& args);
 
     std::mutex createNodeMutex;
 
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
-
-    /**
-     * @brief Global C callback used by liblogosdelivery to report async events.
-     * @param callerRet FFI return code associated with callback dispatch.
-     * @param msg UTF-8 JSON event payload buffer.
-     * @param len Message length in bytes.
-     * @param userData Opaque pointer expected to be `DeliveryModuleImpl*`.
-     */
-    static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
-
-    // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
-    // userData is the DeliveryModuleImpl*.
-    static void start_callback(int errCode, const char* const* reply, const char* errMsg,
-                               void* userData);
-    static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
-                              void* userData);
-
-    // RLN plugin slots installed before createNode, one per ABI function
-    // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by
-    // liblogosdelivery, possibly on a foreign thread. All strings are borrowed
-    // for the duration of the call. userData is the DeliveryModuleImpl*.
-    //
-    // The library's plugin carries no registry or membership, so each
-    // trampoline adds this module's own rlnConfig before forwarding.
-    static void rln_get_membership_state_callback(uint64_t reqId, void* userData);
-    static void rln_get_epoch_quota_callback(uint64_t reqId, uint64_t timestamp,
-                                             void* userData);
-    static void rln_generate_proof_callback(uint64_t reqId, const char* signalHex,
-                                            uint64_t timestamp, void* userData);
-    static void rln_validate_proof_callback(uint64_t reqId, const char* signalHex,
-                                            uint64_t timestamp, const char* proofJson,
-                                            void* userData);
 };

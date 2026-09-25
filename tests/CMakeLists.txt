@@ -10,6 +10,7 @@ logos_test(
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
         ../src/rln_bridge.cpp
+        ../src/poll_pump.cpp
         ../src/rln_presets.cpp
         mocks/delivery_module_events_stub.cpp
     TEST_SOURCES
@@ -43,6 +44,7 @@ if(LIBLOGOSDELIVERY_PATH)
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
             ../src/rln_bridge.cpp
+        ../src/poll_pump.cpp
             ../src/rln_presets.cpp
             mocks/delivery_module_events_stub.cpp
             ${TINYCBOR_SOURCES}

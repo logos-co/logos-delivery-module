@@ -3,7 +3,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include <liblogosdelivery_rln.h> // logosdelivery_rln_response
 #include <logos_async_result.h>   // logos::AsyncResult
 #include <logos_call_error.h>     // logos::CallError
 
@@ -134,10 +133,24 @@ std::string RlnBridge::transportFail(Op op, const std::string& cls,
     return json{{"success", false}, {"error", errorObj.dump()}}.dump();
 }
 
+namespace {
+RlnBridge::Responder& responder()
+{
+    static RlnBridge::Responder r;
+    return r;
+}
+} // namespace
+
+void RlnBridge::setResponder(Responder r)
+{
+    responder() = std::move(r);
+}
+
 void RlnBridge::respond(uint64_t reqId, const std::string& out)
 {
-    // Non-zero: the library already timed out this reqId — nothing to do.
-    (void)logosdelivery_rln_response(reqId, out.c_str());
+    if (responder()) {
+        responder()(reqId, out);
+    }
 }
 
 std::string RlnBridge::callFail(Op op, const logos::CallError& err)

@@ -1,234 +1,247 @@
-// Mock implementation of liblogosdelivery C functions.
+// Mock implementation of liblogosdelivery's poll-mode C ABI.
 // Replaces the real Nim library at link time during unit tests.
 //
-// Callback-taking functions invoke the callback synchronously so the result is
-// observable before the wrapping call returns - matching the storage module
-// mock pattern. For the blocking wrappers (send/subscribe/...) this releases the
-// api_call_handler semaphore before try_acquire_for waits; for the fire-and-
-// forget start()/stop() it means the nodeStarted/nodeStopped event is emitted
-// synchronously during the dispatch call.
+// The library's side of the poll model is a queue of messages and a file
+// descriptor that is readable while the queue is not empty. This mock keeps
+// that queue in memory: every method export answers at once by queueing its
+// REPLY (so the module's pump finds it on the first poll), and tests queue
+// events and reverse calls through mock_rln_state.h to play the library.
 //
-// Upstream generates the logosdelivery_ctx_* calls inline over a CBOR wire; the
-// test stub header declares them instead, and this file implements them
-// directly (extern "C", so no mangling), so no CBOR is involved.
-//
-// Return values and callback messages are controlled via LogosCMockStore.
-// For the int-returning dispatch functions, the return value is the *dispatch*
-// code (0 / RET_OK by default); set a non-zero value to simulate a dispatch
-// failure, in which case no completion callback is fired:
-//   t.mockCFunction("logosdelivery_ctx_start_node").returns(1);  // dispatch fails
-
+// Return values and reply texts are controlled via LogosCMockStore. For the
+// int-returning exports the return value is the *dispatch* code (0 / RET_OK by
+// default); set a non-zero value to simulate a refused submit, in which case
+// no reply is queued:
+//   t.mockCFunction("logosdelivery_start_node").returns(1);  // refused
 #include <logos_clib_mock.h>
+
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <fcntl.h>
+#include <string>
+#include <unistd.h>
+#include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include <liblogosdelivery_poll.h>
 #include "mock_rln_state.h"
 
-namespace delivery_test_rln {
-LogosDeliveryRlnPlugin g_callbacks{};
-void* g_userData = nullptr;
-bool g_callbacksSet = false;
-int g_setCallbacksCalls = 0;
-uint64_t g_lastResponseReqId = 0;
-std::string g_lastResponseJson;
-bool g_responseFired = false;
-std::string g_lastCreateConfigJson;
-} // namespace delivery_test_rln
+using nlohmann::json;
 
-#define RET_OK  0
-#define RET_ERR 1
+namespace {
 
-typedef struct {
-    void* ptr;
-} LogosDeliveryCtx;
+struct Owned {
+    NimFfiMsg msg{};
+    std::vector<uint8_t> bytes;
+};
 
-typedef void (*logosdelivery_create)(int errCode, LogosDeliveryCtx* ctx, const char* errMsg, void* userData);
-typedef void (*logosdelivery_reply)(int errCode, const char* const* reply, const char* errMsg, void* userData);
-// Event listeners.
-typedef void (*logosdelivery_event)(int callerRet, const char* msg, size_t len, void* userData);
+std::deque<Owned> s_queue;
+Owned s_current;              // the message handed out by the last poll
+uint64_t s_nextId = 1;
+uint64_t s_seq = 0;
+int s_pipe[2] = {-1, -1};     // readable while the queue is not empty
+char s_fakeCtx = 0;
+bool s_interpose = false;
+std::string s_interposeWire;
+json s_interposeArgs;
 
-// Sentinel address used as a fake non-null delivery context.
-static char s_fakeCtx = 0;
-
-// Helper: reply RET_OK with the string configured in the mock store.
-static void replyOk(const char* funcName, logosdelivery_reply onReply, void* userData) {
-    if (!onReply) return;
-    const char* msg = LogosCMockStore::instance().getReturnString(funcName);
-    const char* text = msg ? msg : "";
-    onReply(RET_OK, &text, nullptr, userData);
+void ensurePipe()
+{
+    if (s_pipe[0] >= 0) return;
+    if (pipe(s_pipe) != 0) return;
+    fcntl(s_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(s_pipe[1], F_SETFL, O_NONBLOCK);
 }
 
-// A call that takes only a context: record it, reply unless dispatch "fails".
-static int dispatchCall(const char* funcName, logosdelivery_reply onReply, void* userData) {
-    int dispatch = LogosCMockStore::instance().getReturn<int>(funcName);
-    if (dispatch == RET_OK) {
-        replyOk(funcName, onReply, userData);
+void push(uint32_t kind, uint64_t id, uint64_t nameId, int ret, std::vector<uint8_t> bytes)
+{
+    ensurePipe();
+    Owned o;
+    o.bytes = std::move(bytes);
+    o.msg.struct_size = sizeof(NimFfiMsg);
+    o.msg.kind = kind;
+    o.msg.seq = ++s_seq;
+    o.msg.id = id;
+    o.msg.name_id = nameId;
+    o.msg.ret_code = ret;
+    o.msg.payload = o.bytes.empty() ? reinterpret_cast<const uint8_t*>("") : o.bytes.data();
+    o.msg.len = o.bytes.size();
+    s_queue.push_back(std::move(o));
+    char b = 1;
+    (void)!write(s_pipe[1], &b, 1);
+}
+
+// A method export: records the call and queues an OK reply carrying the
+// store's string for this name. `dispatchable` exports (start/stop) also
+// honour a mocked int as the submit code, as the real FFI would refuse.
+int method(const char* name, void* ctx, const uint8_t* req, size_t len, uint64_t* idOut,
+           bool dispatchable = false)
+{
+    if (ctx != &s_fakeCtx || !idOut) return RET_INVALID_CTX;
+    delivery_test_rln::g_lastRequestMethod = name;
+    delivery_test_rln::g_lastRequest =
+        len ? json::from_cbor(std::vector<uint8_t>(req, req + len), true, false) : json::object();
+    if (dispatchable && LogosCMockStore::instance().getReturn<int>(name) != 0) return RET_ERR;
+    if (s_interpose) {
+        s_interpose = false;
+        delivery_test_rln::pushReverseCall(s_interposeWire.c_str(), s_interposeArgs);
     }
-    return dispatch;
+    const uint64_t id = s_nextId++;
+    const char* text = LogosCMockStore::instance().getReturnString(name);
+    push(NIMFFI_MSG_REPLY, id, 0, RET_OK, json::to_cbor(json(text ? text : "")));
+    *idOut = id;
+    return RET_OK;
 }
+
+} // namespace
+
+namespace delivery_test_rln {
+
+nlohmann::json g_lastRequest;
+std::string g_lastRequestMethod;
+std::string g_lastCreateConfigJson;
+bool g_lastCreateRlnPlugin = false;
+uint64_t g_lastReplyCallId = 0;
+int g_lastReplyRet = -1;
+std::string g_lastReplyJson;
+int g_replyCount = 0;
+
+uint64_t pushReverseCall(const char* wire, const json& args)
+{
+    const uint64_t id = s_nextId++;
+    push(NIMFFI_MSG_REVERSE_CALL, id, logosdelivery_name_id(wire), 0, json::to_cbor(args));
+    return id;
+}
+
+void pushEvent(const char* wire, const json& payload)
+{
+    const std::string text = payload.dump();
+    push(NIMFFI_MSG_EVENT, 0, logosdelivery_name_id(wire), 0,
+         std::vector<uint8_t>(text.begin(), text.end()));
+}
+
+void interposeReverseCall(const char* wire, const json& args)
+{
+    s_interpose = true;
+    s_interposeWire = wire;
+    s_interposeArgs = args;
+}
+
+void resetRlnMockState()
+{
+    s_queue.clear();
+    s_interpose = false;
+    g_lastRequest = json();
+    g_lastRequestMethod.clear();
+    g_lastCreateConfigJson.clear();
+    g_lastCreateRlnPlugin = false;
+    g_lastReplyCallId = 0;
+    g_lastReplyRet = -1;
+    g_lastReplyJson.clear();
+    g_replyCount = 0;
+    if (s_pipe[0] >= 0) {
+        char drain[64];
+        while (read(s_pipe[0], drain, sizeof drain) > 0) {}
+    }
+}
+
+} // namespace delivery_test_rln
 
 extern "C" {
 
-int logosdelivery_ctx_create(const char* configJson, logosdelivery_create onCreated, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_create");
-    delivery_test_rln::g_lastCreateConfigJson = configJson ? configJson : "";
-    int ok = LOGOS_CMOCK_RETURN(int, "logosdelivery_ctx_create");
-    if (onCreated) {
-        if (ok) {
-            auto* ctx = static_cast<LogosDeliveryCtx*>(calloc(1, sizeof(LogosDeliveryCtx)));
-            ctx->ptr = &s_fakeCtx;
-            onCreated(RET_OK, ctx, nullptr, userData);
-        } else {
-            onCreated(RET_ERR, nullptr, "mock: create_node fail", userData);
-        }
+int logosdelivery_create_node(const uint8_t* req, size_t len, void** ctxOut, uint64_t* idOut)
+{
+    LOGOS_CMOCK_RECORD("logosdelivery_create_node");
+    delivery_test_rln::g_lastRequestMethod = "logosdelivery_create_node";
+    delivery_test_rln::g_lastRequest =
+        len ? json::from_cbor(std::vector<uint8_t>(req, req + len), true, false) : json::object();
+    delivery_test_rln::g_lastCreateConfigJson = delivery_test_rln::g_lastRequest.value("configJson", "");
+    delivery_test_rln::g_lastCreateRlnPlugin = delivery_test_rln::g_lastRequest.value("rlnPlugin", false);
+    const int ok = LOGOS_CMOCK_RETURN(int, "logosdelivery_create_node");
+    if (!ok || !ctxOut || !idOut) {
+        return RET_ERR;
     }
+    *ctxOut = &s_fakeCtx;
+    *idOut = s_nextId++;
+    push(NIMFFI_MSG_REPLY, *idOut, 0, RET_OK, json::to_cbor(json(true)));
     return RET_OK;
 }
 
-const char* logosdelivery_version(void) {
-    LOGOS_CMOCK_RECORD("logosdelivery_version");
-    return "mock-version";
-}
-
-int logosdelivery_ctx_destroy(LogosDeliveryCtx* ctx) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_destroy");
-    free(ctx);
+int logosdelivery_destroy(void* ctx)
+{
+    LOGOS_CMOCK_RECORD("logosdelivery_destroy");
+    if (ctx != &s_fakeCtx) return RET_INVALID_CTX;
+    s_queue.clear();
     return RET_OK;
 }
 
-uint64_t logosdelivery_add_event_listener(void* /*ctx*/, const char* /*eventName*/,
-                                          logosdelivery_event /*cb*/, void* /*userData*/) {
-    LOGOS_CMOCK_RECORD("logosdelivery_add_event_listener");
-    // Non-zero: a valid listener id.
-    return 1;
-}
-
-int logosdelivery_remove_event_listener(void* /*ctx*/, uint64_t /*listenerId*/) {
-    LOGOS_CMOCK_RECORD("logosdelivery_remove_event_listener");
+int logosdelivery_shutdown(void)
+{
+    LOGOS_CMOCK_RECORD("logosdelivery_shutdown");
     return RET_OK;
 }
 
-int logosdelivery_ctx_start_node(const LogosDeliveryCtx* /*ctx*/, logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_start_node");
-    return dispatchCall("logosdelivery_ctx_start_node", onReply, userData);
-}
-
-int logosdelivery_ctx_stop_node(const LogosDeliveryCtx* /*ctx*/, logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_stop_node");
-    return dispatchCall("logosdelivery_ctx_stop_node", onReply, userData);
-}
-
-int logosdelivery_ctx_send(const LogosDeliveryCtx* /*ctx*/, const char* /*messageJson*/,
-                           logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_send");
-    replyOk("logosdelivery_ctx_send", onReply, userData);
+int logosdelivery_poll(void* ctx, int32_t /*timeoutMs*/, const NimFfiMsg** msg)
+{
+    if (ctx != &s_fakeCtx || !msg) return RET_INVALID_CTX;
+    if (s_queue.empty()) {
+        *msg = nullptr;
+        return RET_TIMEOUT;
+    }
+    s_current = std::move(s_queue.front());
+    s_queue.pop_front();
+    s_current.msg.payload = s_current.bytes.empty() ? reinterpret_cast<const uint8_t*>("")
+                                                    : s_current.bytes.data();
+    char b;
+    (void)!read(s_pipe[0], &b, 1);
+    *msg = &s_current.msg;
     return RET_OK;
 }
 
-int logosdelivery_ctx_subscribe(const LogosDeliveryCtx* /*ctx*/, const char* /*contentTopic*/,
-                                logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_subscribe");
-    replyOk("logosdelivery_ctx_subscribe", onReply, userData);
-    return RET_OK;
+int logosdelivery_poll_fd(void* ctx)
+{
+    if (ctx != &s_fakeCtx) return -1;
+    ensurePipe();
+    return s_pipe[0];
 }
 
-int logosdelivery_ctx_unsubscribe(const LogosDeliveryCtx* /*ctx*/, const char* /*contentTopic*/,
-                                  logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_unsubscribe");
-    replyOk("logosdelivery_ctx_unsubscribe", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_channel_create(const LogosDeliveryCtx* /*ctx*/, const char* /*channelId*/,
-                                     const char* /*contentTopic*/, const char* /*senderId*/,
-                                     uint64_t /*encryptFn*/, uint64_t /*decryptFn*/,
-                                     uint64_t /*cipherUserData*/, logosdelivery_reply onReply,
-                                     void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_channel_create");
-    replyOk("logosdelivery_ctx_channel_create", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_channel_exists(const LogosDeliveryCtx* /*ctx*/, const char* /*channelId*/,
-                                     logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_channel_exists");
-    replyOk("logosdelivery_ctx_channel_exists", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_channel_send(const LogosDeliveryCtx* /*ctx*/, const char* /*channelId*/,
-                                   const char* /*messageJson*/, logosdelivery_reply onReply,
-                                   void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_channel_send");
-    replyOk("logosdelivery_ctx_channel_send", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_channel_close(const LogosDeliveryCtx* /*ctx*/, const char* /*channelId*/,
-                                    logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_channel_close");
-    replyOk("logosdelivery_ctx_channel_close", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_waku_store_query(const LogosDeliveryCtx* /*ctx*/, const char* /*jsonQuery*/,
-                                       const char* /*peerAddr*/, int32_t /*timeoutMs*/,
-                                       logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_waku_store_query");
-    replyOk("logosdelivery_ctx_waku_store_query", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_get_node_info(const LogosDeliveryCtx* /*ctx*/, const char* /*nodeInfoId*/,
-                                    logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_node_info");
-    replyOk("logosdelivery_ctx_get_node_info", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_get_available_node_info_ids(const LogosDeliveryCtx* /*ctx*/,
-                                                  logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_available_node_info_ids");
-    replyOk("logosdelivery_ctx_get_available_node_info_ids", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_get_available_configs(const LogosDeliveryCtx* /*ctx*/,
-                                            logosdelivery_reply onReply, void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_available_configs");
-    replyOk("logosdelivery_ctx_get_available_configs", onReply, userData);
-    return RET_OK;
-}
-
-// RLN surface (liblogosdelivery_rln.h). The install is recorded so tests can
-// fire the stored callback slots, simulating the library requesting an RLN op.
-int logosdelivery_rln_set_plugin(const LogosDeliveryRlnPlugin* cbs, void* user_data) {
-    LOGOS_CMOCK_RECORD("logosdelivery_rln_set_plugin");
-    delivery_test_rln::g_setCallbacksCalls++;
-    if (cbs) {
-        delivery_test_rln::g_callbacks = *cbs;
-        delivery_test_rln::g_userData = user_data;
-        delivery_test_rln::g_callbacksSet = true;
+int logosdelivery_reverse_reply(void* ctx, uint64_t callId, int ret, const uint8_t* payload, size_t len)
+{
+    LOGOS_CMOCK_RECORD("logosdelivery_reverse_reply");
+    if (ctx != &s_fakeCtx) return RET_INVALID_CTX;
+    delivery_test_rln::g_lastReplyCallId = callId;
+    delivery_test_rln::g_lastReplyRet = ret;
+    ++delivery_test_rln::g_replyCount;
+    if (ret == RET_OK) {
+        json v = json::from_cbor(std::vector<uint8_t>(payload, payload + len), true, false);
+        delivery_test_rln::g_lastReplyJson = v.is_string() ? v.get<std::string>() : v.dump();
     } else {
-        // NULL clears the surface (and, in the real library, fails all
-        // in-flight requests).
-        delivery_test_rln::g_callbacks = LogosDeliveryRlnPlugin{};
-        delivery_test_rln::g_userData = nullptr;
-        delivery_test_rln::g_callbacksSet = false;
+        delivery_test_rln::g_lastReplyJson.assign(reinterpret_cast<const char*>(payload), len);
     }
-    return 0;
+    return RET_OK;
 }
 
-// Return value is controllable (default 0 = accepted); set non-zero to
-// simulate an unknown / already-completed reqId:
-//   t.mockCFunction("logosdelivery_rln_response").returns(1);
-int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
-    LOGOS_CMOCK_RECORD("logosdelivery_rln_response");
-    delivery_test_rln::g_lastResponseReqId = req_id;
-    delivery_test_rln::g_lastResponseJson = result_json ? result_json : "";
-    delivery_test_rln::g_responseFired = true;
-    return LOGOS_CMOCK_RETURN(int, "logosdelivery_rln_response");
-}
+#define MOCK_METHOD(name, dispatchable)                                                \
+    int name(void* ctx, const uint8_t* req, size_t len, uint64_t* idOut)                  \
+    {                                                                                  \
+        LOGOS_CMOCK_RECORD(#name);                                                     \
+        return method(#name, ctx, req, len, idOut, dispatchable);                      \
+    }
+MOCK_METHOD(logosdelivery_start_node, true)
+MOCK_METHOD(logosdelivery_stop_node, true)
+MOCK_METHOD(logosdelivery_send, false)
+MOCK_METHOD(logosdelivery_subscribe, false)
+MOCK_METHOD(logosdelivery_unsubscribe, false)
+MOCK_METHOD(logosdelivery_channel_create, false)
+MOCK_METHOD(logosdelivery_channel_exists, false)
+MOCK_METHOD(logosdelivery_channel_send, false)
+MOCK_METHOD(logosdelivery_channel_close, false)
+MOCK_METHOD(logosdelivery_get_available_node_info_ids, false)
+MOCK_METHOD(logosdelivery_get_node_info, false)
+MOCK_METHOD(logosdelivery_get_available_configs, false)
+MOCK_METHOD(waku_store_query, false)
+#undef MOCK_METHOD
 
 } // extern "C"

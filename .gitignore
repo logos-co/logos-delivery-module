@@ -13,3 +13,9 @@ result-*
 doctests/outputs/*
 !doctests/outputs/*.md
 !doctests/outputs/images/
+
+# local node tools and run artefacts
+bin/
+run/
+build-tests.log
+build-unit-tests.log

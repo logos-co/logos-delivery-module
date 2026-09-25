@@ -41,6 +41,7 @@
 // does.
 
 #include <atomic>
+#include <functional>
 #include <cstdint>
 #include <string>
 
@@ -113,6 +114,14 @@ private:
 
     // The single place a reply reaches the library. Static so a completion
     // callback needs no bridge pointer.
+    // How an answer reaches the library: the plugin installs the pump's
+    // reverse reply. Called from whatever thread the RLN module's completion
+    // arrives on; nim-ffi takes it from any thread.
+public:
+    using Responder = std::function<void(uint64_t reqId, const std::string& out)>;
+    static void setResponder(Responder responder);
+
+private:
     static void respond(uint64_t reqId, const std::string& out);
 
     // First line of every op entry point: a bridge that is not serving still

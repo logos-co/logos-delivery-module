@@ -1,16 +1,17 @@
 # RLN bridge
 
 The delivery library (liblogosdelivery) does not implement RLN itself — it
-asks an external RLN module for every RLN operation. Its plugin is
-implementation-agnostic: it never names a registry or a membership, carries
-no configuration and never starts the backend. All of that lives here. This
-module answers those requests in-process: `src/rln_bridge.cpp` adds the
-registry id and rln identifier from the node's preset, calls the co-loaded
-`liblogos_rln_module` through its generated typed client and feeds each reply
-back. Every request is also emitted as an `rln*Request` event for
-observability; `rlnRespond` exists to answer a request from outside, but on a
-bridge-enabled node the bridge answers first and a second response per reqId
-is rejected.
+asks an external RLN module for every RLN operation. It asks through nim-ffi
+**reverse calls**: each question is a `REVERSE_CALL` message the module reads
+off the library's poll queue (`src/poll_pump.cpp`), and the answer goes back
+through `logosdelivery_reverse_reply`. The library is implementation-agnostic:
+it never names a registry or a membership, carries no configuration and never
+starts the backend. All of that lives here. This module answers each question
+in-process: `src/rln_bridge.cpp` adds the registry id and rln identifier from
+the node's preset, calls the co-loaded `liblogos_rln_module` through its
+generated typed client and feeds each reply back, from whatever thread the
+completion arrives on. Every question is also emitted as an `rln*Request`
+event for observability.
 
 A `get_membership_state` reply crosses verbatim. The other three answer the
 result envelope, which the typed client decodes and the bridge re-emits field
@@ -31,15 +32,16 @@ limiting that network runs.
 
 Every shipped preset has RLN **off** (see [`networks.md`](./networks.md)).
 
-- Installing the library's RLN plugin is what makes it mount RLN, and it
-  reads that at node creation, so `createNode` does it before handing the
-  config to the library.
+- The library mounts RLN when the host says it answers RLN questions: the
+  `rlnPlugin` flag in the `logosdelivery_create_node` request, which
+  `createNode` sets from the preset. There is no callback table to install.
 - Bringing the backend up reaches the chain, so `createNode` runs that on its
   own thread and returns without waiting. Follow it with `rlnState` or the
   `rlnStateChanged` event: `Disabled` → `Initializing` → `Ready` | `Failed`.
 - This module starts `liblogos_rln_module` itself; the library no longer
   does. A bridge that cannot come up is not fatal: the `rln*Request` events
-  plus `rlnRespond` remain, but nothing starts the backend on that path.
+  remain and every question is answered with the bridge's `disabled` error,
+  but nothing starts the backend on that path.
 - `liblogos_rln_module` is an `optional_dependency`, so the host neither
   loads it nor requires it: a node whose preset has RLN off runs without the
   RLN stack installed at all. A node on an RLN-enabled preset loads it — and
@@ -48,7 +50,7 @@ Every shipped preset has RLN **off** (see [`networks.md`](./networks.md)).
 - Bring-up fires `start` from this module, then the library's
   `get_membership_state` gate: the node's membership must already be
   `active` or `grace_period` — registration happens out-of-band, through the
-  RLN module, not through this library or its plugin.
+  RLN module, not through this library.
   Without one (e.g. no chain), `start` fails with the RLN module's own
   error carried verbatim into `nodeStarted`.
 
@@ -104,12 +106,12 @@ log — `<run dir>/session/logs/daemon.log` — carries the library's log lines.
 
 ## Time budgets
 
-The library gives each request a budget before synthesizing a TRANSIENT
-failure itself: 80 s for the registry reads (`get_membership_state`,
-`generate_proof`), 10 s for the rest. Each request op is one
-`<name>AsyncResult` call on the generated client carrying its own deadline —
-70 s for the reads (just under the library's budget, so the bridge's answer
-lands first), 10 s for `get_epoch_quota` and `validate_proof` — and the reply
-arrives on the client's completion callback. `start` and `stop` are
-synchronous typed-client calls with no library clock behind them; they carry
-20 s, which is what the protocol default already gave them.
+The library gives each question a backstop of 200 s
+(`-d:ffiReverseCallTimeoutMs`) before failing it itself; the real deadlines
+are the bridge's. Each question is one `<name>AsyncResult` call on the
+generated client carrying its own deadline — 70 s for the registry reads
+(`get_membership_state`, `generate_proof`), 10 s for `get_epoch_quota` and
+`validate_proof` — and the reply arrives on the client's completion callback,
+which answers the library directly. `start` and `stop` are synchronous
+typed-client calls with no library clock behind them; they carry 20 s, which
+is what the protocol default already gave them.
