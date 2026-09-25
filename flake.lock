@@ -42024,11 +42024,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1790182075,
-        "narHash": "sha256-NH+6pZXKqgYShVOiBUweyqUSkAuZUV2IEEumBUge/cA=",
+        "lastModified": 1790355687,
+        "narHash": "sha256-mawrFUpWYHV8Og4hWgioFtJTa/O9vt6LaFId89aZjU0=",
         "ref": "refs/heads/master",
-        "rev": "1524b254d90b70e04bd72bb12ef84acf64705244",
-        "revCount": 2544,
+        "rev": "cbe1bc6c06e4a041d5483b40bffb193ca33c416e",
+        "revCount": 2571,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
