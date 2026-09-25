@@ -1,14 +1,21 @@
 services:
   logos-node:
     build:
-      context: https://github.com/logos-co/logos-docker.git#611a7282926724c1cce8119f07fd7a68b5a9bccd
+      context: https://github.com/logos-co/logos-docker.git#658e4e7ca55991644103f222e80b2d42b45edcbf
+      args:
+        DELIVERY_VERSION: "0.3.0"
     image: logos-node:dev-local
     container_name: logos-node
     volumes:
       - ./conf:/conf:ro
+      - logos-persistence:/var/lib/logos/persistence
     ports:
       - "30303:30303/tcp"   # p2p
+      - "30303:30303/udp"   # p2p, QUIC
       - "9000:9000/udp"     # discv5
-    # The image starts the logoscore daemon (`logoscore -D -m ./modules`).
+    # The image starts the logosctl daemon (`logosctl daemon start`).
     # Loading the module and starting the node is a one-shot step run from
     # the host after `compose up` — see docs/pages/run-node.md.
+
+volumes:
+  logos-persistence:
