@@ -158,10 +158,8 @@ void DeliveryModuleImpl::rln_get_membership_state_callback(uint64_t reqId, void*
     }
     try {
         const auto cfg = impl->rlnConfigSnapshot();
-        if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->getMembershipState(reqId, cfg->registryId,
-                                                cfg->rlnIdentifier);
-        }
+        impl->rlnBridge->getMembershipState(reqId, cfg->registryId,
+                                            cfg->rlnIdentifier);
         impl->dispatchRlnGetMembershipStateRequestEvent(static_cast<int64_t>(reqId),
                                              cfg->registryId,
                                              cfg->rlnIdentifier,
@@ -185,10 +183,8 @@ void DeliveryModuleImpl::rln_get_epoch_quota_callback(uint64_t reqId, uint64_t t
     }
     try {
         const auto cfg = impl->rlnConfigSnapshot();
-        if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->getEpochQuota(reqId, cfg->registryId,
-                                           cfg->rlnIdentifier, timestamp);
-        }
+        impl->rlnBridge->getEpochQuota(reqId, cfg->registryId,
+                                       cfg->rlnIdentifier, timestamp);
         impl->dispatchRlnGetEpochQuotaRequestEvent(static_cast<int64_t>(reqId),
                                       cfg->registryId,
                                       cfg->rlnIdentifier,
@@ -212,11 +208,9 @@ void DeliveryModuleImpl::rln_generate_proof_callback(uint64_t reqId, const char*
     }
     try {
         const auto cfg = impl->rlnConfigSnapshot();
-        if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->generateProof(reqId, cfg->registryId,
-                                           cfg->rlnIdentifier,
-                                           toStringOrEmpty(signalHex), timestamp);
-        }
+        impl->rlnBridge->generateProof(reqId, cfg->registryId,
+                                       cfg->rlnIdentifier,
+                                       toStringOrEmpty(signalHex), timestamp);
         impl->dispatchRlnGenerateProofRequestEvent(static_cast<int64_t>(reqId),
                                       cfg->registryId,
                                       cfg->rlnIdentifier,
@@ -242,12 +236,10 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
     }
     try {
         const auto cfg = impl->rlnConfigSnapshot();
-        if (impl->rlnBridge->enabled()) {
-            impl->rlnBridge->validateProof(reqId, cfg->registryId,
-                                           cfg->rlnIdentifier,
-                                           toStringOrEmpty(signalHex), timestamp,
-                                           toStringOrEmpty(proofJson));
-        }
+        impl->rlnBridge->validateProof(reqId, cfg->registryId,
+                                       cfg->rlnIdentifier,
+                                       toStringOrEmpty(signalHex), timestamp,
+                                       toStringOrEmpty(proofJson));
         impl->dispatchRlnValidateProofRequestEvent(static_cast<int64_t>(reqId),
                                       cfg->registryId,
                                       cfg->rlnIdentifier,
@@ -871,7 +863,7 @@ void DeliveryModuleImpl::stopRlnBackend()
     // This module started the RLN backend, so it stops it too. Stopping one
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
-    if (rlnConfigSnapshot()->enabled && rlnBridge->enabled()) {
+    if (rlnConfigSnapshot()->enabled) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",

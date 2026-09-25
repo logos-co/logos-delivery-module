@@ -84,7 +84,9 @@ public:
      *
      * One such override is `anonymityLevel` — `"None"` (default), `"Preferred"`
      * or `"Required"`. Anything above `"None"` mounts mix and routes sends
-     * through it, so it conflicts with an explicit `"mix": false`:
+     * through it, so it conflicts with an explicit `"mix": false`.
+     * `"Preferred"` falls back to the plain path when mix is unusable;
+     * `"Required"` fails the send instead.
      * @code{.json}
      * {
      *   "mode": "Core",

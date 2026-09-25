@@ -142,27 +142,6 @@
             done
             pending="$next"
           done
-
-          # Use pkg-config to locate the exact libpq from the build environment
-          LIBPQ_LIBDIR=$(pkg-config --variable=libdir libpq 2>/dev/null || true)
-          if [ -n "$LIBPQ_LIBDIR" ] && [ -d "$LIBPQ_LIBDIR" ]; then
-            for f in "$LIBPQ_LIBDIR"/libpq.*; do
-              [ -f "$f" ] && cp -L "$f" $out/lib/ 2>/dev/null || true
-            done
-          fi
-
-          # libpq is loaded at runtime via dlopen/dlsym (not a linked dependency),
-          # so install_name_tool has no effect on macOS — otool -L won't show libpq.
-          # On Linux, dlopen with a bare name searches the calling library's DT_RUNPATH,
-          # so prepending $ORIGIN makes libpq.so discoverable from the same directory.
-          # Prepend, don't replace: the original RUNPATH carries the store paths for 
-          # linked deps.
-          if [ -f "$out/lib/liblogosdelivery.so" ]; then
-            echo "Fixing rpath in liblogosdelivery.so: prepending \$ORIGIN for dlopen libpq resolution"
-            chmod u+w "$out/lib/liblogosdelivery.so"
-            OLD_RPATH=$(patchelf --print-rpath "$out/lib/liblogosdelivery.so")
-            patchelf --set-rpath '$ORIGIN'"''${OLD_RPATH:+:$OLD_RPATH}" "$out/lib/liblogosdelivery.so"
-          fi
         '';
       };
 

@@ -8,6 +8,7 @@ services:
       - ./conf:/conf:ro
     ports:
       - "30303:30303/tcp"   # p2p
+      - "30303:30303/udp"   # quic
       - "9000:9000/udp"     # discv5
     # The image starts the logoscore daemon (`logoscore -D -m ./modules`).
     # Loading the module and starting the node is a one-shot step run from
