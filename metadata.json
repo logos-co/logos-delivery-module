@@ -1,5 +1,6 @@
 {
     "name": "delivery_module",
+    "display_name": "Delivery Module",
     "version": "0.3.0",
     "description": "Logos Delivery Module - High-level message-delivery API",
     "author": "Logos Core Team",
