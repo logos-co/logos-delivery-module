@@ -62,19 +62,13 @@ rebuilds. `docker compose down -v` removes it.
 
 Run a node from released binaries — nothing to build, no repository clone. You
 need one CLI, [`logosctl`](https://github.com/logos-co/logos-logoscore-cli)
-0.3.0: the node daemon, its client, and the package manager in one binary. It
-is published for Linux (`x86_64` / `aarch64`) and macOS (Apple Silicon /
-`aarch64`).
+0.3.0: the node daemon, its client, and the package manager in one binary.
 
 ### Install logosctl
 
-This downloads `logosctl` for your OS/arch into `./bin` (the script pins a
-release — bump `LOGOSCTL_TAG` in it to move to a newer one):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/logos-co/logos-delivery-module/master/scripts/install-node-tools.sh | sh
-export PATH="$PWD/bin:$PATH"
-```
+Download the archive for your system from the
+[logosctl 0.3.0 release](https://github.com/logos-co/logos-logoscore-cli/releases/tag/0.3.0)
+and follow its install steps to put `logosctl` on your `PATH`.
 
 ### Install the module and boot the node
 
