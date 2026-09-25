@@ -201,6 +201,8 @@ Keep extra keys inside `messagingOverrides` / `channelsOverrides` /
 legacy flat shape. Unpinned listening ports are OS-assigned; the config pins
 the p2p ports to match the Docker port mappings.
 
+QUIC is on by default, on UDP at the TCP port; open both.
+
 For the dev network, use [`conf/logos-dev.json`](../../conf/logos-dev.json)
 (preset `logos.dev`) — see [`networks.md`](./networks.md) for how the two
 differ. The full config grammar, including kernel-only nodes
