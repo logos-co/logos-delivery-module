@@ -2,8 +2,7 @@
 
 Runs a delivery node (a Logos Core daemon + `delivery_module` 0.3.0, for Logos
 Testnet v0.3). There is no GUI or HTTP API — interaction is via the daemon's
-CLI (`logosctl`, or `logoscore` in the Docker and Nix setups). You can run it
-three ways:
+CLI (`logosctl`, or `logoscore` in the Nix setup). You can run it three ways:
 
 - [With Docker](#with-docker) — quickest; everything runs in a container.
 - [Prebuilt binaries](#without-docker-prebuilt-binaries) — download release
@@ -29,25 +28,26 @@ cd logos-delivery-module
 docker compose up -d --build
 ```
 
-The image is built from [logos-docker](https://github.com/logos-co/logos-docker)
-with `delivery_module` 0.3.0 from the Logos catalog. The first build runs Nix —
-allow ~30–45 min. Later starts are fast.
+The image is built from [logos-docker](https://github.com/logos-co/logos-docker):
+the `logosctl` daemon with `delivery_module` 0.3.0 from the Logos catalog.
 
 ### Boot the node
 
 The daemon is running; load the module and start the node:
 
 ```bash
-docker exec logos-node logoscore --config-dir /var/lib/logos/config load-module delivery_module --json
-docker exec logos-node logoscore --config-dir /var/lib/logos/config call delivery_module createNode @/conf/logos-test.json --json
-docker exec logos-node logoscore --config-dir /var/lib/logos/config call delivery_module start --json
+docker exec logos-node logosctl module load delivery_module
+docker exec logos-node logosctl call delivery_module createNode @/conf/logos-test.json
+docker exec logos-node logosctl call delivery_module start
 ```
 
 Verify:
 
 ```bash
-docker exec logos-node logoscore --config-dir /var/lib/logos/config status --json
+docker exec logos-node logosctl daemon status
 ```
+
+The daemon logs to the container's output: `docker logs logos-node`.
 
 ### Stop
 
@@ -210,9 +210,8 @@ logosctl call delivery_module getNodeInfo MyMultiaddresses --json | jq -r .resul
 # /ip4/<public-ip>/tcp/30303/p2p/16Uiu2…
 ```
 
-With Docker, run the same calls through
-`docker exec logos-node logoscore --config-dir /var/lib/logos/config call …`;
-with the Nix build, through `logoscore call …`. See
+With Docker, prefix them with `docker exec logos-node`; with the Nix build,
+use `logoscore call …`. See
 [`query-node.md`](./query-node.md) for everything else the node reports.
 
 ## Configuration
@@ -305,9 +304,10 @@ On a preset with RLN on, install the RLN modules next to this one before
   ```
 
 - Nix — the build above already installs them.
-- Docker — set the `RLN_VERSION`, `LEZ_RLN_VERSION` and `LEZ_CORE_VERSION`
-  build args of the [logos-docker](https://github.com/logos-co/logos-docker)
-  image in [`docker-compose.yml`](../../docker-compose.yml).
+- Docker — set the `RLN_VERSION` build arg of the
+  [logos-docker](https://github.com/logos-co/logos-docker) image in
+  [`docker-compose.yml`](../../docker-compose.yml), with `MODULES_REPO`
+  pointing at a catalog that carries the RLN modules.
 
 Follow bring-up with `rlnState`: `Disabled` → `Initializing` → `Ready` |
 `Failed`. See [`rln.md`](./rln.md) for the details.
