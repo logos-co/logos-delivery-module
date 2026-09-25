@@ -207,7 +207,7 @@ and advertise its public address in its ENR and listen addresses:
 
 ```bash
 logosctl call delivery_module getNodeInfo MyMultiaddresses --json | jq -r .result.value
-# /ip4/<public-ip>/tcp/30303/p2p/16Uiu2…
+# /ip4/<public-ip>/tcp/30303/p2p/16Uiu2…,/ip4/<public-ip>/udp/30303/quic-v1/p2p/16Uiu2…
 ```
 
 With Docker, prefix them with `docker exec logos-node`; with the Nix build,
@@ -255,28 +255,25 @@ For a node others should reach, set the address explicitly:
 
 `nat` also takes `"any"` (the default: discover a UPnP or NAT-PMP gateway),
 `"upnp"`, `"pmp"` or `"none"`. Inside Docker, use `extip`. Open the
-TCP p2p port (`tcp-port`, 30303) and the UDP discovery port (`discv5-udp-port`,
-9000) on the host firewall.
+p2p port (`tcp-port`, 30303) for both TCP and UDP (QUIC, below) and the UDP
+discovery port (`discv5-udp-port`, 9000) on the host firewall.
 
 ### QUIC
 
-QUIC runs next to TCP on its own UDP port. It is off by default; turn it on
-with:
+QUIC is on by default and runs next to TCP. Unless `quic-port` names another
+port, it listens on UDP at the TCP port number — `/udp/30303/quic-v1` for the
+config above. [`docker-compose.yml`](../../docker-compose.yml) already
+publishes it.
+
+Peers dial QUIC before TCP, and a QUIC address that does not answer costs each
+of them a 3 s timeout before falling back to TCP. Open the UDP port, or turn
+QUIC off where it cannot be reached:
 
 ```json
 "messagingOverrides": {
-  "quic-support": true,
-  "quic-port": 60000
+  "quic-support": false
 }
 ```
-
-Pin `quic-port`: unset, it is OS-assigned. Open that UDP port, and with
-Docker, add `"60000:60000/udp"` to the `ports` in
-[`docker-compose.yml`](../../docker-compose.yml). The node then listens on, and
-advertises, `/udp/60000/quic-v1` as well as TCP.
-
-Enable it only where the UDP port is reachable: peers dial QUIC before TCP,
-and a blocked QUIC port costs each of them a 10 s timeout before falling back.
 
 On Linux, raise the socket receive buffer limit, or the node logs
 `QUIC UDP receive buffer capped below requested size` at every start:
