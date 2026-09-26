@@ -187,6 +187,13 @@ int logosdelivery_ctx_get_node_info(const LogosDeliveryCtx* /*ctx*/, const char*
     return RET_OK;
 }
 
+int logosdelivery_ctx_get_connection_status(const LogosDeliveryCtx* /*ctx*/,
+                                            logosdelivery_reply onReply, void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_connection_status");
+    replyOk("logosdelivery_ctx_get_connection_status", onReply, userData);
+    return RET_OK;
+}
+
 int logosdelivery_ctx_get_available_node_info_ids(const LogosDeliveryCtx* /*ctx*/,
                                                   logosdelivery_reply onReply, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_available_node_info_ids");

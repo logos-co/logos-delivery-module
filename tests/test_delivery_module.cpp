@@ -506,6 +506,30 @@ LOGOS_TEST(getNodeInfo_returns_mocked_value_for_attribute) {
     delete impl;
 }
 
+// getConnectionStatus
+
+LOGOS_TEST(getConnectionStatus_returns_mocked_status) {
+    auto t = LogosTestContext("delivery_module");
+    auto* impl = createInitializedImpl(t);
+
+    t.mockCFunction("logosdelivery_ctx_get_connection_status").returns("PartiallyConnected");
+    StdLogosResult result = impl->getConnectionStatus();
+
+    LOGOS_ASSERT_TRUE(result.success);
+    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("PartiallyConnected"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_connection_status"));
+
+    delete impl;
+}
+
+LOGOS_TEST(getConnectionStatus_fails_without_createNode) {
+    auto t = LogosTestContext("delivery_module");
+    DeliveryModuleImpl impl;
+    StdLogosResult result = impl.getConnectionStatus();
+    LOGOS_ASSERT_FALSE(result.success);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_get_connection_status"));
+}
+
 // getAvailableConfigs
 
 LOGOS_TEST(getAvailableConfigs_returns_mocked_json) {

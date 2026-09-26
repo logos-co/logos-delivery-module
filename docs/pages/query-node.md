@@ -60,6 +60,17 @@ logoscore call delivery_module getNodeInfo MyPeerId --json | jq -r '.result.valu
 | `MyMultiaddresses` | `getNodeInfo MyMultiaddresses` | Listen multiaddresses         |
 | `Metrics`          | `getNodeInfo Metrics`          | Prometheus text exposition    |
 | `Version`          | `getNodeInfo Version`          | `liblogosdelivery` version    |
+| `IsRunning`        | `getNodeInfo IsRunning`        | `true` once started, else `false` |
+
+## Connection status
+
+```bash
+logoscore call delivery_module getConnectionStatus --json | jq -r '.result.value'
+```
+
+Returns `Disconnected`, `PartiallyConnected` or `Connected`, the same values
+the `connectionStateChanged` event carries. The event fires on transitions
+only; this reads the current status.
 
 The `logoscore` binary version is in `logoscore status --json` →
 `.daemon.version`.
