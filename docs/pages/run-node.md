@@ -208,7 +208,7 @@ the p2p ports to match the Docker port mappings.
 QUIC is on by default, on UDP at the TCP port; open both.
 
 For the dev network, use [`conf/logos-dev.json`](../../conf/logos-dev.json)
-(preset `logos.dev`, with discovery hosted on `libp2p_module`) — see
+(preset `logos.dev`) — see
 [`networks.md`](./networks.md) for how the two differ. The full config
 grammar, including kernel-only nodes (`"entryLayer": "kernel"`), is
 documented in the [API reference](api_reference.rst).
@@ -220,9 +220,17 @@ The node is now connected to the `logos.test` network. See
 
 Enable it with `"pluginKadDiscovery": true` in `messagingOverrides` (or in
 `kernelConf` for a kernel-only node); leave it out to keep the node's internal
-discovery. [`conf/logos-dev.json`](../../conf/logos-dev.json) needs nothing
-but the switch. Extra DHT bootstrap peers go through the node's own
-`kad-bootstrap-node` key.
+discovery. On top of [`conf/logos-dev.json`](../../conf/logos-dev.json) the
+switch is all it takes:
+
+```json
+{
+  "preset": "logos.dev",
+  "messagingOverrides": { "pluginKadDiscovery": true }
+}
+```
+
+Extra DHT bootstrap peers go through the node's own `kad-bootstrap-node` key.
 
 It needs `libp2p_module` installed next to this module (see the Nix build
 above). Without it `start` fails and the node is stopped. On Windows, where
