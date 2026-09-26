@@ -40,6 +40,7 @@ what_you_learn:
   - How a module's declared dependencies have to be installed alongside it
   - How to start the `logoscore` daemon, load a module, introspect it, and call its methods
   - How to create and start a delivery node with `createNode` and `start`
+  - How to tell a created node from a running one, and read its connection status
   - How to shut the daemon down and confirm it has exited
   - How to load the module and create a node on Windows without its optional RLN rate-limiting dependency
 
@@ -271,6 +272,7 @@ sections:
           - "delivery_module"
           - "createNode"
           - "start"
+          - "getConnectionStatus"
 
       - title: "Create the delivery node"
         text: |
@@ -284,12 +286,49 @@ sections:
 
       - run: "sleep 5"
 
+      - title: "Check the node is not running yet"
+        text: |
+          `createNode` only creates the node. The `IsRunning` node info item tells
+          a created node from a started one:
+        run: "./logos/bin/logoscore call delivery_module getNodeInfo IsRunning"
+        code_block: "logoscore call delivery_module getNodeInfo IsRunning"
+        expect_contains:
+          - '"success":true'
+          - '"value":"false"'
+
+      - title: "Read the connection status before start"
+        text: |
+          `getConnectionStatus` reads the status `connectionStateChanged` reports
+          on transitions. A node that is not started is `Disconnected`:
+        run: "./logos/bin/logoscore call delivery_module getConnectionStatus"
+        code_block: "logoscore call delivery_module getConnectionStatus"
+        expect_contains:
+          - '"success":true'
+          - '"value":"Disconnected"'
+
       - title: "Start the delivery node"
         text: |
           `start` boots the node created by `createNode`. This is a synchronous call
           that returns when the node has started:
         run: "./logos/bin/logoscore call delivery_module start"
         code_block: "logoscore call delivery_module start"
+        expect_contains:
+          - '"success":true'
+
+      - title: "Check the node is running"
+        run: "./logos/bin/logoscore call delivery_module getNodeInfo IsRunning"
+        code_block: "logoscore call delivery_module getNodeInfo IsRunning"
+        expect_contains:
+          - '"success":true'
+          - '"value":"true"'
+
+      - title: "Read the connection status after start"
+        text: |
+          Once started, the status follows the node's peers: `Disconnected`,
+          `PartiallyConnected` or `Connected`, depending on how far it has
+          joined the network.
+        run: "./logos/bin/logoscore call delivery_module getConnectionStatus"
+        code_block: "logoscore call delivery_module getConnectionStatus"
         expect_contains:
           - '"success":true'
 
@@ -382,6 +421,16 @@ sections:
         run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module rlnState"
         expect_contains:
           - '"state":"Disabled"'
+
+      - title: "Confirm the node is created but not running"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module getNodeInfo IsRunning"
+        expect_contains:
+          - '"value":"false"'
+
+      - title: "Read the connection status of the stopped node"
+        run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module getConnectionStatus"
+        expect_contains:
+          - '"value":"Disconnected"'
 
       - title: "Stop the Windows daemon"
         run: "run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config stop"
