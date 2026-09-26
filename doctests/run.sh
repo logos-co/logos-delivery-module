@@ -43,8 +43,8 @@ if [ "${VERIFY_BUILD:-0}" = "1" ]; then
   nix build "path:${REPO_ROOT}#lgx" -L
 fi
 
-echo "==> Checking the spec's RLN pins against flake.lock"
-./check-rln-pins.sh
+echo "==> Checking the spec's dependency pins against flake.lock"
+./check-dependency-pins.sh
 
 echo "==> Clearing previous ${OUTPUT_DIR}/"
 # A prior run copies module artifacts out of the read-only nix store, so the

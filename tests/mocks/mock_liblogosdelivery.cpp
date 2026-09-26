@@ -34,6 +34,7 @@ uint64_t g_lastResponseReqId = 0;
 std::string g_lastResponseJson;
 bool g_responseFired = false;
 std::string g_lastCreateConfigJson;
+std::string g_startNodeReplyError;
 } // namespace delivery_test_rln
 
 #define RET_OK  0
@@ -111,6 +112,13 @@ int logosdelivery_remove_event_listener(void* /*ctx*/, uint64_t /*listenerId*/) 
 
 int logosdelivery_ctx_start_node(const LogosDeliveryCtx* /*ctx*/, logosdelivery_reply onReply, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_start_node");
+    const std::string& failure = delivery_test_rln::g_startNodeReplyError;
+    if (!failure.empty()) {
+        if (onReply) {
+            onReply(RET_ERR, nullptr, failure.c_str(), userData);
+        }
+        return RET_OK;
+    }
     return dispatchCall("logosdelivery_ctx_start_node", onReply, userData);
 }
 
@@ -223,6 +231,51 @@ int logosdelivery_rln_set_plugin(const LogosDeliveryRlnPlugin* cbs, void* user_d
 // Return value is controllable (default 0 = accepted); set non-zero to
 // simulate an unknown / already-completed reqId:
 //   t.mockCFunction("logosdelivery_rln_response").returns(1);
+// --- service discovery -------------------------------------------------
+
+int logosdelivery_ctx_get_discovery_requirements(const void* /*ctx*/,
+                                                 logosdelivery_reply onReply,
+                                                 void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_discovery_requirements");
+    // Set under its own key (the reply takes the function's): non-zero makes
+    // the call fail to dispatch.
+    const int dispatch = LogosCMockStore::instance().getReturn<int>(
+        "logosdelivery_ctx_get_discovery_requirements.dispatch");
+    if (dispatch != RET_OK) {
+        return dispatch;
+    }
+    // Unconfigured means a node that wants no plugin, so the many tests that
+    // only need a context keep working without setting a reply.
+    const char* configured = LogosCMockStore::instance().getReturnString(
+        "logosdelivery_ctx_get_discovery_requirements");
+    if (!configured || !*configured) {
+        if (onReply) {
+            const char* reply = R"({"externalServiceDiscovery":false,"bootstrapNodes":[]})";
+            onReply(RET_OK, &reply, nullptr, userData);
+        }
+        return RET_OK;
+    }
+    replyOk("logosdelivery_ctx_get_discovery_requirements", onReply, userData);
+    return RET_OK;
+}
+
+int logosdelivery_ctx_set_service_discovery_plugin(const void* /*ctx*/,
+                                                   uint64_t /*pluginPtr*/,
+                                                   logosdelivery_reply onReply,
+                                                   void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_ctx_set_service_discovery_plugin");
+    replyOk("logosdelivery_ctx_set_service_discovery_plugin", onReply, userData);
+    return RET_OK;
+}
+
+int logosdelivery_ctx_clear_service_discovery_plugin(const void* /*ctx*/,
+                                                     logosdelivery_reply onReply,
+                                                     void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_ctx_clear_service_discovery_plugin");
+    replyOk("logosdelivery_ctx_clear_service_discovery_plugin", onReply, userData);
+    return RET_OK;
+}
+
 int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
     LOGOS_CMOCK_RECORD("logosdelivery_rln_response");
     delivery_test_rln::g_lastResponseReqId = req_id;

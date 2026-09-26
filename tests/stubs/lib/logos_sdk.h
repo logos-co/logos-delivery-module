@@ -9,10 +9,15 @@
 #define __logos_sdk_stub__
 
 #include "liblogos_rln_module_api.h"
+#include "libp2p_module_api.h"
 
 struct LogosModules {
-    LogosModules() : liblogos_rln_module("delivery_module") {}
+    LogosModules()
+        : liblogos_rln_module("delivery_module")
+        , libp2p_module("delivery_module")
+    {}
     LiblogosRlnModule liblogos_rln_module;
+    Libp2pModule libp2p_module;
 };
 
 #endif /* __logos_sdk_stub__ */

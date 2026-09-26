@@ -9,6 +9,7 @@ logos_test(
     NAME delivery_module_tests
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
+        ../src/service_discovery_plugin.cpp
         ../src/rln_bridge.cpp
         ../src/rln_presets.cpp
         mocks/delivery_module_events_stub.cpp
@@ -42,6 +43,7 @@ if(LIBLOGOSDELIVERY_PATH)
         NAME delivery_module_integration_tests
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
+            ../src/service_discovery_plugin.cpp
             ../src/rln_bridge.cpp
             ../src/rln_presets.cpp
             mocks/delivery_module_events_stub.cpp
