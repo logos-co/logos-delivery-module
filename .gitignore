@@ -15,6 +15,7 @@ doctests/outputs/*
 !doctests/outputs/images/
 
 # local node tools and run artefacts
+bin
 bin/
 run/
 build-tests.log

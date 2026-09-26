@@ -18,18 +18,13 @@ endif()
 file(GLOB TINYCBOR_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/lib/tinycbor/*.c)
 
 # Define the module
+# The module is logos-delivery's Nim image (library/logos_module), a static
+# archive exporting the logos_module_* C ABI. It is linked into the plugin,
+# as a Rust cdylib would be, so its lp_* calls reach the protocol layer of
+# the same image. Only the Qt glue is built here.
 logos_module(
     NAME delivery_module
-    SOURCES
-        src/delivery_module_plugin.h
-        src/delivery_module_plugin.cpp
-        src/rln_bridge.h
-        src/rln_bridge.cpp
-        src/rln_presets.h
-        src/rln_presets.cpp
-        ${TINYCBOR_SOURCES}
     EXTERNAL_LIBS
-        logosdelivery
-    INCLUDE_DIRS
-        lib
+        logosdelivery_module
+        rln
 )

@@ -5,58 +5,38 @@ actually mounts.
 
 ## Layers
 
-A message passes through four layers on its way out:
+A message passes through three components on its way out:
 
 ```text
 Logos Core  ·  your module or UI
-     │  calls delivery_module methods
+     │  calls delivery_module methods (lp_* / QtRO, carried by logos-core)
      ▼
-delivery_module            ← this repository, a Qt plugin
-     │  C FFI
-     ▼
-liblogosdelivery
-     │  Nim API
+delivery_module = liblogosdelivery_module.a       ← logos-delivery, in Nim, linked into the plugin
+     │  in-process
      ▼
 logos-delivery             ← the node implementation
 ```
 
-This repository is the middle box. It owns no protocol logic: it adapts the
-universal Logos module API onto `liblogosdelivery`'s C FFI, and turns the
-messages coming back the other way into typed events. Everything about how
-messages actually travel is decided by
-[logos-delivery](https://github.com/logos-messaging/logos-delivery).
+This repository is the packaging: `metadata.json`, the committed
+`delivery_module.lidl`, the presets and docs, and the Nix flake that wraps
+`liblogosdelivery_module` (built by [logos-delivery](https://github.com/logos-messaging/logos-delivery)
+from `library/logos_module`) in logos-core's uniform plugin glue
+(`interface: "cdylib"`). There is no C++ in between: the Nim archive exports
+both the library's nim-ffi surface and the `logos_module_*` C ABI, and is
+linked into the plugin as a Rust cdylib would be, so its calls to other
+modules (`lp_*`) reach the protocol layer of the same image.
 
 ## Threads
 
-`liblogosdelivery` is built on nim-ffi's **poll model**: every export answers
-with a message on one queue per node, and a file descriptor is readable while
-the queue holds something. This module never receives a callback. nim-ffi's own host-side queue reader
-(`nim_ffi::Host`, `lib/nim_ffi_host.hpp`, vendored from nim-ffi's `host/`)
-reads that queue on the module's own thread: a
-`QSocketNotifier` drains it from the Qt event loop between calls, and a method
-call pumps inline until its reply arrives — serving events and the library's
-RLN questions on the way, so nothing can deadlock waiting for something this
-thread must itself deliver.
-
-
-The process holds three threads of its own: the Qt main thread (module
-methods, the pump), logos-protocol's transport thread (`client_thread_entry`),
-and liblogosdelivery's one nim-ffi thread running the node
-(`typedthreads::threadProcWrapper`) — plus, transiently, the RLN bring-up
-thread `createNode` spawns, reaped by the next method call once it is done.
-`ps -M` may also show a `_pthread_wqthread`: a libdispatch worker the system
-keeps parked, not one of ours. Measured under `logoscore` on
-macOS (`ps -M` on the module's host process, node created, started, one send):
-
-| delivery_module host | threads |
-| --- | --- |
-| released 0.2.1, callback model, no RLN | 4 (+ nim-ffi's event thread) |
-| callback model with the RLN bridge (two worker lanes) | 6 |
-| this build, poll model, RLN mounted and answering | **3** (+ a libdispatch worker the system parks) |
-
-That division is why the configuration you pass to `createNode` is handed
-through verbatim — logos-delivery owns the grammar, and this module does not
-interpret it.
+A method call arrives on the host's thread as `logos_module_dispatch`,
+becomes a CBOR request to the library's own export, and that thread polls
+the node's context until the reply (nim-ffi's poll model, used in-process).
+Events reach the host's emit callback straight from the node's thread. The
+node asks `liblogos_rln_module` its RLN questions itself, through logos-core's
+`lp_*` C ABI, from its own thread. The process holds three threads of its
+own: the host's, logos-protocol's, and the node's. `start` and `stop` return
+at once; their outcome is the `nodeStarted` / `nodeStopped` event the node
+emits itself, because a stop can take longer than any call budget.
 
 ## What a node mounts
 

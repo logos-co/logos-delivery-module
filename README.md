@@ -16,8 +16,7 @@ nix build
 ```
 
 The result will include:
-- `/lib/delivery_module_plugin.dylib` (or `.so` on Linux) - The Delivery module plugin
-- `/lib/liblogosdelivery.dylib` (or `.so` on linux) - The logos-delivery library
+- `/lib/delivery_module_plugin.dylib` (or `.so` on Linux) - the module: logos-delivery's Nim image (exporting the `logos_module_*` C ABI) linked into the Qt plugin glue logos-core loads
 - `/lib/librln.dylib` (or `.so` in linux) - Zerokit's RLN library
 - `/lib/libpq.dylib` (or `.so` on Linux) - PostgreSQL runtime library
 - `/lib/libpq.5.dylib` (or `.so.5` on Linux)
@@ -59,8 +58,7 @@ When built with Nix, the module produces:
 ```
 result/
 └── lib/
-    ├── delivery_module_plugin.dylib  # or .so on Linux — Logos module plugin
-    ├── liblogosdelivery.dylib
+    ├── delivery_module_plugin.dylib  # or .so on Linux — the module (Nim image + plugin glue)
     ├── librln.dylib
     ├── libpq.dylib                   # or .so on Linux — PostgreSQL runtime
     └── libpq.5.dylib                 # or .so.5 on Linux
@@ -77,7 +75,7 @@ result/
 - Qt6 (qtbase)
 - Qt6 Remote Objects (qtremoteobjects)
 - logos-liblogos (provided via Nix)
-- logos-cpp-sdk (provided via Nix)
+- logos-module-builder (provided via Nix); the module's code lives in logos-delivery (`library/logos_module`), built on logos-nim-sdk
 - logos-delivery / liblogosdelivery — target (provided via Nix)
 - PostgreSQL (libpq) — runtime dependency, bundled from the logos-delivery package
 

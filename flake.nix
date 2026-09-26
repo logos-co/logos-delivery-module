@@ -13,7 +13,7 @@
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     # The poll-mode library: branch poll-ffi (nim-ffi dual/6-reverse, RLN
     # questions as reverse calls).
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poll-ffi&rev=492f16ef930acb3c62016883f44f4d65a5cc93f9";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poll-ffi&rev=136b774a2ac6d6cede35f8f95856403d35120503";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
@@ -38,13 +38,10 @@
         configFile = ./metadata.json;
         flakeInputs = inputs;
         externalLibInputs = {
-          logosdelivery = {
+          # The module image: liblogosdelivery plus the logos_module_* exports.
+          logosdelivery_module = {
             input = inputs.logos-delivery;
-            packages.default = "liblogosdelivery";
-            systems.x86_64-windows = {
-              system = "x86_64-linux";
-              packages.default = "liblogosdelivery-windows-x86_64";
-            };
+            packages.default = "liblogosdelivery_module";
           };
           # Bundle librln.dylib alongside liblogosdelivery.dylib so the transitive
           # dep resolves at runtime (and during logos-cpp-generator dlopen).

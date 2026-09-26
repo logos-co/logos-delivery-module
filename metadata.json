@@ -6,17 +6,16 @@
     "author": "Logos Core Team",
     "type": "core",
     "category": "protocol",
-    "interface": "universal",
+    "interface": "cdylib",
     "main": "delivery_module_plugin",
     "codegen": {
-        "impl_header": "delivery_module_plugin.h"
+        "lidl": "delivery_module.lidl"
     },
     "dependencies": [],
-    "optional_dependencies": ["liblogos_rln_module"],
+    "optional_dependencies": [
+        "liblogos_rln_module"
+    ],
     "include": [
-        "liblogosdelivery.so",
-        "liblogosdelivery.dylib",
-        "liblogosdelivery.dll",
         "librln.so",
         "librln.dylib",
         "librln.dll",
@@ -29,11 +28,11 @@
     "capabilities": [],
     "nix": {
         "packages": {
-            "runtime": ["nlohmann_json"]
+            "runtime": []
         },
         "external_libraries": [
             {
-                "name": "logosdelivery",
+                "name": "logosdelivery_module",
                 "build_command": "true"
             },
             {
@@ -41,7 +40,7 @@
             }
         ],
         "cmake": {
-            "extra_include_dirs": ["lib"]
+            "extra_include_dirs": []
         }
     }
 }
