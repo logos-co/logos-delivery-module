@@ -138,6 +138,8 @@ extern "C"
                                                     void* user_data);
   int logosdelivery_ctx_get_node_info(const LogosDeliveryCtx* ctx, const char* nodeInfoId,
                                       LogosDeliveryReplyFn on_reply, void* user_data);
+  int logosdelivery_ctx_get_connection_status(const LogosDeliveryCtx* ctx,
+                                              LogosDeliveryReplyFn on_reply, void* user_data);
   int logosdelivery_ctx_get_available_configs(const LogosDeliveryCtx* ctx,
                                               LogosDeliveryReplyFn on_reply, void* user_data);
 
