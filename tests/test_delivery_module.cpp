@@ -1145,6 +1145,17 @@ LOGOS_TEST(discovery_from_requirements_rejects_bad_input) {
     }
 }
 
+LOGOS_TEST(discovery_from_requirements_tells_a_request_from_an_unreadable_reply) {
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_FALSE(delivery_discovery::fromRequirements("not json", nlohmann::json::object(), req).empty());
+    LOGOS_ASSERT_FALSE(req.requested);
+    LOGOS_ASSERT_FALSE(delivery_discovery::fromRequirements(
+        R"({"externalServiceDiscovery":true,"bootstrapNodes":["/ip4/10.0.0.2/tcp/1"]})",
+        nlohmann::json::object(), req).empty());
+    LOGOS_ASSERT_TRUE(req.requested);
+    LOGOS_ASSERT_FALSE(req.enabled);
+}
+
 // createNode: plugin path, driven by the node's answer
 
 LOGOS_TEST(createNode_installs_plugin_when_the_node_asks_for_it) {
@@ -1169,10 +1180,37 @@ LOGOS_TEST(createNode_skips_plugin_when_the_node_wants_none) {
     LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
 }
 
-LOGOS_TEST(createNode_fails_on_a_malformed_requirements_reply) {
+// A reply that cannot be read, or no reply at all, says nothing about a
+// request: no plugin, and createNode goes on. A node that did ask for one
+// then fails its start in logos-delivery.
+LOGOS_TEST(createNode_installs_no_plugin_on_an_unreadable_requirements_reply) {
     auto t = LogosTestContext("delivery_module");
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
     t.mockCFunction("logosdelivery_ctx_get_discovery_requirements").returns("nonsense");
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+}
+
+LOGOS_TEST(createNode_installs_no_plugin_when_the_requirements_call_fails) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+    t.mockCFunction("logosdelivery_ctx_get_discovery_requirements.dispatch").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_discovery_requirements"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+}
+
+// Asked for, but the node's own data is unusable: fail where the reason is
+// still clear.
+LOGOS_TEST(createNode_fails_when_a_requested_plugin_cannot_be_set_up) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+    t.mockCFunction("logosdelivery_ctx_get_discovery_requirements")
+        .returns(R"({"externalServiceDiscovery":true,"bootstrapNodes":["/ip4/10.0.0.2/tcp/1"]})");
 
     DeliveryModuleImpl impl;
     const auto r = impl.createNode(R"({"preset":"logos.test"})");

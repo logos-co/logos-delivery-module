@@ -754,14 +754,23 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         bindApiCall(logosdelivery_ctx_get_discovery_requirements, asCtx(deliveryCtxHandle)));
     delivery_discovery::PluginRequest discovery;
     std::string failure;
+    // Fail only when the node asked for a plugin and we cannot provide it. An
+    // unanswered or unreadable reply installs none: a node that did ask then
+    // fails its start, which logos-delivery enforces without a plugin.
     if (!result.success) {
-        failure = "discovery requirements: " + result.error;
+        fprintf(stderr, "DeliveryModuleImpl: no discovery requirements, no plugin installed: %s\n",
+                result.error.c_str());
     } else {
         const std::string requirements = result.value.is_string()
             ? result.value.get<std::string>()
             : result.value.dump();
         failure = delivery_discovery::fromRequirements(
             requirements, delivery_discovery::libp2pEnvConfig(), discovery);
+        if (!failure.empty() && !discovery.requested) {
+            fprintf(stderr, "DeliveryModuleImpl: discovery requirements not understood, no plugin installed: %s\n",
+                    failure.c_str());
+            failure.clear();
+        }
     }
     if (failure.empty() && discovery.enabled) {
         failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);

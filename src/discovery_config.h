@@ -15,6 +15,8 @@
 namespace delivery_discovery {
 
 struct PluginRequest {
+    /// The node asked for a plugin, whether or not its data is usable.
+    bool requested{false};
     bool enabled{false};
     /// Complete JSON object text for libp2p_module's createNode. Empty unless
     /// `enabled`.
@@ -110,6 +112,7 @@ inline std::string fromRequirements(const std::string& reply, const nlohmann::js
     if (!req["externalServiceDiscovery"].get<bool>()) {
         return {};
     }
+    out.requested = true;
 
     nlohmann::json nodes = nlohmann::json::array();
     if (req.contains("bootstrapNodes")) {

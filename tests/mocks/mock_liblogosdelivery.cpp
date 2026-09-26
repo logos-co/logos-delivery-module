@@ -237,6 +237,13 @@ int logosdelivery_ctx_get_discovery_requirements(const void* /*ctx*/,
                                                  logosdelivery_reply onReply,
                                                  void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_get_discovery_requirements");
+    // Set under its own key (the reply takes the function's): non-zero makes
+    // the call fail to dispatch.
+    const int dispatch = LogosCMockStore::instance().getReturn<int>(
+        "logosdelivery_ctx_get_discovery_requirements.dispatch");
+    if (dispatch != RET_OK) {
+        return dispatch;
+    }
     // Unconfigured means a node that wants no plugin, so the many tests that
     // only need a context keep working without setting a reply.
     const char* configured = LogosCMockStore::instance().getReturnString(
