@@ -13,7 +13,7 @@
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     # The poll-mode library: branch poll-ffi (nim-ffi dual/6-reverse, RLN
     # questions as reverse calls).
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poll-ffi&rev=22d54bf512d5e7b8c0629875121736f8b04e86b8";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=poll-ffi&rev=b85626910073962c000c8f077285fa3d5da06049";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
