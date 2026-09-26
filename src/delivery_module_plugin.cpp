@@ -1006,6 +1006,24 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
     return outcome;
 }
 
+StdLogosResult DeliveryModuleImpl::getConnectionStatus() {
+    if (!deliveryCtx) {
+        fprintf(stderr, "DeliveryModuleImpl: Cannot get connection status - context not initialized. Call createNode first.\n");
+        return {false, {}, "Context not initialized"};
+    }
+    auto outcome = callApiRetValue(
+        "get_connection_status",
+        CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_ctx_get_connection_status, asCtx(deliveryCtxHandle)));
+
+    if (!outcome.success) {
+        fprintf(stderr, "DeliveryModuleImpl: Get connection status failed, reason: %s\n",
+                outcome.error.c_str());
+    }
+
+    return outcome;
+}
+
 StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
 

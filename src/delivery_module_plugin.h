@@ -295,6 +295,18 @@ public:
     StdLogosResult getNodeInfo(const std::string& nodeInfoId);
 
     /**
+     * @brief Returns the node's current connection status.
+     *
+     * `connectionStateChanged` fires on transitions only, so a caller that
+     * starts listening after the node settled reads the current status here.
+     *
+     * @return `Disconnected`, `PartiallyConnected` or `Connected` on success,
+     *         `Disconnected` while the node is not started. Fails before
+     *         @ref createNode has run.
+     */
+    StdLogosResult getConnectionStatus();
+
+    /**
      * @brief Information about the available configuration parameters for `createNode`.
      */
     StdLogosResult getAvailableConfigs();
