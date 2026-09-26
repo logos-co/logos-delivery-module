@@ -340,6 +340,45 @@ LOGOS_TEST(discovery_start_timeout_is_a_notice_and_never_reissued) {
     }
 }
 
+// The plugin's entry points are called from Nim over the C ABI: a malformed
+// record must not reach std::terminate, and whatever throws is an error reply.
+LOGOS_TEST(discovery_lookup_survives_a_record_with_a_non_string_peer_id) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule::lookupRecords = nlohmann::json::parse(
+        R"([{"peerId":42,"addrs":[]},{"peerId":null},{"peerId":"16Uiu2HAmA","addrs":[]}])");
+    Libp2pModule libp2p("delivery_module");
+    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+
+    char err[1024] = {};
+    char* out = nullptr;
+    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+    const int rc = vt->lookup(vt->pluginCtx, "service:/logos/delivery", 0, &out, err, sizeof(err));
+    Libp2pModule::reset();
+
+    LOGOS_ASSERT_EQ(rc, LD_DISCO_OK);
+    LOGOS_ASSERT_TRUE(out != nullptr);
+    LOGOS_ASSERT_EQ(nlohmann::json::parse(out).size(), size_t{3});
+    vt->freeString(vt->pluginCtx, out);
+}
+
+LOGOS_TEST(discovery_entry_point_turns_an_exception_into_an_error) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule::lookupThrows = true;
+    Libp2pModule libp2p("delivery_module");
+    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+
+    char err[1024] = {};
+    char* out = nullptr;
+    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+    const int rc = vt->lookup(vt->pluginCtx, "service:/logos/delivery", 0, &out, err, sizeof(err));
+    Libp2pModule::reset();
+
+    LOGOS_ASSERT_EQ(rc, LD_DISCO_ERROR);
+    LOGOS_ASSERT_TRUE(std::string(err).find("stub lookup threw") != std::string::npos);
+}
+
 // An explicit refusal is not a start in flight: the bring-up fails, and the
 // next call may try again.
 LOGOS_TEST(discovery_start_refusal_fails_the_bring_up) {

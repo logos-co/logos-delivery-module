@@ -6,6 +6,7 @@
 #ifndef __libp2p_module_api_stub__
 #define __libp2p_module_api_stub__
 
+#include <stdexcept>
 #include <string>
 
 #include <logos_call_error.h>
@@ -29,6 +30,10 @@ public:
     static inline std::string startErrorCode;
     /// Every start call, so a test can tell whether one was issued again.
     static inline int startCalls = 0;
+    /// What discoLookup answers with, as a successful reply, when not null.
+    static inline nlohmann::json lookupRecords;
+    /// When true, discoLookup throws, as a malformed reply would.
+    static inline bool lookupThrows = false;
 
     static void reset()
     {
@@ -37,6 +42,8 @@ public:
         startError.clear();
         startErrorCode.clear();
         startCalls = 0;
+        lookupRecords = nullptr;
+        lookupThrows = false;
     }
 
     StdLogosResult createNode(const std::string&, logos::CallError* err = nullptr, int = 0)
@@ -77,7 +84,13 @@ public:
     { return StdLogosResult{}; }
     StdLogosResult discoLookup(const std::string&, const std::string&,
                                logos::CallError* = nullptr, int = 0)
-    { return StdLogosResult{}; }
+    {
+        if (lookupThrows) {
+            throw std::runtime_error("stub lookup threw");
+        }
+        return lookupRecords.is_null() ? StdLogosResult{}
+                                       : StdLogosResult{true, lookupRecords, ""};
+    }
     StdLogosResult discoRandomLookup(logos::CallError* = nullptr, int = 0)
     { return StdLogosResult{}; }
 };
