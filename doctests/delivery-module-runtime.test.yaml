@@ -134,8 +134,8 @@ sections:
           those references and never fetches them; building `#lib` brings
           them into the store.
         run: |
-          nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=7d78bb772b8c728ca3ea881158057f6faf9eda24#lgx' -o libp2p-lgx
-          nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=7d78bb772b8c728ca3ea881158057f6faf9eda24#lib' --no-link
+          nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lgx' -o libp2p-lgx
+          nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lib' --no-link
         post_text: "One more `.lgx` package:"
         extra_run:
           run: "ls libp2p-lgx/*.lgx"

@@ -13,13 +13,6 @@
     },
     "dependencies": [],
     "optional_dependencies": ["libp2p_module", "liblogos_rln_module"],
-    "dependency_overrides": {
-        "libp2p_module": {
-            "input": "libp2p_module",
-            "file": "src/plugin.h",
-            "impl_class": "Libp2pModuleImpl"
-        }
-    },
     "include": [
         "liblogosdelivery.so",
         "liblogosdelivery.dylib",

@@ -19,7 +19,7 @@
       flake = false;
     };
     # The name is load-bearing: the builder resolves the metadata.json
-    # dependency of the same name, here via its dependency_overrides entry.
+    # dependency of the same name and generates the client from its LIDL.
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
     # The name is load-bearing: the builder resolves each optional_dependencies
     # entry as the input of that name and generates bindings from its LIDL.
