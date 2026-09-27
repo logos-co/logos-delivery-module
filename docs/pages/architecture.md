@@ -48,3 +48,22 @@ metrics keep working.
 The concrete configuration shapes — an app developer's full stack, a node
 operator's public service node, a self-hosted network — are documented with
 `createNode` in the [API reference](api_reference.rst).
+
+## Plugin-hosted discovery
+
+With `pluginKadDiscovery` on, logos-delivery delegates kademlia service
+discovery to this module, which hosts it on `libp2p_module`. After `createNode`
+the module asks the node (`logosdelivery_get_discovery_requirements`) whether a
+plugin is expected and which DHT bootstrap peers its configuration resolved,
+presets included. It sets `libp2p_module` up from that answer — the peers as
+`bootstrapNodes`, `mountKad` and `mountServiceDiscovery` on — laid over
+libp2p's own `LIBP2P_MODULE_CONFIG`.
+
+libp2p is first contacted on the first discovery call after `start`, not at
+`createNode`, so a missing module or a bad bootstrap set surfaces there. Only
+the first bootstrap peer is handed over: libp2p dials the set inside a fixed
+10 s call budget, which two DNS-resolved peers exceed.
+
+Set `LD_DISCO_TRACE` to a file path to log every call across the plugin
+boundary; logos-core discards a module's stderr, so that file is the only view
+into it.

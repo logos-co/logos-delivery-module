@@ -119,8 +119,9 @@ directly on the host.
 
 Build the `logoscore` CLI (the headless runtime) and the `lgpm` package
 manager from their flakes, then build and install this module's `.lgx`.
-`liblogos_rln_module` is an optional dependency, so a node whose preset has
-RLN off needs nothing else; an RLN-enabled one also needs
+Both of its dependencies are optional. `libp2p_module` hosts external service
+discovery: a node configured for it (`plugin-kad-discovery`) fails to start
+without it, any other node runs without it. An RLN-enabled preset also needs
 `liblogos_rln_module` and `liblogos_lez_rln_module`. This flake
 re-exports their `.lgx`s from its own locked inputs, so they match the revs
 the module was built against:
@@ -136,6 +137,9 @@ nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
 # This module, built from the current checkout
 nix build '.#lgx' -o delivery-lgx
 
+# libp2p, for external service discovery
+nix build '.#libp2p_module-lgx' -o libp2p-lgx
+
 # Its RLN dependency chain
 nix build '.#liblogos_rln_module-lgx' -o rln-lgx
 nix build '.#liblogos_lez_rln_module-lgx' -o lez-rln-lgx
@@ -143,7 +147,7 @@ nix build '.#liblogos_lez_rln_module-lgx' -o lez-rln-lgx
 # Seed the modules dir with the bundled capability module, then install
 mkdir -p modules
 cp -RL ./logos/modules/. ./modules/
-for pkg in lez-rln-lgx rln-lgx delivery-lgx; do
+for pkg in libp2p-lgx lez-rln-lgx rln-lgx delivery-lgx; do
   ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file "$pkg"/*.lgx
 done
 ```
@@ -204,13 +208,39 @@ the p2p ports to match the Docker port mappings.
 QUIC is on by default, on UDP at the TCP port; open both.
 
 For the dev network, use [`conf/logos-dev.json`](../../conf/logos-dev.json)
-(preset `logos.dev`) — see [`networks.md`](./networks.md) for how the two
-differ. The full config grammar, including kernel-only nodes
-(`"entryLayer": "kernel"`), is documented in the
-[API reference](api_reference.rst).
+(preset `logos.dev`) — see
+[`networks.md`](./networks.md) for how the two differ. The full config
+grammar, including kernel-only nodes (`"entryLayer": "kernel"`), is
+documented in the [API reference](api_reference.rst).
 
 The node is now connected to the `logos.test` network. See
 [`query-node.md`](./query-node.md) to read its peer ID, ENR, and metrics.
+
+### Plugin-hosted discovery
+
+Enable it with `"pluginKadDiscovery": true` in `messagingOverrides` (or in
+`kernelConf` for a kernel-only node); leave it out to keep the node's internal
+discovery. On top of [`conf/logos-dev.json`](../../conf/logos-dev.json) the
+switch is all it takes:
+
+```json
+{
+  "preset": "logos.dev",
+  "messagingOverrides": { "pluginKadDiscovery": true }
+}
+```
+
+Extra DHT bootstrap peers go through the node's own `kad-bootstrap-node` key.
+
+It needs `libp2p_module` installed next to this module (see the Nix build
+above). Without it `start` fails and the node is stopped. On Windows, where
+`libp2p_module` has no build, use internal discovery.
+
+`LIBP2P_MODULE_CONFIG` (inline JSON or a file path) is optional. Set it only to
+override libp2p's own defaults, for example its listen addresses when other
+nodes must reach it: unset, it listens on an ephemeral loopback port.
+
+How it works is described in [Architecture](./architecture.md#plugin-hosted-discovery).
 
 ## Metrics
 

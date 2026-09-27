@@ -11,6 +11,7 @@
 #include <logos_module_context.h>
 #include <logos_result.h>
 
+class DeliveryServiceDiscoveryPlugin;
 class RlnBridge;
 
 // Everything the delivery library no longer knows about RLN. Resolved from
@@ -543,6 +544,11 @@ private:
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
 
+    // stop()'s RLN half, also run by the stop after a failed start. Serialized
+    // because both may join the bring-up thread at once.
+    void stopRlnBackend();
+    std::mutex rlnBackendStopMutex;
+
     // Undoes installRlnPlugin: clears the library's RLN plugin and resets both
     // copies of the RLN config. A no-op unless this instance installed it.
     // Publishes no state transition; that is the caller's call.
@@ -589,7 +595,9 @@ private:
     // ordered against the writers -- the RLN trampolines.
     std::shared_ptr<const DeliveryRlnConfig> rlnConfigSnapshot() const;
 
-    // Raw FFI context: what the event registry takes.
+    // Raw FFI context: what the event registry takes. Every other call goes
+    // through the generated logosdelivery_ctx_* wrappers, which want the handle
+    // below instead.
     void* deliveryCtx;
     // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), which
     // every logosdelivery_ctx_* call takes. Held as void* so the C ABI header
@@ -599,7 +607,26 @@ private:
 
     std::mutex createNodeMutex;
 
+    // Non-null only when the node config asked for plugin-hosted kad discovery.
+    // Outlives every plugin call: logos-delivery releases the registration when
+    // the context is destroyed, which happens in this class's destructor.
+    std::unique_ptr<DeliveryServiceDiscoveryPlugin> discoPlugin;
+
+    /// Frees discoPlugin once no entry point is running, or leaks it rather
+    /// than freeing it under an abandoned thread that is still inside it.
+    void releaseServiceDiscoveryPlugin();
+    static constexpr std::chrono::seconds kQuiesceTimeout{5};
+
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
+
+    /**
+     * @brief Installs the discovery vtable for a node configured with
+     *        `pluginKadDiscovery`; runs in createNode, before start.
+     *
+     * @param libp2pConfig JSON for libp2p's createNode (see discovery_config.h).
+     * @return the failure reason, or empty on success.
+     */
+    std::string installServiceDiscoveryPlugin(const std::string& libp2pConfig);
 
     /**
      * @brief Global C callback used by liblogosdelivery to report async events.
@@ -612,10 +639,23 @@ private:
 
     // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
     // userData is the DeliveryModuleImpl*.
+    // Both take the generated reply shape -- `reply` points at the result on
+    // success, `errMsg` carries the reason otherwise -- and ignore
+    // RET_STALE_WARN, the non-terminal progress tick a long start/stop emits.
     static void start_callback(int errCode, const char* const* reply, const char* errMsg,
                                void* userData);
     static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
                               void* userData);
+
+    // A failed start leaves the node half up, so start_callback stops it
+    // again -- from our own thread, as the library's refuses re-entrant calls.
+    void stopAfterFailedStart();
+    // Disarms stopAfterFailedStart and joins a stop it already issued. start()
+    // calls it before arming a new one, releaseNode() before the context goes.
+    void joinFailedStartStop();
+    std::mutex failedStartStopMutex;
+    bool failedStartStopArmed{false};
+    std::thread failedStartStopThread;
 
     // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by

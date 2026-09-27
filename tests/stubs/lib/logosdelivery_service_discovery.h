@@ -1,0 +1,122 @@
+// Stub of logos-delivery's library/logosdelivery_service_discovery.h for unit
+// tests; keep in sync when bumping logos-delivery. The generated entry points
+// come from the stub liblogosdelivery.h instead of generated/.
+
+#pragma once
+#ifndef __logosdelivery_service_discovery__
+#define __logosdelivery_service_discovery__
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "liblogosdelivery.h"
+
+#define LD_DISCO_ABI_VERSION 1
+
+#define LD_DISCO_OK 0
+#define LD_DISCO_ERROR 1
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+  typedef int (*LdDiscoStartFn)(void *pluginCtx, char *errBuf, size_t errBufLen);
+
+  typedef int (*LdDiscoStopFn)(void *pluginCtx, char *errBuf, size_t errBufLen);
+
+  typedef int (*LdDiscoLookupFn)(void *pluginCtx,
+                                 const char *key,
+                                 int64_t limit,
+                                 char **outJson,
+                                 char *errBuf,
+                                 size_t errBufLen);
+
+  typedef int (*LdDiscoRandomLookupFn)(void *pluginCtx,
+                                       char **outJson,
+                                       char *errBuf,
+                                       size_t errBufLen);
+
+  typedef void (*LdDiscoFreeStringFn)(void *pluginCtx, char *s);
+
+  typedef int (*LdDiscoStartAdvertisingFn)(void *pluginCtx,
+                                           const char *key,
+                                           const uint8_t *data,
+                                           size_t dataLen,
+                                           const uint8_t *record,
+                                           size_t recordLen,
+                                           char *errBuf,
+                                           size_t errBufLen);
+
+  typedef int (*LdDiscoStopAdvertisingFn)(void *pluginCtx,
+                                          const char *key,
+                                          char *errBuf,
+                                          size_t errBufLen);
+
+  typedef int (*LdDiscoRegisterInterestFn)(void *pluginCtx,
+                                           const char *key,
+                                           char *errBuf,
+                                           size_t errBufLen);
+
+  typedef int (*LdDiscoUnregisterInterestFn)(void *pluginCtx,
+                                             const char *key,
+                                             char *errBuf,
+                                             size_t errBufLen);
+
+  typedef struct
+  {
+    uint32_t abiVersion;
+    void *pluginCtx;
+    uint32_t requestTimeoutMs;
+
+    LdDiscoStartFn start;
+    LdDiscoStopFn stop;
+    LdDiscoLookupFn lookup;
+    LdDiscoRandomLookupFn randomLookup;
+    LdDiscoFreeStringFn freeString;
+    LdDiscoStartAdvertisingFn startAdvertising;
+    LdDiscoStopAdvertisingFn stopAdvertising;
+    LdDiscoRegisterInterestFn registerInterest;
+    LdDiscoUnregisterInterestFn unregisterInterest;
+  } LdServiceDiscoveryPlugin;
+
+  /* Generated logosdelivery_ctx_* entry points, in nim-ffi's CBOR ABI shape. */
+  typedef void (*LogosDeliveryServiceDiscoveryReplyFn)(int err_code,
+                                                       const char *const *reply,
+                                                       const char *err_msg,
+                                                       void *user_data);
+
+  int logosdelivery_ctx_set_service_discovery_plugin(
+      const LogosDeliveryCtx *ctx,
+      uint64_t pluginPtr,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data);
+
+  int logosdelivery_ctx_clear_service_discovery_plugin(
+      const LogosDeliveryCtx *ctx,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data);
+
+  int logosdelivery_ctx_get_discovery_requirements(
+      const LogosDeliveryCtx *ctx,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data);
+
+  /* Installs (or replaces) the plugin of the node `ctx`. Typed wrapper over
+   * logosdelivery_ctx_set_service_discovery_plugin, which takes the plugin
+   * address as a uint64_t. */
+  static inline int logosdelivery_install_service_discovery_plugin(
+      const LogosDeliveryCtx *ctx,
+      const LdServiceDiscoveryPlugin *plugin,
+      LogosDeliveryServiceDiscoveryReplyFn on_reply,
+      void *user_data)
+  {
+    return logosdelivery_ctx_set_service_discovery_plugin(
+        ctx, (uint64_t)(uintptr_t)plugin, on_reply, user_data);
+  }
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __logosdelivery_service_discovery__ */

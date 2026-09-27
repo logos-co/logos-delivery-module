@@ -18,6 +18,9 @@
       url = "github:logos-messaging/nim-ffi/4c1218626bbbf89e19836845b690937cd255c3f0";
       flake = false;
     };
+    # The name is load-bearing: the builder resolves the metadata.json
+    # dependency of the same name and generates the client from its LIDL.
+    libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
     # The name is load-bearing: the builder resolves each optional_dependencies
     # entry as the input of that name and generates bindings from its LIDL.
     liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=65697028baffc072e1aeebaec7c7e35e7e12cab1&dir=logos-rln-module";
@@ -142,8 +145,8 @@
         '';
       };
 
-      # The RLN dependency chain, re-exported from this flake's own locked
-      # inputs, for a node whose preset enables RLN.
+      # The optional module dependencies (libp2p, the RLN chain), re-exported
+      # at the revs this flake locks.
       rlnModule = inputs.liblogos_rln_module;
       lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
     in
@@ -151,6 +154,11 @@
       packages = builtins.mapAttrs (system: pkgs: pkgs // {
         "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
         "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
-      }) module.packages;
+      } // (
+        # libp2p_module has no build for every system (none for Windows).
+        if inputs.libp2p_module.packages ? ${system}
+        then { "libp2p_module-lgx" = inputs.libp2p_module.packages.${system}.lgx; }
+        else { }
+      )) module.packages;
     };
 }

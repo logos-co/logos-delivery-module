@@ -12,7 +12,7 @@
         "impl_header": "delivery_module_plugin.h"
     },
     "dependencies": [],
-    "optional_dependencies": ["liblogos_rln_module"],
+    "optional_dependencies": ["libp2p_module", "liblogos_rln_module"],
     "include": [
         "liblogosdelivery.so",
         "liblogosdelivery.dylib",

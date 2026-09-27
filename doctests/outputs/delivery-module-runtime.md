@@ -14,7 +14,7 @@ delivery-module commit end-to-end through the headless `logoscore` runtime:
    module you run is built from exactly what is checked out here, not the latest
    published release.
 3. Install the `.lgx` into a `./modules` directory with `lgpm`, together with
-   the RLN modules `delivery_module` depends on.
+   the optional `libp2p_module` and RLN modules `delivery_module` can use.
 4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
    it with `module-info`, call `createNode` with a Waku node config, then call
    `start` — verifying the module actually runs and boots a delivery node.
@@ -25,8 +25,9 @@ keeps the delivery module loadable and callable.
 
 On Windows, CI cross-builds the module and uses a staged native `logoscore`
 host to create a node without RLN (Rate Limiting Nullifier), the optional
-rate-limiting feature. That leg uses an offline config, verifies RLN stays
-disabled, and stops before `start`, which requires network access.
+rate-limiting feature, and without `libp2p_module`, which has no Windows
+build. That leg uses an offline config, verifies RLN stays disabled, and
+stops before `start`, which requires network access.
 
 **What you'll build:** This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows.
 
@@ -95,7 +96,7 @@ The executable is at `./lgpm/bin/lgpm`.
 
 Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
 output and install it into a local `./modules` directory with `lgpm`, along
-with the RLN modules it depends on. Every module built with
+with the optional `libp2p_module` and RLN modules. Every module built with
 [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
 exposes a ready-to-install `#lgx`.
 
@@ -121,7 +122,36 @@ The `.lgx` package is now under `./delivery-lgx/`:
 ls delivery-lgx/*.lgx
 ```
 
-### 3.2 Build the RLN dependency chain
+### 3.2 Build the libp2p dependency
+
+`libp2p_module` is an optional dependency of `delivery_module`: it
+hosts external service discovery. A node configured for that
+(`plugin-kad-discovery`) fails to start without it; any other node
+runs without it. Build it at the rev this module's `flake.lock` pins
+for it. From a clone, this flake re-exports the
+same package — `nix build '.#libp2p_module-lgx'` — which reads the
+pin straight out of the lock.
+
+The second command builds the module's `#lib` without linking it.
+The `.lgx` is a development package: its libraries load their own
+dependencies (on Linux, `libtinycbor`) from the Nix store rather
+than carrying them. The package is compressed, so Nix cannot see
+those references and never fetches them; building `#lib` brings
+them into the store.
+
+```bash
+nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lgx' -o libp2p-lgx
+nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lib' --no-link
+
+```
+
+One more `.lgx` package:
+
+```bash
+ls libp2p-lgx/*.lgx
+```
+
+### 3.3 Build the RLN dependency chain
 
 `liblogos_rln_module` is an optional dependency of `delivery_module`:
 a node whose preset has RLN off loads without it. A node on an
@@ -148,7 +178,7 @@ Two more `.lgx` packages, one per module in the chain:
 ls rln-lgx/*.lgx lez-rln-lgx/*.lgx
 ```
 
-### 3.3 Seed the modules directory with the bundled capability module
+### 3.4 Seed the modules directory with the bundled capability module
 
 `delivery_module` is loaded through the host's capability layer, so the
 modules directory also needs the `capability_module` that ships with
@@ -160,22 +190,23 @@ cp -RL ./logos/modules/. ./modules/
 
 ```
 
-### 3.4 Install the .lgx packages with lgpm
+### 3.5 Install the .lgx packages with lgpm
 
 Install the freshly-built packages into `./modules`. These are all
 `core` modules, so they go to `--modules-dir`. The packages are
 unsigned (local dev builds), so we pass `--allow-unsigned`.
 
 ```bash
+./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file libp2p-lgx/*.lgx
 ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file lez-rln-lgx/*.lgx
 ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file rln-lgx/*.lgx
 ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx
 
 ```
 
-### 3.5 Confirm the install
+### 3.6 Confirm the install
 
-Scan the directory and confirm all four modules landed:
+Scan the directory and confirm all five modules landed:
 
 ```bash
 ./lgpm/bin/lgpm --modules-dir ./modules list
@@ -269,8 +300,9 @@ logoscore list-modules
 
 ### 4.6 Load the module
 
-Load `delivery_module` into the running daemon. Its RLN dependency is
-optional, so the host loads this module alone:
+Load `delivery_module` into the running daemon. Its dependencies are
+all optional, so the host loads this module plus whichever of them are
+installed:
 
 ```bash
 logoscore load-module delivery_module

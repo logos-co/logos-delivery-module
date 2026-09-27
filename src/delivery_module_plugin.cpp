@@ -14,13 +14,16 @@
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
-#include <boost/beast/core/detail/base64.hpp>
+#include "base64.h"
 
 #include "api_call_handler.h"
+#include "discovery_config.h"
+#include "service_discovery_plugin.h"
 #include "rln_bridge.h"
 #include "rln_presets.h"
 
-// Generated at build time from metadata.json#optional_dependencies; defines the
+// Generated at build time from metadata.json#dependencies and
+// #optional_dependencies; defines the
 // LogosModules aggregate behind LogosModuleContext::modules().
 #include "logos_sdk.h"
 extern "C" {
@@ -33,23 +36,6 @@ extern "C" {
 }
 
 namespace {
-namespace b64 = boost::beast::detail::base64;
-
-std::string base64Encode(const std::vector<uint8_t>& data) {
-    std::string out;
-    out.resize(b64::encoded_size(data.size()));
-    out.resize(b64::encode(out.data(), data.data(), data.size()));
-    return out;
-}
-
-std::vector<uint8_t> base64Decode(const std::string& encoded) {
-    std::vector<uint8_t> out;
-    out.resize(b64::decoded_size(encoded.size()));
-    auto [written, read] = b64::decode(out.data(), encoded.data(), encoded.size());
-    out.resize(written);
-    return out;
-}
-
 int64_t currentTimestampNs() {
     // std::chrono, not clock_gettime(CLOCK_REALTIME): mingw declares neither,
     // and system_clock is the portable spelling of the same reading.
@@ -76,7 +62,7 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
     if (!payloadValue.is_string()) {
         return {};
     }
-    return base64Decode(payloadValue.get<std::string>());
+    return delivery_base64::decode(payloadValue.get<std::string>());
 }
 
 // Wire names of the events this module forwards. nim-ffi 0.3.0 replaced the
@@ -108,6 +94,39 @@ void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
     }
     impl->nodeStarted(errCode == RET_OK, replyText(errCode, reply, errMsg),
                       currentTimestampNs());
+    if (errCode != RET_OK) {
+        impl->stopAfterFailedStart();
+    }
+}
+
+void DeliveryModuleImpl::stopAfterFailedStart()
+{
+    std::lock_guard<std::mutex> lock(failedStartStopMutex);
+    if (!failedStartStopArmed) {
+        return;
+    }
+    failedStartStopArmed = false;
+    // The same two halves as stop(): the node, then the RLN backend this
+    // module started for it.
+    failedStartStopThread = std::thread([this] {
+        if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
+            fprintf(stderr, "DeliveryModuleImpl: failed to stop the node after a failed start\n");
+            return;
+        }
+        stopRlnBackend();
+    });
+}
+
+void DeliveryModuleImpl::joinFailedStartStop()
+{
+    {
+        std::lock_guard<std::mutex> lock(failedStartStopMutex);
+        failedStartStopArmed = false;
+    }
+    // Disarmed under the lock, so no thread can be assigned after this point.
+    if (failedStartStopThread.joinable()) {
+        failedStartStopThread.join();
+    }
 }
 
 void DeliveryModuleImpl::stop_callback(int errCode, const char* const* reply,
@@ -265,6 +284,23 @@ StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
     return {true, {}};
 }
 
+void DeliveryModuleImpl::releaseServiceDiscoveryPlugin()
+{
+    if (!discoPlugin) {
+        return;
+    }
+    // A timed-out call may leave a thread inside the plugin; leak the object
+    // rather than free it under that thread.
+    if (discoPlugin->quiesce(kQuiesceTimeout)) {
+        discoPlugin.reset();
+        return;
+    }
+    fprintf(stderr,
+            "DeliveryModuleImpl: service discovery plugin still in use; "
+            "leaking it rather than freeing it under a live thread\n");
+    (void)discoPlugin.release();
+}
+
 DeliveryModuleImpl::~DeliveryModuleImpl()
 {
     releaseNode();
@@ -295,6 +331,10 @@ void DeliveryModuleImpl::abortRln()
 
 void DeliveryModuleImpl::releaseNode()
 {
+    // A stop issued after a failed start holds the context handle, and joins
+    // the bring-up thread itself: finish it first, so that join is not racing
+    // the one below.
+    joinFailedStartStop();
     // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
     // run while it is still in flight. A no-op when no thread was started.
     joinRlnBringUp();
@@ -315,6 +355,11 @@ void DeliveryModuleImpl::releaseNode()
         deliveryCtxHandle = nullptr;
         deliveryCtx = nullptr;
     }
+
+    // After ctx_destroy, unlike RLN above: destroying the node joins the
+    // discovery worker, the only caller of the plugin, so no new call can
+    // arrive once it returns.
+    releaseServiceDiscoveryPlugin();
 }
 
 StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
@@ -702,6 +747,41 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
     }
 
+    // Only the node knows whether it wants a discovery plugin and which DHT
+    // peers its config resolved; ask it.
+    const StdLogosResult result = callApiRetValue(
+        "get_discovery_requirements", CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_ctx_get_discovery_requirements, asCtx(deliveryCtxHandle)));
+    delivery_discovery::PluginRequest discovery;
+    std::string failure;
+    // Fail only when the node asked for a plugin and we cannot provide it. An
+    // unanswered or unreadable reply installs none: a node that did ask then
+    // fails its start, which logos-delivery enforces without a plugin.
+    if (!result.success) {
+        fprintf(stderr, "DeliveryModuleImpl: no discovery requirements, no plugin installed: %s\n",
+                result.error.c_str());
+    } else {
+        const std::string requirements = result.value.is_string()
+            ? result.value.get<std::string>()
+            : result.value.dump();
+        failure = delivery_discovery::fromRequirements(
+            requirements, delivery_discovery::libp2pEnvConfig(), discovery);
+        if (!failure.empty() && !discovery.requested) {
+            fprintf(stderr, "DeliveryModuleImpl: discovery requirements not understood, no plugin installed: %s\n",
+                    failure.c_str());
+            failure.clear();
+        }
+    }
+    if (failure.empty() && discovery.enabled) {
+        failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
+    }
+    if (!failure.empty()) {
+        // A node configured for plugin discovery cannot start without a
+        // registered plugin, so a half-built context is worse than none:
+        // unwind it and report, rather than failing later at start().
+        return releaseAndFail("service discovery setup failed: " + failure);
+    }
+
     if (rlnPreset.enabled) {
         rlnBringUpThread = std::thread([this] {
             const std::string failure = startRlnBackend();
@@ -716,6 +796,38 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     return {true, {}};
 }
 
+std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string& libp2pConfig)
+{
+    if (!deliveryCtx) {
+        return "context not initialized";
+    }
+
+    // libp2p is not contacted here: outbound calls fail on the Qt main thread.
+    // Without a framework (unit tests) there is no modules(); pass null.
+    Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
+    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2p, libp2pConfig);
+
+    // The vtable is borrowed for the duration of the call and copied by the
+    // node, but discoPlugin owns the object every entry point dispatches on,
+    // so it must outlive the context -- hence a member, not a local.
+    const StdLogosResult installed = callApiRetVoid(
+        "install service discovery plugin", CALLBACK_TIMEOUT,
+        [this](void* ticket) {
+            return logosdelivery_install_service_discovery_plugin(
+                static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle),
+                discoPlugin->vtable(),
+                replyTrampoline,
+                ticket);
+        });
+
+    if (!installed.success) {
+        return installed.error;
+    }
+
+    fprintf(stderr, "DeliveryModuleImpl: service discovery plugin installed\n");
+    return {};
+}
+
 StdLogosResult DeliveryModuleImpl::start()
 {
     fprintf(stderr, "DeliveryModuleImpl::start called\n");
@@ -724,9 +836,16 @@ StdLogosResult DeliveryModuleImpl::start()
         return {false, {}, "Context not initialized"};
     }
 
+    joinFailedStartStop();
+    {
+        std::lock_guard<std::mutex> lock(failedStartStopMutex);
+        failedStartStopArmed = true;
+    }
+
     // Node start can block for a long time (relay reconnect backoff), so return
     // once dispatched. Completion arrives via nodeStarted.
     if (logosdelivery_ctx_start_node(asCtx(deliveryCtxHandle), start_callback, this) != RET_OK) {
+        joinFailedStartStop();
         return {false, {}, "failed to initiate start"};
     }
     return {true, {}};
@@ -743,18 +862,23 @@ StdLogosResult DeliveryModuleImpl::stop()
     if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
+    stopRlnBackend();
+    return {true, {}};
+}
 
+void DeliveryModuleImpl::stopRlnBackend()
+{
+    std::lock_guard<std::mutex> lock(rlnBackendStopMutex);
     // This module started the RLN backend, so it stops it too. Stopping one
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
-    if (rlnConfig->enabled) {
+    if (rlnConfigSnapshot()->enabled) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
                     failure.c_str());
         }
     }
-    return {true, {}};
 }
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)
@@ -768,7 +892,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 
     nlohmann::json messageObj;
     messageObj["contentTopic"] = contentTopic;
-    messageObj["payload"] = base64Encode(payload);
+    messageObj["payload"] = delivery_base64::encode(payload);
     messageObj["ephemeral"] = false;
 
     std::string messageJson = messageObj.dump();
@@ -924,7 +1048,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
     }
 
     nlohmann::json messageObj;
-    messageObj["payload"] = base64Encode(payload);
+    messageObj["payload"] = delivery_base64::encode(payload);
     messageObj["ephemeral"] = false;
 
     std::string messageJson = messageObj.dump();
