@@ -11,7 +11,7 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=feat/mix-rln-module-interop&rev=9659de37011fd6e5dc64b23872baab1e2bc12b6f";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=feat/mix-rln-module-interop&rev=9e2696d05fde72de5dec99f6c12fbf8d92b5e53e";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
@@ -26,7 +26,7 @@
     liblogos_rln_module.url = "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=63bb541d18c53e3c6e261421ee9eb8c2fd8445ca&dir=logos-rln-module";
     # Retain the fixture-tested registry/wallet chain, including the fee-cap fix.
     liblogos_rln_module.inputs.liblogos_lez_rln_module.url =
-      "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=2f5ba3c5574a879adf245ce01400e0c3b0c5a1ff&dir=logos-lez-rln-module";
+      "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=63bb541d18c53e3c6e261421ee9eb8c2fd8445ca&dir=logos-lez-rln-module";
     liblogos_rln_module.inputs.liblogos_lez_rln_module.inputs.logos-execution-zone.url =
       "github:logos-blockchain/logos-execution-zone/f0778a4316daa4065ff18a77f4f98706149c240e";
   };

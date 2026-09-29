@@ -4246,18 +4246,18 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1789703180,
-        "narHash": "sha256-CBdSD00pDKqAeU5K8VO7e9FbQC9ZloAu985u3xZ9AKM=",
+        "lastModified": 1790633223,
+        "narHash": "sha256-Ub0t6JNw5z09ci6wOufNnblFZpULfAgLC8xMTy4Ko88=",
         "ref": "feat/mix-wire-binding",
-        "rev": "2f5ba3c5574a879adf245ce01400e0c3b0c5a1ff",
-        "revCount": 57,
+        "rev": "63bb541d18c53e3c6e261421ee9eb8c2fd8445ca",
+        "revCount": 76,
         "type": "git",
         "url": "https://github.com/richard-ramos/logos-rln-modules"
       },
       "original": {
         "dir": "logos-lez-rln-module",
         "ref": "feat/mix-wire-binding",
-        "rev": "2f5ba3c5574a879adf245ce01400e0c3b0c5a1ff",
+        "rev": "63bb541d18c53e3c6e261421ee9eb8c2fd8445ca",
         "type": "git",
         "url": "https://github.com/richard-ramos/logos-rln-modules"
       }
@@ -41128,18 +41128,18 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1790712835,
-        "narHash": "sha256-NCJ1+YRfNLKS3uZ0UrvatgsuElWbslHxMLp52F5j6T4=",
+        "lastModified": 1790718609,
+        "narHash": "sha256-yg+gUyfdaphtHYOAX2qesEKhbP1AxOB210roJCKpqcY=",
         "ref": "feat/mix-rln-module-interop",
-        "rev": "9659de37011fd6e5dc64b23872baab1e2bc12b6f",
-        "revCount": 2580,
+        "rev": "9e2696d05fde72de5dec99f6c12fbf8d92b5e53e",
+        "revCount": 2581,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
         "ref": "feat/mix-rln-module-interop",
-        "rev": "9659de37011fd6e5dc64b23872baab1e2bc12b6f",
+        "rev": "9e2696d05fde72de5dec99f6c12fbf8d92b5e53e",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
