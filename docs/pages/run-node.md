@@ -278,10 +278,10 @@ sudo sysctl -w net.core.rmem_max=8388608
 
 ### RLN
 
-RLN comes from the preset — there is nothing to configure. Both
-`logos.test` and `logos.dev` currently run with it off, so a node needs no
-RLN modules today; `module load` reports `liblogos_rln_module` as skipped and
-carries on. [`networks.md`](./networks.md) tracks each network's RLN state.
+RLN comes from the preset — there is nothing to configure. `logos.dev` runs
+with it on, with proof validation; `logos.test` runs with it off, so a node
+there needs no RLN modules and `module load` reports `liblogos_rln_module` as
+skipped. [`networks.md`](./networks.md) tracks each network's RLN state.
 
 On a preset with RLN on, install the RLN modules next to this one before
 `createNode`, or bring-up ends in `Failed`:

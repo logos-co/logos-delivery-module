@@ -860,8 +860,7 @@ LOGOS_TEST(createNode_without_an_rln_preset_installs_no_plugin) {
     delete impl;
 }
 
-// The shipped presets all carry RLN off, so naming one must not turn it on.
-LOGOS_TEST(builtin_presets_leave_rln_off) {
+LOGOS_TEST(builtin_logos_test_preset_leaves_rln_off) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
@@ -870,6 +869,27 @@ LOGOS_TEST(builtin_presets_leave_rln_off) {
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.test"})").success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
     LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
+}
+
+LOGOS_TEST(builtin_logos_dev_preset_turns_rln_on_with_validation) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    std::string error;
+    const RlnPresetEntry entry = resolveRlnPreset("logos.dev", error);
+    LOGOS_ASSERT_TRUE(error.empty());
+    LOGOS_ASSERT_TRUE(entry.enabled);
+    LOGOS_ASSERT_TRUE(entry.enableValidation);
+    LOGOS_ASSERT_FALSE(entry.registryId.empty());
+    LOGOS_ASSERT_TRUE(entry.epochSizeSec > 0);
+    LOGOS_ASSERT_EQ(entry.rlnIdentifier, std::string(kLogosDeliveryRlnIdentifier));
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.dev"})").success);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    LOGOS_ASSERT_EQ(impl.rlnState().value.value("registryId", ""), entry.registryId);
+    LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
 }
 
 LOGOS_TEST(an_rln_preset_installs_the_plugin_and_reports_bring_up) {

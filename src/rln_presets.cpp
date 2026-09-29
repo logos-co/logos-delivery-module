@@ -38,12 +38,16 @@ std::string knownPresetNameList()
 }
 
 // The identifier is this application's and is known; the registry and epoch
-// size belong to a deployment, and neither fleet runs RLN yet to have one.
+// size belong to a deployment, and only logos.dev runs RLN yet to have one.
 const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
         {"", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
-        {"logos.dev", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
+        {"logos.dev", RlnPresetEntry{.enabled = true,
+                                     .enableValidation = true,
+                                     .registryId = "logos:testnet:TBD",
+                                     .rlnIdentifier = kLogosDeliveryRlnIdentifier,
+                                     .epochSizeSec = 600}},
         {"logos.test", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
     };
     return table;

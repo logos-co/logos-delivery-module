@@ -31,19 +31,20 @@ The two are separate clusters, so nodes on one do not see nodes on the other.
 | Entry nodes | `delivery-0{1,2}.<dc>.logos.dev.status.im` | `node-0{1,2}.<dc>.logos.test.status.im` |
 | Sharding | auto, 8 shards | auto, 8 shards |
 | Max message size | 150 KiB | 150 KiB |
-| RLN | off | off |
+| RLN | **on**, with validation | off |
 | Mix routing | on | on |
 | P2P reliability | on | on |
 | discv5 | on | on |
 | Kademlia discovery | on | on |
 
-Cluster ID and entry nodes are the only differences. Both names also accept a
+Cluster ID, entry nodes and RLN are the only differences. Both names also accept a
 dotless spelling (`logosdev`, `logostest`).
 
 The preset also selects the node's RLN settings — registry, epoch size and
 application identifier — which is why RLN needs no configuration of its own.
-Both fleets run with it off; see [`rln.md`](./rln.md) for how a preset turns
-it on and how a local deployment supplies its own.
+`logos.dev` runs with it on and `logos.test` with it off; see
+[`rln.md`](./rln.md) for how a preset turns it on and how a local deployment
+supplies its own.
 
 The live node list and status for both fleets is at
 [fleets.logos.co](https://fleets.logos.co/).
