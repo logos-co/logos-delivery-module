@@ -24,6 +24,7 @@
 #define NIMFFI_RET_OK 0
 #define NIMFFI_RET_ERR 1
 #define NIMFFI_RET_MISSING_CALLBACK 2
+#define NIMFFI_RET_STALE_WARN 3
 #define RET_OK NIMFFI_RET_OK
 #define RET_ERR NIMFFI_RET_ERR
 #define RET_MISSING_CALLBACK NIMFFI_RET_MISSING_CALLBACK
@@ -40,6 +41,7 @@ typedef void (*LogosDeliveryCreateFn)(int err_code, LogosDeliveryCtx* ctx,
 // on success; `err_msg` carries a failure.
 typedef void (*LogosDeliveryReplyFn)(int err_code, const char* const* reply,
                                      const char* err_msg, void* user_data);
+
 
 #ifdef __cplusplus
 extern "C"
@@ -86,6 +88,12 @@ extern "C"
   // <bool> }). Replies with a request ID that tracks its delivery.
   int logosdelivery_ctx_send(const LogosDeliveryCtx* ctx, const char* messageJson,
                              LogosDeliveryReplyFn on_reply, void* user_data);
+  int logosdelivery_ctx_waku_mix_get_peer_record(const LogosDeliveryCtx* ctx,
+                                                 LogosDeliveryReplyFn on_reply,
+                                                 void* user_data);
+  int logosdelivery_ctx_waku_mix_add_peer(const LogosDeliveryCtx* ctx, const char* recordJson,
+                                          LogosDeliveryReplyFn on_reply, void* user_data);
+
 
   // --- Reliable Channels API (stable surface) ---
 

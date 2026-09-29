@@ -1411,3 +1411,26 @@ LOGOS_TEST(rln_bridge_start_backend_refuses_before_enable) {
     LOGOS_ASSERT_EQ(bridge.startBackend("{}"),
                     std::string("rln bridge is not enabled"));
 }
+
+LOGOS_TEST(shared_rln_backend_lifecycle_is_explicit) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
+    LOGOS_ASSERT_TRUE(table.at("logos.test").manageBackend);
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"r","epoch-size-sec":10,"manage-backend":false}})", table).empty());
+    LOGOS_ASSERT_FALSE(table.at("logos.test").manageBackend);
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"manage-backend":"false"}})", table).empty());
+}
+
+LOGOS_TEST(mix_peer_methods_require_a_node_and_forward_library_results) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.getLocalMixPeerRecord().success);
+    LOGOS_ASSERT_FALSE(impl.addMixPeer("{}").success);
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO"})").success);
+    t.mockCFunction("waku_mix_get_peer_record").returns(std::string(R"({"peerId":"mix-peer"})"));
+    LOGOS_ASSERT_TRUE(impl.getLocalMixPeerRecord().success);
+    LOGOS_ASSERT_TRUE(impl.addMixPeer(R"({"peerId":"mix-peer"})").success);
+}

@@ -347,7 +347,7 @@ void DeliveryModuleImpl::releaseNode()
     // process-global -- clearing it unconditionally would disarm another
     // instance's RLN.
     abortRln();
-
+    logosdelivery_mix_rln_set_callback(nullptr, nullptr);
     if (deliveryCtxHandle) {
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
@@ -632,9 +632,19 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
     joinRlnBringUp();
+    rlnBridge->init(&modules().liblogos_rln_module);
+    logosdelivery_mix_rln_set_callback([](uint64_t id, const char* method, const char* args, void* data) {
+        auto* bridge = static_cast<RlnBridge*>(data);
+        try {
+            bridge->callMix(id, method ? method : "", args ? args : "[]");
+        } catch (...) {
+            logosdelivery_rln_response(id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN submission failed\"}}");
+        }
+    }, rlnBridge.get());
 
     if (rlnPreset.enabled) {
         DeliveryRlnConfig fromPreset;
+        fromPreset.manageBackend = rlnPreset.manageBackend;
         fromPreset.registryId = rlnPreset.registryId;
         fromPreset.rlnIdentifier = rlnPreset.rlnIdentifier;
         fromPreset.epochSizeSec = rlnPreset.epochSizeSec;
@@ -872,7 +882,8 @@ void DeliveryModuleImpl::stopRlnBackend()
     // This module started the RLN backend, so it stops it too. Stopping one
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
-    if (rlnConfigSnapshot()->enabled) {
+    const auto config = rlnConfigSnapshot();
+    if (config->enabled && config->manageBackend && rlnBridge->enabled()) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
@@ -1260,6 +1271,9 @@ std::string DeliveryModuleImpl::startRlnBackend()
         return "rln bridge unavailable (" + failure + "); answering falls to rlnRespond";
     }
 
+    // A host sharing the backend with Mix owns its configuration and lifetime.
+    if (!rlnConfig->manageBackend) return {};
+
     // The delivery library no longer starts the backend, so this module does:
     // a node that mounts RLN over a stopped module would Ignore every inbound
     // RLN message.
@@ -1304,4 +1318,17 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
     }
 
     return {true, {}};
+}
+
+StdLogosResult DeliveryModuleImpl::getLocalMixPeerRecord() {
+    if (!deliveryCtx) return {false, {}, "Context not initialized"};
+    return callApiRetValue("waku_mix_get_peer_record", CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_ctx_waku_mix_get_peer_record, asCtx(deliveryCtx)));
+}
+
+StdLogosResult DeliveryModuleImpl::addMixPeer(const std::string& recordJson) {
+    if (!deliveryCtx) return {false, {}, "Context not initialized"};
+    return callApiRetValue("waku_mix_add_peer", CALLBACK_TIMEOUT,
+        bindApiCall(logosdelivery_ctx_waku_mix_add_peer, asCtx(deliveryCtx),
+                    recordJson.c_str()));
 }

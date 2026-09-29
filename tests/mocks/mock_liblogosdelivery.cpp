@@ -60,6 +60,7 @@ static void replyOk(const char* funcName, logosdelivery_reply onReply, void* use
     onReply(RET_OK, &text, nullptr, userData);
 }
 
+
 // A call that takes only a context: record it, reply unless dispatch "fails".
 static int dispatchCall(const char* funcName, logosdelivery_reply onReply, void* userData) {
     int dispatch = LogosCMockStore::instance().getReturn<int>(funcName);
@@ -289,6 +290,25 @@ int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
     delivery_test_rln::g_lastResponseJson = result_json ? result_json : "";
     delivery_test_rln::g_responseFired = true;
     return LOGOS_CMOCK_RETURN(int, "logosdelivery_rln_response");
+}
+
+int logosdelivery_mix_rln_set_callback(LogosDeliveryMixRlnCallFn, void*) {
+    LOGOS_CMOCK_RECORD("logosdelivery_mix_rln_set_callback");
+    return 0;
+}
+
+int logosdelivery_ctx_waku_mix_get_peer_record(
+    const LogosDeliveryCtx*, logosdelivery_reply onReply, void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_ctx_waku_mix_get_peer_record");
+    replyOk("logosdelivery_ctx_waku_mix_get_peer_record", onReply, userData);
+    return RET_OK;
+}
+
+int logosdelivery_ctx_waku_mix_add_peer(
+    const LogosDeliveryCtx*, const char*, logosdelivery_reply onReply, void* userData) {
+    LOGOS_CMOCK_RECORD("logosdelivery_ctx_waku_mix_add_peer");
+    replyOk("logosdelivery_ctx_waku_mix_add_peer", onReply, userData);
+    return RET_OK;
 }
 
 } // extern "C"
