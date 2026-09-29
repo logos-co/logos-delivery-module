@@ -1,7 +1,7 @@
 services:
   logos-node:
     build:
-      context: https://github.com/logos-co/logos-docker.git#658e4e7ca55991644103f222e80b2d42b45edcbf
+      context: https://github.com/logos-co/logos-docker.git#de3009825bc76a0b314fb6aed2ae432fc2ae1f4c
       args:
         DELIVERY_VERSION: "0.3.0"
     image: logos-node:dev-local
