@@ -387,7 +387,7 @@ sections:
     text: |
       CI stages the Windows module, its DLLs, and a native `logoscore` host.
       Copy the module into the host's scan directory, then use a private daemon
-      configuration directory and an offline node config. The shared Windows
+      configuration directory and an offline kernel-only node config. The shared
       runner provides `run` to launch each staged executable.
     steps:
       - title: "Stage the delivery module"
@@ -401,7 +401,7 @@ sections:
           path: windows-smoke-node.json
           language: json
           content: |
-            {"logLevel":"INFO"}
+            {"entryLayer":"kernel","kernelConf":{"logLevel":"INFO"}}
 
       - title: "Start the Windows daemon"
         run: |
