@@ -12,6 +12,7 @@
 #include <optional>
 #include <semaphore>
 #include <unordered_map>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 #include "base64.h"
@@ -82,6 +83,60 @@ constexpr const char* kEventNames[] = {
     "onChannelMessageSent",
     "onChannelMessageError",
 };
+
+std::mutex gMixRlnBridgeMutex;
+std::vector<RlnBridge*> gMixRlnBridges;
+
+void dispatchMixRlnCall(uint64_t id, const char* method, const char* args, void*)
+{
+    std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
+    const auto bridgeIt = std::find_if(gMixRlnBridges.rbegin(), gMixRlnBridges.rend(),
+        [](const RlnBridge* bridge) { return bridge->enabled(); });
+    if (bridgeIt == gMixRlnBridges.rend()) {
+        logosdelivery_rln_response(
+            id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN bridge unavailable\"}}");
+        return;
+    }
+
+    try {
+        (*bridgeIt)->callMix(id, method ? method : "", args ? args : "[]");
+    } catch (...) {
+        logosdelivery_rln_response(
+            id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN submission failed\"}}");
+    }
+}
+
+bool registerMixRlnBridge(RlnBridge* bridge)
+{
+    // The callback setter is not a nim-ffi entry point, so initialize the Nim
+    // runtime before it touches the library's process-global lock.
+    (void)logosdelivery_version();
+
+    std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
+    if (std::find(gMixRlnBridges.begin(), gMixRlnBridges.end(), bridge)
+        != gMixRlnBridges.end()) {
+        return true;
+    }
+    if (gMixRlnBridges.empty()
+        && logosdelivery_mix_rln_set_callback(dispatchMixRlnCall, nullptr) != 0) {
+        return false;
+    }
+    gMixRlnBridges.push_back(bridge);
+    return true;
+}
+
+void unregisterMixRlnBridge(RlnBridge* bridge)
+{
+    std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
+    const auto bridgeIt = std::find(gMixRlnBridges.begin(), gMixRlnBridges.end(), bridge);
+    if (bridgeIt == gMixRlnBridges.end()) {
+        return;
+    }
+    gMixRlnBridges.erase(bridgeIt);
+    if (gMixRlnBridges.empty()) {
+        logosdelivery_mix_rln_set_callback(nullptr, nullptr);
+    }
+}
 } // namespace
 
 void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
@@ -347,7 +402,7 @@ void DeliveryModuleImpl::releaseNode()
     // process-global -- clearing it unconditionally would disarm another
     // instance's RLN.
     abortRln();
-    logosdelivery_mix_rln_set_callback(nullptr, nullptr);
+    unregisterMixRlnBridge(rlnBridge.get());
     if (deliveryCtxHandle) {
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
@@ -633,14 +688,9 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     joinRlnBringUp();
     rlnBridge->init(&modules().liblogos_rln_module);
-    logosdelivery_mix_rln_set_callback([](uint64_t id, const char* method, const char* args, void* data) {
-        auto* bridge = static_cast<RlnBridge*>(data);
-        try {
-            bridge->callMix(id, method ? method : "", args ? args : "[]");
-        } catch (...) {
-            logosdelivery_rln_response(id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN submission failed\"}}");
-        }
-    }, rlnBridge.get());
+    if (!registerMixRlnBridge(rlnBridge.get())) {
+        return {false, {}, "Failed to install the Mix RLN callback"};
+    }
 
     if (rlnPreset.enabled) {
         DeliveryRlnConfig fromPreset;
@@ -1323,12 +1373,12 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
 StdLogosResult DeliveryModuleImpl::getLocalMixPeerRecord() {
     if (!deliveryCtx) return {false, {}, "Context not initialized"};
     return callApiRetValue("waku_mix_get_peer_record", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_waku_mix_get_peer_record, asCtx(deliveryCtx)));
+        bindApiCall(logosdelivery_ctx_waku_mix_get_peer_record, asCtx(deliveryCtxHandle)));
 }
 
 StdLogosResult DeliveryModuleImpl::addMixPeer(const std::string& recordJson) {
     if (!deliveryCtx) return {false, {}, "Context not initialized"};
     return callApiRetValue("waku_mix_add_peer", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_waku_mix_add_peer, asCtx(deliveryCtx),
+        bindApiCall(logosdelivery_ctx_waku_mix_add_peer, asCtx(deliveryCtxHandle),
                     recordJson.c_str()));
 }

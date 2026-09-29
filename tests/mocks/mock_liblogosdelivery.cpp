@@ -35,6 +35,12 @@ std::string g_lastResponseJson;
 bool g_responseFired = false;
 std::string g_lastCreateConfigJson;
 std::string g_startNodeReplyError;
+LogosDeliveryMixRlnCallFn g_mixCallback = nullptr;
+bool g_mixCallbackSetBeforeRuntime = false;
+bool g_nimRuntimeInitialized = false;
+int g_mixSetCallbackCalls = 0;
+const void* g_createdCtxHandle = nullptr;
+const void* g_lastMixCtxHandle = nullptr;
 } // namespace delivery_test_rln
 
 #define RET_OK  0
@@ -80,6 +86,7 @@ int logosdelivery_ctx_create(const char* configJson, logosdelivery_create onCrea
         if (ok) {
             auto* ctx = static_cast<LogosDeliveryCtx*>(calloc(1, sizeof(LogosDeliveryCtx)));
             ctx->ptr = &s_fakeCtx;
+            delivery_test_rln::g_createdCtxHandle = ctx;
             onCreated(RET_OK, ctx, nullptr, userData);
         } else {
             onCreated(RET_ERR, nullptr, "mock: create_node fail", userData);
@@ -90,6 +97,7 @@ int logosdelivery_ctx_create(const char* configJson, logosdelivery_create onCrea
 
 const char* logosdelivery_version(void) {
     LOGOS_CMOCK_RECORD("logosdelivery_version");
+    delivery_test_rln::g_nimRuntimeInitialized = true;
     return "mock-version";
 }
 
@@ -292,21 +300,27 @@ int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
     return LOGOS_CMOCK_RETURN(int, "logosdelivery_rln_response");
 }
 
-int logosdelivery_mix_rln_set_callback(LogosDeliveryMixRlnCallFn, void*) {
+int logosdelivery_mix_rln_set_callback(LogosDeliveryMixRlnCallFn callback, void*) {
     LOGOS_CMOCK_RECORD("logosdelivery_mix_rln_set_callback");
+    delivery_test_rln::g_mixCallback = callback;
+    delivery_test_rln::g_mixCallbackSetBeforeRuntime |=
+        callback != nullptr && !delivery_test_rln::g_nimRuntimeInitialized;
+    delivery_test_rln::g_mixSetCallbackCalls++;
     return 0;
 }
 
 int logosdelivery_ctx_waku_mix_get_peer_record(
-    const LogosDeliveryCtx*, logosdelivery_reply onReply, void* userData) {
+    const LogosDeliveryCtx* ctx, logosdelivery_reply onReply, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_waku_mix_get_peer_record");
+    delivery_test_rln::g_lastMixCtxHandle = ctx;
     replyOk("logosdelivery_ctx_waku_mix_get_peer_record", onReply, userData);
     return RET_OK;
 }
 
 int logosdelivery_ctx_waku_mix_add_peer(
-    const LogosDeliveryCtx*, const char*, logosdelivery_reply onReply, void* userData) {
+    const LogosDeliveryCtx* ctx, const char*, logosdelivery_reply onReply, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_waku_mix_add_peer");
+    delivery_test_rln::g_lastMixCtxHandle = ctx;
     replyOk("logosdelivery_ctx_waku_mix_add_peer", onReply, userData);
     return RET_OK;
 }

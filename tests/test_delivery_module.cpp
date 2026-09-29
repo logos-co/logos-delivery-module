@@ -1430,7 +1430,33 @@ LOGOS_TEST(mix_peer_methods_require_a_node_and_forward_library_results) {
     LOGOS_ASSERT_FALSE(impl.getLocalMixPeerRecord().success);
     LOGOS_ASSERT_FALSE(impl.addMixPeer("{}").success);
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_mixCallbackSetBeforeRuntime);
     t.mockCFunction("waku_mix_get_peer_record").returns(std::string(R"({"peerId":"mix-peer"})"));
     LOGOS_ASSERT_TRUE(impl.getLocalMixPeerRecord().success);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastMixCtxHandle,
+                    delivery_test_rln::g_createdCtxHandle);
     LOGOS_ASSERT_TRUE(impl.addMixPeer(R"({"peerId":"mix-peer"})").success);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastMixCtxHandle,
+                    delivery_test_rln::g_createdCtxHandle);
+}
+
+LOGOS_TEST(mix_rln_callback_remains_until_the_last_instance_is_released) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    auto first = std::make_unique<DeliveryModuleImpl>();
+    auto second = std::make_unique<DeliveryModuleImpl>();
+    LOGOS_ASSERT_TRUE(first->createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT_TRUE(second->createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT(delivery_test_rln::g_mixCallback != nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 1);
+
+    first.reset();
+    LOGOS_ASSERT(delivery_test_rln::g_mixCallback != nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 1);
+
+    second.reset();
+    LOGOS_ASSERT(delivery_test_rln::g_mixCallback == nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 2);
 }
