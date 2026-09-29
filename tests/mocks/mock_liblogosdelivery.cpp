@@ -81,6 +81,7 @@ extern "C" {
 int logosdelivery_ctx_create(const char* configJson, logosdelivery_create onCreated, void* userData) {
     LOGOS_CMOCK_RECORD("logosdelivery_ctx_create");
     delivery_test_rln::g_lastCreateConfigJson = configJson ? configJson : "";
+    delivery_test_rln::g_nimRuntimeInitialized = true;
     int ok = LOGOS_CMOCK_RETURN(int, "logosdelivery_ctx_create");
     if (onCreated) {
         if (ok) {

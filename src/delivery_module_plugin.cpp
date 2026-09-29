@@ -108,10 +108,6 @@ void dispatchMixRlnCall(uint64_t id, const char* method, const char* args, void*
 
 bool registerMixRlnBridge(RlnBridge* bridge)
 {
-    // The callback setter is not a nim-ffi entry point, so initialize the Nim
-    // runtime before it touches the library's process-global lock.
-    (void)logosdelivery_version();
-
     std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
     if (std::find(gMixRlnBridges.begin(), gMixRlnBridges.end(), bridge)
         != gMixRlnBridges.end()) {
@@ -688,9 +684,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     joinRlnBringUp();
     rlnBridge->init(&modules().liblogos_rln_module);
-    if (!registerMixRlnBridge(rlnBridge.get())) {
-        return {false, {}, "Failed to install the Mix RLN callback"};
-    }
 
     if (rlnPreset.enabled) {
         DeliveryRlnConfig fromPreset;
@@ -800,6 +793,13 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     deliveryCtx = callbackCtx->ctx->ptr;
 
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
+
+    // ctx_create initializes the Nim runtime. Install the process-global Mix
+    // callback only after that initialization and after this instance owns a
+    // valid context.
+    if (!registerMixRlnBridge(rlnBridge.get())) {
+        return releaseAndFail("Failed to install the Mix RLN callback");
+    }
 
     for (const char* eventName : kEventNames) {
         if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
