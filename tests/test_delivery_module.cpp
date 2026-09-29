@@ -1340,6 +1340,22 @@ LOGOS_TEST(rln_bridge_result_transport_failure_answers_the_envelope) {
     LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("transient"));
 }
 
+LOGOS_TEST(rln_bridge_dispatches_registry_parameters) {
+    auto t = LogosTestContext("delivery_module");
+    BridgeFixture f;
+    LOGOS_ASSERT_EQ(f.bridge.enable(), std::string());
+
+    f.bridge.callMix(9, "get_registry_parameters", R"(["reg","rln-id"])");
+
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(9));
+    const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
+    LOGOS_ASSERT_FALSE(reply["success"].get<bool>());
+    const auto inner = nlohmann::json::parse(reply["error"].get<std::string>());
+    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("transient"));
+    LOGOS_ASSERT_EQ(inner["kind"].get<std::string>(),
+                    std::string("rln_bridge_transport"));
+}
+
 LOGOS_TEST(rln_bridge_provider_refusal_is_permanent) {
     auto t = LogosTestContext("delivery_module");
     BridgeFixture f;
