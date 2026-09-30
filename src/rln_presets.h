@@ -66,7 +66,8 @@ std::string parseRlnPresetTable(const std::string& json,
 /**
  * @brief RLN settings for a `createNode` preset.
  *
- * Built-in presets ship with RLN off. The file named by
+ * Of the built-in presets only `logos.test` has RLN on (the LEZ testnet
+ * registry, 600 s epochs); `""` and `logos.dev` ship with it off. The file named by
  * @ref kRlnPresetsEnvVar is merged over them, which is how a test or local
  * deployment supplies its own registry with no public API for it. That file
  * may only key entries by preset names the delivery library accepts — it
