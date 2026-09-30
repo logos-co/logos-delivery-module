@@ -34,6 +34,7 @@ inline constexpr const char* kLogosDeliveryRlnIdentifier =
  */
 struct RlnPresetEntry {
     bool enabled = false;
+    bool manageBackend = true;
     bool enableValidation = true;
     std::string registryId;
     std::string rlnIdentifier;

@@ -41127,17 +41127,18 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1791304460,
-        "narHash": "sha256-f/+BKuzrMjUUO1DeJCbLpyBnRMD4D+orcIoolrjGYdM=",
-        "ref": "refs/tags/v0.39.1",
-        "rev": "3a478e90a4813685af47b4f77e1f6232ac5b50bb",
-        "revCount": 2626,
+        "lastModified": 1790724338,
+        "narHash": "sha256-AHHQNgX5PSk+Wh0lWiOsuZKZkYpusGJCOPatr+B59ko=",
+        "ref": "feat/mix-rln-module-interop",
+        "rev": "0701e3c916c71831a695c43ffd40d3c8ba5941ab",
+        "revCount": 2583,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
-        "ref": "refs/tags/v0.39.1",
+        "ref": "feat/mix-rln-module-interop",
+        "rev": "0701e3c916c71831a695c43ffd40d3c8ba5941ab",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"

@@ -2,6 +2,7 @@
 #include "liblogos_rln_module_api.h" // generated from metadata.json#optional_dependencies
 
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 #include <liblogosdelivery_rln.h> // logosdelivery_rln_response
 #include <logos_async_result.h>   // logos::AsyncResult
@@ -92,9 +93,10 @@ int RlnBridge::timeoutMsFor(Op op)
 {
     switch (op) {
     case Op::GetState:
-    case Op::Generate:
-        return 70'000;
+    case Op::GetParameters:
+        return 80'000;
     case Op::GetQuota:
+    case Op::Generate:
     case Op::Validate:
         return 10'000;
     case Op::Start:
@@ -113,6 +115,8 @@ const char* RlnBridge::opName(Op op)
         return "stop";
     case Op::GetState:
         return "get_membership_state";
+    case Op::GetParameters:
+        return "get_registry_parameters";
     case Op::GetQuota:
         return "get_epoch_quota";
     case Op::Generate:
@@ -263,6 +267,21 @@ void RlnBridge::getMembershipState(uint64_t reqId, std::string registryId,
         timeoutMsFor(Op::GetState));
 }
 
+void RlnBridge::getRegistryParameters(uint64_t reqId, std::string registryId,
+                                      std::string rlnIdentifier)
+{
+    if (rejectIfNotEnabled(Op::GetParameters, reqId)) {
+        return;
+    }
+    m_rlnModule->get_registry_parametersAsyncResult(
+        registryId, rlnIdentifier,
+        [reqId](logos::AsyncResult<StdLogosResult> r) {
+            respond(reqId, r.ok() ? resultReply(Op::GetParameters, r.value)
+                                  : callFail(Op::GetParameters, r.error));
+        },
+        timeoutMsFor(Op::GetParameters));
+}
+
 void RlnBridge::getEpochQuota(uint64_t reqId, std::string registryId,
                               std::string rlnIdentifier, uint64_t timestamp)
 {
@@ -308,4 +327,50 @@ void RlnBridge::validateProof(uint64_t reqId, std::string registryId,
                                   : callFail(Op::Validate, r.error));
         },
         timeoutMsFor(Op::Validate));
+}
+
+void RlnBridge::callMix(uint64_t reqId, const std::string& method, const std::string& args)
+{
+    try {
+        const json values = json::parse(args);
+        if (!values.is_array()) {
+            throw std::invalid_argument("arguments must be an array");
+        }
+        const auto textAt = [&values](size_t index) {
+            if (index >= values.size() || !values[index].is_string()) {
+                throw std::invalid_argument("expected string argument");
+            }
+            return values[index].get<std::string>();
+        };
+        const auto timestampAt = [&values](size_t index) {
+            if (index >= values.size()) {
+                throw std::invalid_argument("missing timestamp");
+            }
+            if (values[index].is_number_unsigned()) {
+                return values[index].get<uint64_t>();
+            }
+            if (values[index].is_string()) {
+                return static_cast<uint64_t>(std::stoull(values[index].get<std::string>()));
+            }
+            throw std::invalid_argument("expected timestamp");
+        };
+
+        if (method == "get_membership_state" && values.size() == 2) {
+            getMembershipState(reqId, textAt(0), textAt(1));
+        } else if (method == "get_epoch_quota" && values.size() == 3) {
+            getEpochQuota(reqId, textAt(0), textAt(1), timestampAt(2));
+        } else if (method == "get_registry_parameters" && values.size() == 2) {
+            getRegistryParameters(reqId, textAt(0), textAt(1));
+        } else if (method == "generate_proof" && values.size() == 4) {
+            generateProof(reqId, textAt(0), textAt(1), textAt(2), timestampAt(3));
+        } else if (method == "validate_proof" && values.size() == 5) {
+            validateProof(reqId, textAt(0), textAt(1), textAt(2), timestampAt(3),
+                          values[4].is_string() ? textAt(4) : values[4].dump());
+        } else {
+            throw std::invalid_argument("unknown method or invalid argument count");
+        }
+    } catch (const std::exception& e) {
+        respond(reqId, json{{"error", {{"class", "permanent"},
+                                        {"message", "Invalid Mix RLN call: " + std::string(e.what())}}}}.dump());
+    }
 }
