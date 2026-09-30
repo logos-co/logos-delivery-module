@@ -11,7 +11,7 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&ref=feat/mix-rln-module-interop&rev=0701e3c916c71831a695c43ffd40d3c8ba5941ab";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
@@ -23,7 +23,12 @@
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
     # The name is load-bearing: the builder resolves each optional_dependencies
     # entry as the input of that name and generates bindings from its LIDL.
-    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=65697028baffc072e1aeebaec7c7e35e7e12cab1&dir=logos-rln-module";
+    liblogos_rln_module.url = "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=63bb541d18c53e3c6e261421ee9eb8c2fd8445ca&dir=logos-rln-module";
+    # Retain the fixture-tested registry/wallet chain, including the fee-cap fix.
+    liblogos_rln_module.inputs.liblogos_lez_rln_module.url =
+      "git+https://github.com/richard-ramos/logos-rln-modules?ref=feat/mix-wire-binding&rev=63bb541d18c53e3c6e261421ee9eb8c2fd8445ca&dir=logos-lez-rln-module";
+    liblogos_rln_module.inputs.liblogos_lez_rln_module.inputs.logos-execution-zone.url =
+      "github:logos-blockchain/logos-execution-zone/f0778a4316daa4065ff18a77f4f98706149c240e";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
