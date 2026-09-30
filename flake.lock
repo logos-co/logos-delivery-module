@@ -42026,7 +42026,7 @@
       "locked": {
         "lastModified": 1790537358,
         "narHash": "sha256-erJVYA5G7wrhV/tOojfaTZpuMaTyXXJwYs6P6d5Za2s=",
-        "ref": "refs/heads/master",
+        "ref": "refs/tags/v0.39.0",
         "rev": "ca28145fdc5e9858595126a3d6b01ec19882e31c",
         "revCount": 2572,
         "submodules": true,
@@ -42034,6 +42034,7 @@
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
+        "ref": "refs/tags/v0.39.0",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
