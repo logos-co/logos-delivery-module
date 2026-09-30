@@ -38,6 +38,10 @@ typedef void (*LogosDeliveryRlnValidateProofFn)(uint64_t req_id, const char* sig
                                                 uint64_t timestamp,
                                                 const char* proof_json, void* user_data);
 
+typedef void (*LogosDeliveryMixRlnCallFn)(uint64_t req_id, const char* method_name,
+                                         const char* args_json, void* user_data);
+int logosdelivery_mix_rln_set_callback(LogosDeliveryMixRlnCallFn callback, void* user_data);
+
 typedef struct {
   LogosDeliveryRlnGetMembershipStateFn get_membership_state;
   LogosDeliveryRlnGetEpochQuotaFn get_epoch_quota;
