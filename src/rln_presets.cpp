@@ -54,6 +54,7 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
         {"logos.dev", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
         {"logos.test",
          RlnPresetEntry{.enabled = true,
+                        .enableValidation = false,
                         .registryId = "logos:testnet:"
                                       "841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893",
                         .rlnIdentifier = kLogosDeliveryRlnIdentifier,

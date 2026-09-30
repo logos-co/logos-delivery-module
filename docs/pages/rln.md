@@ -39,6 +39,7 @@ preset-less `""` have it off (see [`networks.md`](./networks.md)).
 | Epoch size | 600 s |
 | Max epoch gap | the RLN module's default (the preset sets none) |
 | RLN identifier | this application's, `sha256("rln/logos-delivery/v0.0.1")` |
+| Validation | off — nodes attach proofs but do not validate incoming ones |
 
 `liblogos_rln_module` ≥ 0.10.0 with `liblogos_lez_rln_module` ≥ 4.2.1 map
 `logos:testnet` to that sequencer through their built-in network table, so a

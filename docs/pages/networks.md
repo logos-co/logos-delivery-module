@@ -31,7 +31,7 @@ The two are separate clusters, so nodes on one do not see nodes on the other.
 | Entry nodes | `delivery-0{1,2}.<dc>.logos.dev.status.im` | `node-0{1,2}.<dc>.logos.test.status.im` |
 | Sharding | auto, 8 shards | auto, 8 shards |
 | Max message size | 150 KiB | 150 KiB |
-| RLN | off | on — LEZ testnet registry, 600 s epochs |
+| RLN | off | on — LEZ testnet registry, 600 s epochs, validation off |
 | Mix routing | on | on |
 | P2P reliability | on | on |
 | discv5 | on | on |

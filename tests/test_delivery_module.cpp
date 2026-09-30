@@ -868,7 +868,7 @@ LOGOS_TEST(builtin_presets_enable_rln_only_on_logos_test) {
     const RlnPresetEntry test = resolveRlnPreset("logos.test", error);
     LOGOS_ASSERT_TRUE(error.empty());
     LOGOS_ASSERT_TRUE(test.enabled);
-    LOGOS_ASSERT_TRUE(test.enableValidation);
+    LOGOS_ASSERT_FALSE(test.enableValidation);
     LOGOS_ASSERT_EQ(test.registryId,
                     std::string("logos:testnet:"
                                 "841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893"));
@@ -892,6 +892,8 @@ LOGOS_TEST(builtin_logos_test_preset_installs_the_rln_plugin) {
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.test"})").success);
     LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_TRUE(libCfg.value("rln-disable-validation", false));
     // No framework context in a unit test, so the bridge cannot come up.
     LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
 }
