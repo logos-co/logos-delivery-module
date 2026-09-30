@@ -1,0 +1,947 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" data-theme="auto">
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Run a delivery node &#8212; Logos Delivery Module 0.3.0 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "auto";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "auto";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=55c26ed414f5f8a31ebb" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=55c26ed414f5f8a31ebb" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=eb78edbb" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="../_static/scripts/fontawesome.js?digest=55c26ed414f5f8a31ebb"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
+
+    <script src="../_static/documentation_options.js?v=e259d695"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'pages/run-node';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.17.1';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://logos-co.github.io/logos-delivery-module/switcher.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.0';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner =
+            false;
+        </script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="icon" href="../_static/logos-logo-dark.png"/>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Query a running node" href="query-node.html" />
+    <link rel="prev" title="Networks: logos.dev vs logos.test" href="networks.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="0.3.0" />
+  
+    
+    <script src="../_static/searchtools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <script src="../searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="auto">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../_static/logos-logo-dark.png" class="logo__image only-light" alt=""/>
+    <img src="../_static/logos-logo-dark.png" class="logo__image only-dark pst-js-only" alt=""/>
+  
+  
+    <p class="title logo__title">Delivery Module 0.3.0</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api-layers.html">
+    API layers
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api_reference.html">
+    API reference
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="internal.html">
+    Internal docs
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://docs.logos.co/messaging">
+    Logos Messaging Docs
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/logos-co/logos-delivery-module" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api-layers.html">
+    API layers
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="api_reference.html">
+    API reference
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="internal.html">
+    Internal docs
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://docs.logos.co/messaging">
+    Logos Messaging Docs
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-3"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-3"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-3"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-3">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/logos-co/logos-delivery-module" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar"><svg class="pst-icon svg-inline--fa" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
+
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l1"><a class="reference internal" href="networks.html">Networks: <code class="docutils literal notranslate"><span class="pre">logos.dev</span></code> vs <code class="docutils literal notranslate"><span class="pre">logos.test</span></code></a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Run a delivery node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="query-node.html">Query a running node</a></li>
+<li class="toctree-l1"><a class="reference internal" href="versioning.html">Versioning</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rln.html">RLN bridge</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="internal.html" class="nav-link">Internal docs</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Run a delivery node</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="run-a-delivery-node">
+<h1>Run a delivery node<a class="headerlink" href="#run-a-delivery-node" title="Link to this heading">#</a></h1>
+<p>Runs a delivery node (a Logos Core daemon + <code class="docutils literal notranslate"><span class="pre">delivery_module</span></code> 0.3.0, for Logos
+Testnet v0.3). There is no GUI or HTTP API — interaction is via the daemon’s
+CLI (<code class="docutils literal notranslate"><span class="pre">logosctl</span></code>, or <code class="docutils literal notranslate"><span class="pre">logoscore</span></code> in the Nix setup). You can run it three ways:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#with-docker">With Docker</a> — quickest; everything runs in a container.</p></li>
+<li><p><a class="reference internal" href="#without-docker-prebuilt-binaries">Prebuilt binaries</a> — download release
+binaries, nothing to build (Linux and macOS).</p></li>
+<li><p><a class="reference internal" href="#without-docker-build-with-nix">Build with Nix</a> — build from source on any
+platform.</p></li>
+</ul>
+<p>All three connect the node to the <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> fleet by default. A node that
+other peers should be able to dial also needs its
+<a class="reference internal" href="#public-address">public address</a> set.</p>
+<section id="with-docker">
+<h2>With Docker<a class="headerlink" href="#with-docker" title="Link to this heading">#</a></h2>
+<section id="prerequisites">
+<h3>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p>Docker with Compose</p></li>
+</ul>
+</section>
+<section id="start">
+<h3>Start<a class="headerlink" href="#start" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/logos-co/logos-delivery-module.git
+<span class="nb">cd</span><span class="w"> </span>logos-delivery-module
+docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+</pre></div>
+</div>
+<p>The image is built from <a class="reference external" href="https://github.com/logos-co/logos-docker">logos-docker</a>:
+the <code class="docutils literal notranslate"><span class="pre">logosctl</span></code> daemon with <code class="docutils literal notranslate"><span class="pre">delivery_module</span></code> 0.3.0 and the RLN modules
+(<code class="docutils literal notranslate"><span class="pre">liblogos_rln_module</span></code> 0.10.0, <code class="docutils literal notranslate"><span class="pre">liblogos_lez_rln_module</span></code>) from the Logos
+catalog.</p>
+</section>
+<section id="boot-the-node">
+<h3>Boot the node<a class="headerlink" href="#boot-the-node" title="Link to this heading">#</a></h3>
+<p>The daemon is running; load the module and create the node:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>logos-node<span class="w"> </span>logosctl<span class="w"> </span>module<span class="w"> </span>load<span class="w"> </span>delivery_module
+docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>logos-node<span class="w"> </span>logosctl<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>createNode<span class="w"> </span>@/conf/logos-test.json
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">logos.test</span></code> runs RLN, so the node needs a membership before it can start —
+<a class="reference internal" href="#fund-the-node-s-rln-membership">fund it</a>, then:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>logos-node<span class="w"> </span>logosctl<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>start
+</pre></div>
+</div>
+<p>Verify:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>logos-node<span class="w"> </span>logosctl<span class="w"> </span>daemon<span class="w"> </span>status
+</pre></div>
+</div>
+<p>The daemon logs to the container’s output: <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">logs</span> <span class="pre">logos-node</span></code>.</p>
+</section>
+<section id="stop">
+<h3>Stop<a class="headerlink" href="#stop" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span>compose<span class="w"> </span>down
+</pre></div>
+</div>
+<p>Node data lives in the <code class="docutils literal notranslate"><span class="pre">logos-persistence</span></code> volume, so it survives <code class="docutils literal notranslate"><span class="pre">down</span></code> and
+rebuilds. <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">compose</span> <span class="pre">down</span> <span class="pre">-v</span></code> removes it.</p>
+</section>
+</section>
+<section id="without-docker-prebuilt-binaries">
+<h2>Without Docker: prebuilt binaries<a class="headerlink" href="#without-docker-prebuilt-binaries" title="Link to this heading">#</a></h2>
+<p>Run a node from released binaries — nothing to build, no repository clone. You
+need one CLI, <a class="reference external" href="https://github.com/logos-co/logos-logoscore-cli"><code class="docutils literal notranslate"><span class="pre">logosctl</span></code></a>
+0.3.0: the node daemon, its client, and the package manager in one binary.</p>
+<section id="install-logosctl">
+<h3>Install logosctl<a class="headerlink" href="#install-logosctl" title="Link to this heading">#</a></h3>
+<p>Download the archive for your system from the
+<a class="reference external" href="https://github.com/logos-co/logos-logoscore-cli/releases/tag/0.3.0">logosctl 0.3.0 release</a>
+and follow its install steps to put <code class="docutils literal notranslate"><span class="pre">logosctl</span></code> on your <code class="docutils literal notranslate"><span class="pre">PATH</span></code>.</p>
+</section>
+<section id="install-the-module-and-boot-the-node">
+<h3>Install the module and boot the node<a class="headerlink" href="#install-the-module-and-boot-the-node" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start the daemon; --detach returns once it accepts commands</span>
+logosctl<span class="w"> </span>daemon<span class="w"> </span>start<span class="w"> </span>--detach
+
+<span class="c1"># Fetch delivery_module and the RLN modules logos.test needs from the Logos</span>
+<span class="c1"># catalog and install them (liblogos_lez_rln_module comes in as a dependency)</span>
+logosctl<span class="w"> </span>catalog<span class="w"> </span>refresh
+logosctl<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>delivery_module<span class="w"> </span>--version<span class="w"> </span><span class="m">0</span>.3.0<span class="w"> </span>--yes
+logosctl<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>liblogos_rln_module<span class="w"> </span>--version<span class="w"> </span><span class="m">0</span>.10.0<span class="w"> </span>--yes
+
+<span class="c1"># logos.test node config (layered createNode shape — see Configuration below)</span>
+cat<span class="w"> </span>&gt;<span class="w"> </span>logos-test.json<span class="w"> </span><span class="s">&lt;&lt;'JSON'</span>
+<span class="s">{</span>
+<span class="s">  "preset": "logos.test",</span>
+<span class="s">  "messagingOverrides": {</span>
+<span class="s">    "logLevel": "DEBUG",</span>
+<span class="s">    "tcp-port": 30303,</span>
+<span class="s">    "discv5-udp-port": 9000,</span>
+<span class="s">    "nat": "extip:&lt;public-ip&gt;"</span>
+<span class="s">  }</span>
+<span class="s">}</span>
+<span class="s">JSON</span>
+
+logosctl<span class="w"> </span>module<span class="w"> </span>load<span class="w"> </span>delivery_module
+logosctl<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>createNode<span class="w"> </span>@logos-test.json
+<span class="c1"># fund the node's RLN membership first (see below), then:</span>
+logosctl<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>start
+</pre></div>
+</div>
+<p>Replace <code class="docutils literal notranslate"><span class="pre">&lt;public-ip&gt;</span></code> with the host’s public IPv4 address, or drop the <code class="docutils literal notranslate"><span class="pre">nat</span></code>
+line for a node nobody needs to dial — see <a class="reference internal" href="#public-address">Public address</a>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">logosctl</span></code> keeps everything — installed modules, logs, node data — in its
+session directory, <code class="docutils literal notranslate"><span class="pre">~/.logosctl</span></code> (<code class="docutils literal notranslate"><span class="pre">--config-dir</span></code> picks another). The daemon
+log is <code class="docutils literal notranslate"><span class="pre">~/.logosctl/logs/daemon.log</span></code>.</p>
+<p>Verify with <code class="docutils literal notranslate"><span class="pre">logosctl</span> <span class="pre">daemon</span> <span class="pre">status</span></code>; stop with <code class="docutils literal notranslate"><span class="pre">logosctl</span> <span class="pre">daemon</span> <span class="pre">stop</span></code>.</p>
+</section>
+</section>
+<section id="fund-the-node-s-rln-membership">
+<h2>Fund the node’s RLN membership<a class="headerlink" href="#fund-the-node-s-rln-membership" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">logos.test</span></code> rate-limits with RLN on the LEZ testnet (see <a class="reference internal" href="rln.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">rln.md</span></code></span></a>).
+<code class="docutils literal notranslate"><span class="pre">createNode</span></code> brings the RLN modules up on the preset’s registry; they create
+the node’s own wallet and register a membership as soon as its payer account
+holds enough native LEZ — the node pays for itself, nothing is registered by
+hand. <code class="docutils literal notranslate"><span class="pre">start</span></code> passes only once that membership is active.</p>
+<p>With Docker, prefix each command with <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">exec</span> <span class="pre">logos-node</span></code>.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># The account to fund (state "ready", "network":"testnet")</span>
+logosctl<span class="w"> </span>call<span class="w"> </span>liblogos_lez_rln_module<span class="w"> </span>wallet_status
+<span class="c1"># → {... "payer":"&lt;ACCOUNT&gt;" ...}</span>
+</pre></div>
+</div>
+<p>Send it <strong>at least 200000000</strong> native on the LEZ testnet: the registration
+price is 1000000 (rate limit 100), and the transaction’s fee reserve, sized
+from the chain’s live fees, is ~1.8e8 at base fee 8 (most of it is refunded).
+Bridge funds from the Logos blockchain testnet with a channel deposit, or
+transfer from an account that already holds LEZ testnet native.</p>
+<p>Then wait for the membership (typically 1–3 minutes after the funds land):</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s'</span><span class="w"> </span><span class="s1">'5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977'</span><span class="w"> </span>&gt;<span class="w"> </span>/tmp/rln-id.arg
+logosctl<span class="w"> </span>call<span class="w"> </span>liblogos_rln_module<span class="w"> </span>get_membership_state<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>logos:testnet:841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893<span class="w"> </span>@/tmp/rln-id.arg
+<span class="c1"># "state":"unknown" with provisioning.step "awaiting_funding" → not funded yet</span>
+<span class="c1"># "state":"active"                                            → ready to start</span>
+</pre></div>
+</div>
+<p>The wallet (and the key to its funds) lives in the node’s data — the
+<code class="docutils literal notranslate"><span class="pre">logos-persistence</span></code> volume with Docker, the session directory otherwise.</p>
+</section>
+<section id="without-docker-build-with-nix">
+<h2>Without Docker: build with Nix<a class="headerlink" href="#without-docker-build-with-nix" title="Link to this heading">#</a></h2>
+<p>Build the runtime and this module with Nix, then run the <code class="docutils literal notranslate"><span class="pre">logoscore</span></code> daemon
+directly on the host.</p>
+<section id="id1">
+<h3>Prerequisites<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://nixos.org/download.html">Nix</a> with flakes enabled</p></li>
+<li><p>Linux or macOS</p></li>
+</ul>
+</section>
+<section id="build-the-runtime-and-module">
+<h3>Build the runtime and module<a class="headerlink" href="#build-the-runtime-and-module" title="Link to this heading">#</a></h3>
+<p>Build the <code class="docutils literal notranslate"><span class="pre">logoscore</span></code> CLI (the headless runtime) and the <code class="docutils literal notranslate"><span class="pre">lgpm</span></code> package
+manager from their flakes, then build and install this module’s <code class="docutils literal notranslate"><span class="pre">.lgx</span></code>.
+Both of its dependencies are optional. <code class="docutils literal notranslate"><span class="pre">libp2p_module</span></code> hosts external service
+discovery: a node configured for it (<code class="docutils literal notranslate"><span class="pre">plugin-kad-discovery</span></code>) fails to start
+without it, any other node runs without it. An RLN-enabled preset also needs
+<code class="docutils literal notranslate"><span class="pre">liblogos_rln_module</span></code> and <code class="docutils literal notranslate"><span class="pre">liblogos_lez_rln_module</span></code>. This flake
+re-exports their <code class="docutils literal notranslate"><span class="pre">.lgx</span></code>s from its own locked inputs, so they match the revs
+the module was built against:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/logos-co/logos-delivery-module.git
+<span class="nb">cd</span><span class="w"> </span>logos-delivery-module
+git<span class="w"> </span>checkout<span class="w"> </span>v0.3.0
+
+<span class="c1"># Runtime + package manager</span>
+nix<span class="w"> </span>build<span class="w"> </span><span class="s1">'github:logos-co/logos-logoscore-cli'</span><span class="w"> </span>--out-link<span class="w"> </span>./logos
+nix<span class="w"> </span>build<span class="w"> </span><span class="s1">'github:logos-co/logos-package-manager#cli'</span><span class="w"> </span>-o<span class="w"> </span>lgpm
+
+<span class="c1"># This module, built from the checkout</span>
+nix<span class="w"> </span>build<span class="w"> </span><span class="s1">'.#lgx'</span><span class="w"> </span>-o<span class="w"> </span>delivery-lgx
+
+<span class="c1"># libp2p, for external service discovery</span>
+nix<span class="w"> </span>build<span class="w"> </span><span class="s1">'.#libp2p_module-lgx'</span><span class="w"> </span>-o<span class="w"> </span>libp2p-lgx
+
+<span class="c1"># Its RLN dependency chain</span>
+nix<span class="w"> </span>build<span class="w"> </span><span class="s1">'.#liblogos_rln_module-lgx'</span><span class="w"> </span>-o<span class="w"> </span>rln-lgx
+nix<span class="w"> </span>build<span class="w"> </span><span class="s1">'.#liblogos_lez_rln_module-lgx'</span><span class="w"> </span>-o<span class="w"> </span>lez-rln-lgx
+
+<span class="c1"># Seed the modules dir with the bundled capability module, then install</span>
+mkdir<span class="w"> </span>-p<span class="w"> </span>modules
+cp<span class="w"> </span>-RL<span class="w"> </span>./logos/modules/.<span class="w"> </span>./modules/
+<span class="k">for</span><span class="w"> </span>pkg<span class="w"> </span><span class="k">in</span><span class="w"> </span>libp2p-lgx<span class="w"> </span>lez-rln-lgx<span class="w"> </span>rln-lgx<span class="w"> </span>delivery-lgx<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>./lgpm/bin/lgpm<span class="w"> </span>--modules-dir<span class="w"> </span>./modules<span class="w"> </span>--allow-unsigned<span class="w"> </span>install<span class="w"> </span>--file<span class="w"> </span><span class="s2">"</span><span class="nv">$pkg</span><span class="s2">"</span>/*.lgx
+<span class="k">done</span>
+</pre></div>
+</div>
+<p>The first build compiles the whole runtime stack through Nix — allow
+~30–45 min. Later builds are fast.</p>
+<p><code class="docutils literal notranslate"><span class="pre">.#lgx</span></code> is a development package that only the Nix-built runtime above can
+load. To install a local build into a released <code class="docutils literal notranslate"><span class="pre">logosctl</span></code> instead, build
+<code class="docutils literal notranslate"><span class="pre">.#lgx-portable</span></code> and pass it to <code class="docutils literal notranslate"><span class="pre">logosctl</span> <span class="pre">package</span> <span class="pre">install</span></code>.</p>
+</section>
+<section id="start-the-daemon">
+<h3>Start the daemon<a class="headerlink" href="#start-the-daemon" title="Link to this heading">#</a></h3>
+<p>Put <code class="docutils literal notranslate"><span class="pre">logoscore</span></code> on your <code class="docutils literal notranslate"><span class="pre">PATH</span></code> and start it in daemon mode pointed at
+<code class="docutils literal notranslate"><span class="pre">./modules</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/logos/bin:</span><span class="nv">$PATH</span><span class="s2">"</span>
+logoscore<span class="w"> </span>-D<span class="w"> </span>-m<span class="w"> </span>./modules<span class="w"> </span>&gt;<span class="w"> </span>logs.txt<span class="w"> </span><span class="p">&amp;</span>
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h3>Boot the node<a class="headerlink" href="#id2" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logoscore<span class="w"> </span>load-module<span class="w"> </span>delivery_module
+logoscore<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>createNode<span class="w"> </span>@conf/logos-test.json
+logoscore<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>start
+</pre></div>
+</div>
+<p>Verify:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logoscore<span class="w"> </span>status
+</pre></div>
+</div>
+</section>
+<section id="id3">
+<h3>Stop<a class="headerlink" href="#id3" title="Link to this heading">#</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logoscore<span class="w"> </span>stop
+</pre></div>
+</div>
+<blockquote>
+<div><p>For a fully pinned, build-from-this-commit walkthrough — plus notes on the
+blocking Kademlia bootstrap in headless runs — see the
+<a class="reference external" href="https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md">runtime doc-test</a>.</p>
+</div></blockquote>
+</section>
+</section>
+<section id="check-the-node">
+<h2>Check the node<a class="headerlink" href="#check-the-node" title="Link to this heading">#</a></h2>
+<p>Once <code class="docutils literal notranslate"><span class="pre">start</span></code> returns, the node joins the network in the background. Within a
+few minutes it should report connected peers:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logosctl<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>getNodeInfo<span class="w"> </span>Metrics<span class="w"> </span>--json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.result.value<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">'^libp2p_peers '</span>
+<span class="c1"># libp2p_peers 8.0</span>
+</pre></div>
+</div>
+<p>and advertise its public address in its ENR and listen addresses:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logosctl<span class="w"> </span>call<span class="w"> </span>delivery_module<span class="w"> </span>getNodeInfo<span class="w"> </span>MyMultiaddresses<span class="w"> </span>--json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.result.value
+<span class="c1"># /ip4/&lt;public-ip&gt;/tcp/30303/p2p/16Uiu2…,/ip4/&lt;public-ip&gt;/udp/30303/quic-v1/p2p/16Uiu2…</span>
+</pre></div>
+</div>
+<p>With Docker, prefix them with <code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">exec</span> <span class="pre">logos-node</span></code>; with the Nix build,
+use <code class="docutils literal notranslate"><span class="pre">logoscore</span> <span class="pre">call</span> <span class="pre">…</span></code>. See
+<a class="reference internal" href="query-node.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">query-node.md</span></code></span></a> for everything else the node reports.</p>
+</section>
+<section id="configuration">
+<h2>Configuration<a class="headerlink" href="#configuration" title="Link to this heading">#</a></h2>
+<p>The config uses the layered <code class="docutils literal notranslate"><span class="pre">createNode</span></code> shape: <code class="docutils literal notranslate"><span class="pre">preset</span></code> picks the network,
+<code class="docutils literal notranslate"><span class="pre">mode</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">&quot;Core&quot;</span></code> (<code class="docutils literal notranslate"><span class="pre">&quot;Edge&quot;</span></code> for a light node), per-layer settings
+go in <code class="docutils literal notranslate"><span class="pre">messagingOverrides</span></code>. The repo ships it as
+<a class="reference download internal" download="" href="../_downloads/26c36be3c7bc7fbc0473965e224945c6/logos-test.json"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">conf/logos-test.json</span></code></span></a>: Docker mounts it into the
+container at <code class="docutils literal notranslate"><span class="pre">/conf</span></code> (<code class="docutils literal notranslate"><span class="pre">&#64;/conf/logos-test.json</span></code>); with the Nix build, pass the
+path directly (<code class="docutils literal notranslate"><span class="pre">&#64;conf/logos-test.json</span></code>). The prebuilt-binaries path above
+writes the same config inline, plus <code class="docutils literal notranslate"><span class="pre">nat</span></code>. Edit it and re-run the boot steps
+to change settings.</p>
+<p>Keep extra keys inside <code class="docutils literal notranslate"><span class="pre">messagingOverrides</span></code> / <code class="docutils literal notranslate"><span class="pre">channelsOverrides</span></code> /
+<code class="docutils literal notranslate"><span class="pre">kernelConf</span></code> — a bare top-level key (even <code class="docutils literal notranslate"><span class="pre">logLevel</span></code>) switches parsing to the
+legacy flat shape. Unpinned listening ports are OS-assigned; the config pins
+the p2p ports to match the Docker port mappings.</p>
+<p>For the dev network, use <a class="reference download internal" download="" href="../_downloads/1ab476f44a356e788b485db128d52fdc/logos-dev.json"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">conf/logos-dev.json</span></code></span></a>
+(preset <code class="docutils literal notranslate"><span class="pre">logos.dev</span></code>) — see
+<a class="reference internal" href="networks.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">networks.md</span></code></span></a> for how the two differ. The full config
+grammar, including kernel-only nodes (<code class="docutils literal notranslate"><span class="pre">&quot;entryLayer&quot;:</span> <span class="pre">&quot;kernel&quot;</span></code>), is
+documented in the <a class="reference internal" href="api_reference.html"><span class="std std-doc">API reference</span></a>.</p>
+<p>The node’s local state goes to the runtime’s per-instance persistence
+directory unless <code class="docutils literal notranslate"><span class="pre">localStoragePath</span></code> names another.</p>
+<section id="public-address">
+<h3>Public address<a class="headerlink" href="#public-address" title="Link to this heading">#</a></h3>
+<p>The node advertises only addresses peers can actually dial. It no longer
+publishes <code class="docutils literal notranslate"><span class="pre">0.0.0.0</span></code> or a placeholder port: until it learns its public address,
+its ENR carries no IP at all and other nodes cannot connect to it.</p>
+<p>For a node others should reach, set the address explicitly:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="nt">"messagingOverrides"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"nat"</span><span class="p">:</span><span class="w"> </span><span class="s2">"extip:&lt;public-ip&gt;"</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">nat</span></code> also takes <code class="docutils literal notranslate"><span class="pre">&quot;any&quot;</span></code> (the default: discover a UPnP or NAT-PMP gateway),
+<code class="docutils literal notranslate"><span class="pre">&quot;upnp&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;pmp&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">&quot;none&quot;</span></code>. Inside Docker, use <code class="docutils literal notranslate"><span class="pre">extip</span></code>. Open the
+p2p port (<code class="docutils literal notranslate"><span class="pre">tcp-port</span></code>, 30303) for both TCP and UDP (QUIC, below) and the UDP
+discovery port (<code class="docutils literal notranslate"><span class="pre">discv5-udp-port</span></code>, 9000) on the host firewall.</p>
+</section>
+<section id="quic">
+<h3>QUIC<a class="headerlink" href="#quic" title="Link to this heading">#</a></h3>
+<p>QUIC is on by default and runs next to TCP. Unless <code class="docutils literal notranslate"><span class="pre">quic-port</span></code> names another
+port, it listens on UDP at the TCP port number — <code class="docutils literal notranslate"><span class="pre">/udp/30303/quic-v1</span></code> for the
+config above. <a class="reference download internal" download="" href="../_downloads/f0f45a183f8765773a1d775882cc3b53/docker-compose.yml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docker-compose.yml</span></code></span></a> already
+publishes it.</p>
+<p>On Linux, raise the socket receive buffer limit, or the node logs
+<code class="docutils literal notranslate"><span class="pre">QUIC</span> <span class="pre">UDP</span> <span class="pre">receive</span> <span class="pre">buffer</span> <span class="pre">capped</span> <span class="pre">below</span> <span class="pre">requested</span> <span class="pre">size</span></code> at every start:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sudo<span class="w"> </span>sysctl<span class="w"> </span>-w<span class="w"> </span>net.core.rmem_max<span class="o">=</span><span class="m">8388608</span>
+</pre></div>
+</div>
+</section>
+<section id="rln">
+<h3>RLN<a class="headerlink" href="#rln" title="Link to this heading">#</a></h3>
+<p>RLN comes from the preset — there is nothing to configure. <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> runs
+with it on (the LEZ testnet registry), so a <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> node needs the RLN
+modules and an active RLN membership; see <a class="reference internal" href="rln.html#turning-rln-on"><span class="std std-ref"><code class="docutils literal notranslate"><span class="pre">rln.md</span></code></span></a>.
+<code class="docutils literal notranslate"><span class="pre">logos.dev</span></code> runs with it off, so a <code class="docutils literal notranslate"><span class="pre">logos.dev</span></code> node needs no RLN modules;
+<code class="docutils literal notranslate"><span class="pre">module</span> <span class="pre">load</span></code> reports <code class="docutils literal notranslate"><span class="pre">liblogos_rln_module</span></code> as skipped and carries on.
+<a class="reference internal" href="networks.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">networks.md</span></code></span></a> tracks each network’s RLN state.</p>
+<p>On a preset with RLN on, install the RLN modules next to this one before
+<code class="docutils literal notranslate"><span class="pre">createNode</span></code>, or bring-up ends in <code class="docutils literal notranslate"><span class="pre">Failed</span></code>:</p>
+<ul>
+<li><p>Prebuilt binaries — they are in a separate catalog:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logosctl<span class="w"> </span>catalog<span class="w"> </span>add<span class="w"> </span>https://github.com/logos-co/logos-rln-modules/releases/download/index/logos-repo.json
+logosctl<span class="w"> </span>catalog<span class="w"> </span>refresh
+logosctl<span class="w"> </span>package<span class="w"> </span>install<span class="w"> </span>liblogos_rln_module<span class="w"> </span>--yes
+</pre></div>
+</div>
+</li>
+<li><p>Nix — the build above already installs them.</p></li>
+<li><p>Docker — set the <code class="docutils literal notranslate"><span class="pre">RLN_VERSION</span></code> build arg of the
+<a class="reference external" href="https://github.com/logos-co/logos-docker">logos-docker</a> image in
+<a class="reference download internal" download="" href="../_downloads/f0f45a183f8765773a1d775882cc3b53/docker-compose.yml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docker-compose.yml</span></code></span></a>, with <code class="docutils literal notranslate"><span class="pre">MODULES_REPO</span></code>
+pointing at a catalog that carries the RLN modules.</p></li>
+</ul>
+<p>Follow bring-up with <code class="docutils literal notranslate"><span class="pre">rlnState</span></code>: <code class="docutils literal notranslate"><span class="pre">Disabled</span></code> → <code class="docutils literal notranslate"><span class="pre">Initializing</span></code> → <code class="docutils literal notranslate"><span class="pre">Ready</span></code> |
+<code class="docutils literal notranslate"><span class="pre">Failed</span></code>. See <a class="reference internal" href="rln.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">rln.md</span></code></span></a> for the details.</p>
+</section>
+<section id="plugin-hosted-discovery">
+<h3>Plugin-hosted discovery<a class="headerlink" href="#plugin-hosted-discovery" title="Link to this heading">#</a></h3>
+<p>Enable it with <code class="docutils literal notranslate"><span class="pre">&quot;pluginKadDiscovery&quot;:</span> <span class="pre">true</span></code> in <code class="docutils literal notranslate"><span class="pre">messagingOverrides</span></code> (or in
+<code class="docutils literal notranslate"><span class="pre">kernelConf</span></code> for a kernel-only node); leave it out to keep the node’s internal
+discovery. On top of <a class="reference download internal" download="" href="../_downloads/1ab476f44a356e788b485db128d52fdc/logos-dev.json"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">conf/logos-dev.json</span></code></span></a> the
+switch is all it takes:</p>
+<div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"preset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"logos.dev"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"messagingOverrides"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"pluginKadDiscovery"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Extra DHT bootstrap peers go through the node’s own <code class="docutils literal notranslate"><span class="pre">kad-bootstrap-node</span></code> key.</p>
+<p>It needs <code class="docutils literal notranslate"><span class="pre">libp2p_module</span></code> installed next to this module (see the Nix build
+above). Without it <code class="docutils literal notranslate"><span class="pre">start</span></code> fails and the node is stopped. On Windows, where
+<code class="docutils literal notranslate"><span class="pre">libp2p_module</span></code> has no build, use internal discovery.</p>
+<p><code class="docutils literal notranslate"><span class="pre">LIBP2P_MODULE_CONFIG</span></code> (inline JSON or a file path) is optional. Set it only to
+override libp2p’s own defaults, for example its listen addresses when other
+nodes must reach it: unset, it listens on an ephemeral loopback port.</p>
+<p>How it works is described in <a class="reference internal" href="architecture.html#plugin-hosted-discovery"><span class="std std-ref">Architecture</span></a>.</p>
+</section>
+</section>
+<section id="metrics">
+<h2>Metrics<a class="headerlink" href="#metrics" title="Link to this heading">#</a></h2>
+<p>The node already aggregates Prometheus metrics internally (the same set exposed
+on <code class="docutils literal notranslate"><span class="pre">metricsServerPort</span></code>, rendered behind the <code class="docutils literal notranslate"><span class="pre">&quot;Metrics&quot;</span></code> node-info attribute).
+<code class="docutils literal notranslate"><span class="pre">collectOpenMetricsText()</span></code> hands that exposition text back <strong>verbatim</strong> so the
+<a class="reference external" href="https://github.com/logos-co/openmetrics-module"><code class="docutils literal notranslate"><span class="pre">openmetrics</span></code></a> module can scrape
+this module without standing up a separate HTTP server — no in-module parsing or
+reshaping. The openmetrics scraper parses the text, injects a
+<code class="docutils literal notranslate"><span class="pre">module=&quot;delivery_module&quot;</span></code> label on every series, and merges it with other
+modules.</p>
+<p>Point the <code class="docutils literal notranslate"><span class="pre">openmetrics</span></code> module at this one by name, selecting the text-source
+convention with <code class="docutils literal notranslate"><span class="pre">&quot;format&quot;:</span> <span class="pre">&quot;text&quot;</span></code>:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>logoscore<span class="w"> </span>--config-dir<span class="w"> </span>/tmp/om<span class="w"> </span>call<span class="w"> </span>openmetrics<span class="w"> </span>start<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s1">'{"port":9090,"modules":[{"name":"delivery_module","format":"text"}]}'</span>
+curl<span class="w"> </span>http://localhost:9090/metrics<span class="w">   </span><span class="c1"># every series carries module="delivery_module"</span>
+</pre></div>
+</div>
+<p>Before a node is created (or if the read fails) <code class="docutils literal notranslate"><span class="pre">collectOpenMetricsText()</span></code>
+returns an empty document so a scrape never errors out on this module.</p>
+<p>For a one-off read without the <code class="docutils literal notranslate"><span class="pre">openmetrics</span></code> module, the raw exposition text is
+also available via <code class="docutils literal notranslate"><span class="pre">getNodeInfo</span> <span class="pre">Metrics</span></code> — see <a class="reference internal" href="query-node.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">query-node.md</span></code></span></a>.</p>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="networks.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Networks: <code class="docutils literal notranslate"><span class="pre">logos.dev</span></code> vs <code class="docutils literal notranslate"><span class="pre">logos.test</span></code></p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="query-node.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Query a running node</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#with-docker">With Docker</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#start">Start</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#boot-the-node">Boot the node</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#stop">Stop</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#without-docker-prebuilt-binaries">Without Docker: prebuilt binaries</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-logosctl">Install logosctl</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-the-module-and-boot-the-node">Install the module and boot the node</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#fund-the-node-s-rln-membership">Fund the node’s RLN membership</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#without-docker-build-with-nix">Without Docker: build with Nix</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Prerequisites</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#build-the-runtime-and-module">Build the runtime and module</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#start-the-daemon">Start the daemon</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Boot the node</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">Stop</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#check-the-node">Check the node</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration">Configuration</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#public-address">Public address</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#quic">QUIC</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#rln">RLN</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#plugin-hosted-discovery">Plugin-hosted discovery</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#metrics">Metrics</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../_sources/pages/run-node.md.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb"></script>
+<script defer src="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026, Institute of Free Technology.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.0.4.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.17.1.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
