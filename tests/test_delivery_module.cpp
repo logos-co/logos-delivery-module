@@ -860,14 +860,52 @@ LOGOS_TEST(createNode_without_an_rln_preset_installs_no_plugin) {
     delete impl;
 }
 
-// The shipped presets all carry RLN off, so naming one must not turn it on.
-LOGOS_TEST(builtin_presets_leave_rln_off) {
+// Only logos.test ships with RLN on; "" and logos.dev stay off.
+LOGOS_TEST(builtin_presets_enable_rln_only_on_logos_test) {
+    ::unsetenv(kRlnPresetsEnvVar);
+    std::string error;
+
+    const RlnPresetEntry test = resolveRlnPreset("logos.test", error);
+    LOGOS_ASSERT_TRUE(error.empty());
+    LOGOS_ASSERT_TRUE(test.enabled);
+    LOGOS_ASSERT_FALSE(test.enableValidation);
+    LOGOS_ASSERT_EQ(test.registryId,
+                    std::string("logos:testnet:"
+                                "841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893"));
+    LOGOS_ASSERT_EQ(test.rlnIdentifier, std::string(kLogosDeliveryRlnIdentifier));
+    LOGOS_ASSERT_EQ(test.epochSizeSec, static_cast<uint64_t>(600));
+    LOGOS_ASSERT_EQ(test.maxEpochGap, static_cast<uint64_t>(0));
+
+    LOGOS_ASSERT_FALSE(resolveRlnPreset("logos.dev", error).enabled);
+    LOGOS_ASSERT_TRUE(error.empty());
+    LOGOS_ASSERT_FALSE(resolveRlnPreset("", error).enabled);
+    LOGOS_ASSERT_TRUE(error.empty());
+}
+
+// Naming logos.test with no presets file turns RLN on from the built-in table.
+LOGOS_TEST(builtin_logos_test_preset_installs_the_rln_plugin) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    ::unsetenv(kRlnPresetsEnvVar);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.test"})").success);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_TRUE(libCfg.value("rln-disable-validation", false));
+    // No framework context in a unit test, so the bridge cannot come up.
+    LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
+}
+
+// logos.dev carries RLN off, so naming it must not turn it on.
+LOGOS_TEST(builtin_logos_dev_preset_leaves_rln_off) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
-    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.test"})").success);
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.dev"})").success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
     LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
 }
