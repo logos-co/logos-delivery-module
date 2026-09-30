@@ -167,7 +167,7 @@ packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
 straight out of the lock.
 
 ```bash
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=65697028baffc072e1aeebaec7c7e35e7e12cab1&dir=logos-rln-module#lgx' -o rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=25357cfd877ba18d6e0880564b8fd7ba0abf2d70&dir=logos-rln-module#lgx' -o rln-lgx
 nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=9583801fae795b6d5fd5bfe8d4f407d14d859b9f&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
 
 ```
