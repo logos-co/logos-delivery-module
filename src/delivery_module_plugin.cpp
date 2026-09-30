@@ -12,7 +12,6 @@
 #include <optional>
 #include <semaphore>
 #include <unordered_map>
-#include <vector>
 
 #include <nlohmann/json.hpp>
 #include "base64.h"
@@ -83,56 +82,6 @@ constexpr const char* kEventNames[] = {
     "onChannelMessageSent",
     "onChannelMessageError",
 };
-
-std::mutex gMixRlnBridgeMutex;
-std::vector<RlnBridge*> gMixRlnBridges;
-
-void dispatchMixRlnCall(uint64_t id, const char* method, const char* args, void*)
-{
-    std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
-    const auto bridgeIt = std::find_if(gMixRlnBridges.rbegin(), gMixRlnBridges.rend(),
-        [](const RlnBridge* bridge) { return bridge->enabled(); });
-    if (bridgeIt == gMixRlnBridges.rend()) {
-        logosdelivery_rln_response(
-            id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN bridge unavailable\"}}");
-        return;
-    }
-
-    try {
-        (*bridgeIt)->callMix(id, method ? method : "", args ? args : "[]");
-    } catch (...) {
-        logosdelivery_rln_response(
-            id, "{\"error\":{\"class\":\"transient\",\"message\":\"Mix RLN submission failed\"}}");
-    }
-}
-
-bool registerMixRlnBridge(RlnBridge* bridge)
-{
-    std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
-    if (std::find(gMixRlnBridges.begin(), gMixRlnBridges.end(), bridge)
-        != gMixRlnBridges.end()) {
-        return true;
-    }
-    if (gMixRlnBridges.empty()
-        && logosdelivery_mix_rln_set_callback(dispatchMixRlnCall, nullptr) != 0) {
-        return false;
-    }
-    gMixRlnBridges.push_back(bridge);
-    return true;
-}
-
-void unregisterMixRlnBridge(RlnBridge* bridge)
-{
-    std::lock_guard<std::mutex> lock(gMixRlnBridgeMutex);
-    const auto bridgeIt = std::find(gMixRlnBridges.begin(), gMixRlnBridges.end(), bridge);
-    if (bridgeIt == gMixRlnBridges.end()) {
-        return;
-    }
-    gMixRlnBridges.erase(bridgeIt);
-    if (gMixRlnBridges.empty()) {
-        logosdelivery_mix_rln_set_callback(nullptr, nullptr);
-    }
-}
 } // namespace
 
 void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
@@ -398,7 +347,7 @@ void DeliveryModuleImpl::releaseNode()
     // process-global -- clearing it unconditionally would disarm another
     // instance's RLN.
     abortRln();
-    unregisterMixRlnBridge(rlnBridge.get());
+
     if (deliveryCtxHandle) {
         // Frees the handle and stops the node, tearing down the event
         // listeners registered against it along the way.
@@ -683,11 +632,9 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
     joinRlnBringUp();
-    rlnBridge->init(&modules().liblogos_rln_module);
 
     if (rlnPreset.enabled) {
         DeliveryRlnConfig fromPreset;
-        fromPreset.manageBackend = rlnPreset.manageBackend;
         fromPreset.registryId = rlnPreset.registryId;
         fromPreset.rlnIdentifier = rlnPreset.rlnIdentifier;
         fromPreset.epochSizeSec = rlnPreset.epochSizeSec;
@@ -793,13 +740,6 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     deliveryCtx = callbackCtx->ctx->ptr;
 
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
-
-    // ctx_create initializes the Nim runtime. Install the process-global Mix
-    // callback only after that initialization and after this instance owns a
-    // valid context.
-    if (!registerMixRlnBridge(rlnBridge.get())) {
-        return releaseAndFail("Failed to install the Mix RLN callback");
-    }
 
     for (const char* eventName : kEventNames) {
         if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
@@ -932,8 +872,7 @@ void DeliveryModuleImpl::stopRlnBackend()
     // This module started the RLN backend, so it stops it too. Stopping one
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
-    const auto config = rlnConfigSnapshot();
-    if (config->enabled && config->manageBackend && rlnBridge->enabled()) {
+    if (rlnConfigSnapshot()->enabled) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
@@ -1321,9 +1260,6 @@ std::string DeliveryModuleImpl::startRlnBackend()
         return "rln bridge unavailable (" + failure + "); answering falls to rlnRespond";
     }
 
-    // A host sharing the backend with Mix owns its configuration and lifetime.
-    if (!rlnConfig->manageBackend) return {};
-
     // The delivery library no longer starts the backend, so this module does:
     // a node that mounts RLN over a stopped module would Ignore every inbound
     // RLN message.
@@ -1368,17 +1304,4 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
     }
 
     return {true, {}};
-}
-
-StdLogosResult DeliveryModuleImpl::getLocalMixPeerRecord() {
-    if (!deliveryCtx) return {false, {}, "Context not initialized"};
-    return callApiRetValue("waku_mix_get_peer_record", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_waku_mix_get_peer_record, asCtx(deliveryCtxHandle)));
-}
-
-StdLogosResult DeliveryModuleImpl::addMixPeer(const std::string& recordJson) {
-    if (!deliveryCtx) return {false, {}, "Context not initialized"};
-    return callApiRetValue("waku_mix_add_peer", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_waku_mix_add_peer, asCtx(deliveryCtxHandle),
-                    recordJson.c_str()));
 }

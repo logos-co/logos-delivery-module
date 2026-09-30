@@ -71,14 +71,6 @@ public:
         answer(std::move(callback), std::string());
     }
 
-    void get_registry_parametersAsyncResult(
-        const std::string&, const std::string&,
-        std::function<void(logos::AsyncResult<StdLogosResult>)> callback,
-        int /*timeout_ms*/ = 0)
-    {
-        answer(std::move(callback), StdLogosResult{});
-    }
-
     void get_epoch_quotaAsyncResult(
         const std::string&, const std::string&, const std::string&,
         std::function<void(logos::AsyncResult<StdLogosResult>)> callback,

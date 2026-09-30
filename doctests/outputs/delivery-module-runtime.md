@@ -386,7 +386,7 @@ logoscore status
 
 CI stages the Windows module, its DLLs, and a native `logoscore` host.
 Copy the module into the host's scan directory, then use a private daemon
-configuration directory and an offline kernel-only node config. The shared
+configuration directory and an offline node config. The shared Windows
 runner provides `run` to launch each staged executable.
 
 ### 5.1 Stage the delivery module
@@ -400,7 +400,7 @@ test ! -e windows-logoscore/modules/delivery_module &&
 ### 5.2 Write an offline node config
 
 ```json
-{"entryLayer":"kernel","kernelConf":{"logLevel":"INFO"}}
+{"logLevel":"INFO"}
 ```
 
 ### 5.3 Start the Windows daemon

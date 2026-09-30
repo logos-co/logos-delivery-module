@@ -29,13 +29,6 @@ extern std::string g_lastCreateConfigJson;
 // failure carrying this reason, as a start that failed inside the node.
 extern std::string g_startNodeReplyError;
 
-extern LogosDeliveryMixRlnCallFn g_mixCallback;
-extern bool g_mixCallbackSetBeforeRuntime;
-extern bool g_nimRuntimeInitialized;
-extern int g_mixSetCallbackCalls;
-extern const void* g_createdCtxHandle;
-extern const void* g_lastMixCtxHandle;
-
 inline void resetRlnMockState() {
     g_callbacks = LogosDeliveryRlnPlugin{};
     g_userData = nullptr;
@@ -46,12 +39,6 @@ inline void resetRlnMockState() {
     g_responseFired = false;
     g_lastCreateConfigJson.clear();
     g_startNodeReplyError.clear();
-    g_mixCallback = nullptr;
-    g_mixCallbackSetBeforeRuntime = false;
-    g_nimRuntimeInitialized = false;
-    g_mixSetCallbackCalls = 0;
-    g_createdCtxHandle = nullptr;
-    g_lastMixCtxHandle = nullptr;
 }
 
 } // namespace delivery_test_rln
