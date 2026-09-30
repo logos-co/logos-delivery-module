@@ -41128,18 +41128,16 @@
       },
       "locked": {
         "lastModified": 1790782197,
-        "narHash": "sha256-8z1n8RoCF7xolGGGqL3k48B/e3MUGqMifROQZ3SafUE=",
+        "narHash": "sha256-GHxi1EhkVvriIgc7HdMOiF3u6BSKZ3zXtRfpE5Sm4PA=",
         "ref": "feat/mix-rln-module-interop",
         "rev": "5becb59bc530435ba02a2c4f4be596f3d93e86c6",
         "revCount": 2601,
-        "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
         "ref": "feat/mix-rln-module-interop",
         "rev": "5becb59bc530435ba02a2c4f4be596f3d93e86c6",
-        "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       }
