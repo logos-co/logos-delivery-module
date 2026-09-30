@@ -42,8 +42,8 @@ docker exec logos-node logosctl module load delivery_module
 docker exec logos-node logosctl call delivery_module createNode @/conf/logos-test.json
 ```
 
-`logos.test` runs RLN, so the node needs a membership before it can start —
-[fund it](#fund-the-nodes-rln-membership), then:
+`logos.test` runs RLN, so the node sends only once it holds a membership —
+[fund it](#fund-the-nodes-rln-membership). It starts and receives without one:
 
 ```bash
 docker exec logos-node logosctl call delivery_module start
@@ -124,7 +124,7 @@ Verify with `logosctl daemon status`; stop with `logosctl daemon stop`.
 `createNode` brings the RLN modules up on the preset's registry; they create
 the node's own wallet and register a membership as soon as its payer account
 holds enough native LEZ — the node pays for itself, nothing is registered by
-hand. `start` passes only once that membership is active.
+hand. Until that membership is active the node runs, but its sends fail.
 
 With Docker, prefix each command with `docker exec logos-node`.
 

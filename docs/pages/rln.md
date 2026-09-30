@@ -46,10 +46,10 @@ preset-less `""` have it off (see [`networks.md`](./networks.md)).
 `logos.test` node needs no LEZ environment. With older RLN modules, set
 `LEZ_RLN_SEQUENCER` to the sequencer URL.
 
-A `logos.test` node must hold an **active RLN membership** in that registry —
-registered out-of-band through the RLN module, from a funded LEZ testnet
-payer — or bring-up fails the membership gate below and the node does not
-start.
+A `logos.test` node needs an **active RLN membership** in that registry to
+send — registered through the RLN module, from a funded LEZ testnet payer.
+Without one the node starts and receives, but every send is retried for a
+minute and then fails with `messageError`.
 
 - Installing the library's RLN plugin is what makes it mount RLN, and it
   reads that at node creation, so `createNode` does it before handing the
@@ -65,12 +65,11 @@ start.
   RLN stack installed at all. A node on an RLN-enabled preset loads it — and
   its own dep, `liblogos_lez_rln_module` — before
   `createNode`, or bring-up ends in `Failed`.
-- Bring-up fires `start` from this module, then the library's
-  `get_membership_state` gate: the node's membership must already be
-  `active` or `grace_period` — registration happens out-of-band, through the
-  RLN module, not through this library or its plugin.
-  Without one (e.g. no chain), `start` fails with the RLN module's own
-  error carried verbatim into `nodeStarted`.
+- Bring-up fires `start` from this module; the library then checks the
+  membership with `get_membership_state`. It must be `active` or
+  `grace_period` for the node to send — registration happens through the RLN
+  module, not through this library or its plugin. Without one the node still
+  starts and validates; sends fail until the membership is active.
 
 `Ready` means the backend started and the bridge answers. It does not mean
 the RLN module's valid-root window is warm — that is a background refresh
