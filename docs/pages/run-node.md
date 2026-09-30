@@ -29,15 +29,23 @@ docker compose up -d --build
 ```
 
 The image is built from [logos-docker](https://github.com/logos-co/logos-docker):
-the `logosctl` daemon with `delivery_module` 0.3.0 from the Logos catalog.
+the `logosctl` daemon with `delivery_module` 0.3.0 and the RLN modules
+(`liblogos_rln_module` 0.10.0, `liblogos_lez_rln_module`) from the Logos
+catalog.
 
 ### Boot the node
 
-The daemon is running; load the module and start the node:
+The daemon is running; load the module and create the node:
 
 ```bash
 docker exec logos-node logosctl module load delivery_module
 docker exec logos-node logosctl call delivery_module createNode @/conf/logos-test.json
+```
+
+`logos.test` runs RLN, so the node needs a membership before it can start —
+[fund it](#fund-the-nodes-rln-membership), then:
+
+```bash
 docker exec logos-node logosctl call delivery_module start
 ```
 
@@ -76,9 +84,11 @@ and follow its install steps to put `logosctl` on your `PATH`.
 # Start the daemon; --detach returns once it accepts commands
 logosctl daemon start --detach
 
-# Fetch delivery_module from the Logos catalog and install it
+# Fetch delivery_module and the RLN modules logos.test needs from the Logos
+# catalog and install them (liblogos_lez_rln_module comes in as a dependency)
 logosctl catalog refresh
 logosctl package install delivery_module --version 0.3.0 --yes
+logosctl package install liblogos_rln_module --version 0.10.0 --yes
 
 # logos.test node config (layered createNode shape — see Configuration below)
 cat > logos-test.json <<'JSON'
@@ -95,6 +105,7 @@ JSON
 
 logosctl module load delivery_module
 logosctl call delivery_module createNode @logos-test.json
+# fund the node's RLN membership first (see below), then:
 logosctl call delivery_module start
 ```
 
@@ -106,6 +117,41 @@ session directory, `~/.logosctl` (`--config-dir` picks another). The daemon
 log is `~/.logosctl/logs/daemon.log`.
 
 Verify with `logosctl daemon status`; stop with `logosctl daemon stop`.
+
+## Fund the node's RLN membership
+
+`logos.test` rate-limits with RLN on the LEZ testnet (see [`rln.md`](./rln.md)).
+`createNode` brings the RLN modules up on the preset's registry; they create
+the node's own wallet and register a membership as soon as its payer account
+holds enough native LEZ — the node pays for itself, nothing is registered by
+hand. `start` passes only once that membership is active.
+
+With Docker, prefix each command with `docker exec logos-node`.
+
+```bash
+# The account to fund (state "ready", "network":"testnet")
+logosctl call liblogos_lez_rln_module wallet_status
+# → {... "payer":"<ACCOUNT>" ...}
+```
+
+Send it **at least 200000000** native on the LEZ testnet: the registration
+price is 1000000 (rate limit 100), and the transaction's fee reserve, sized
+from the chain's live fees, is ~1.8e8 at base fee 8 (most of it is refunded).
+Bridge funds from the Logos blockchain testnet with a channel deposit, or
+transfer from an account that already holds LEZ testnet native.
+
+Then wait for the membership (typically 1–3 minutes after the funds land):
+
+```bash
+printf '%s' '5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977' > /tmp/rln-id.arg
+logosctl call liblogos_rln_module get_membership_state \
+  logos:testnet:841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893 @/tmp/rln-id.arg
+# "state":"unknown" with provisioning.step "awaiting_funding" → not funded yet
+# "state":"active"                                            → ready to start
+```
+
+The wallet (and the key to its funds) lives in the node's data — the
+`logos-persistence` volume with Docker, the session directory otherwise.
 
 ## Without Docker: build with Nix
 
