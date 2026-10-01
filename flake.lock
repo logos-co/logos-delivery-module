@@ -41127,17 +41127,18 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1790537358,
-        "narHash": "sha256-erJVYA5G7wrhV/tOojfaTZpuMaTyXXJwYs6P6d5Za2s=",
-        "ref": "refs/tags/v0.39.0",
-        "rev": "ca28145fdc5e9858595126a3d6b01ec19882e31c",
-        "revCount": 2572,
+        "lastModified": 1790883046,
+        "narHash": "sha256-cCbCRbHn0Tex+mxYIJMFSLKR/vYPCevVm2+uu5qLDCs=",
+        "ref": "refs/heads/fix/libp2p-liveness-spin",
+        "rev": "04cdfd2fa0ba448935fe5990e76c30891a7109ee",
+        "revCount": 2605,
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
-        "ref": "refs/tags/v0.39.0",
+        "ref": "refs/heads/fix/libp2p-liveness-spin",
+        "rev": "04cdfd2fa0ba448935fe5990e76c30891a7109ee",
         "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
