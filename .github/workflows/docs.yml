@@ -107,7 +107,7 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-          newest="$(git tag --list --sort=-v:refname | head -n1)"
+          newest="$(git -c versionsort.suffix=- tag --list --sort=-v:refname | head -n1)"
           if [ "${{ github.event.release.prerelease }}" = "true" ] || [ "$tag" != "$newest" ]; then
             echo "is_latest=false" >> "$GITHUB_OUTPUT"
           else
