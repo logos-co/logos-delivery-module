@@ -34,6 +34,8 @@ public:
     static inline nlohmann::json lookupRecords;
     /// When true, discoLookup throws, as a malformed reply would.
     static inline bool lookupThrows = false;
+    /// The config the last createNode was given.
+    static inline std::string lastCreateNodeConfig;
 
     static void reset()
     {
@@ -44,10 +46,12 @@ public:
         startCalls = 0;
         lookupRecords = nullptr;
         lookupThrows = false;
+        lastCreateNodeConfig.clear();
     }
 
-    StdLogosResult createNode(const std::string&, logos::CallError* err = nullptr, int = 0)
+    StdLogosResult createNode(const std::string& config, logos::CallError* err = nullptr, int = 0)
     {
+        lastCreateNodeConfig = config;
         if (err && !createNodeErrorCode.empty()) {
             err->code = createNodeErrorCode;
             err->message = "stub transport failure";
