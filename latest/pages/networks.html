@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Networks: logos.dev vs logos.test &#8212; Logos Delivery Module 0.2.1 documentation</title>
+    <title>Networks: logos.dev vs logos.test &#8212; Logos Delivery Module 0.3.0 documentation</title>
   
   
   
@@ -39,14 +39,14 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
 
-    <script src="../_static/documentation_options.js?v=37f418d5"></script>
+    <script src="../_static/documentation_options.js?v=e259d695"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'pages/networks';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.17.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://logos-co.github.io/logos-delivery-module/switcher.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.2.1';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.0';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -58,7 +58,7 @@
     <link rel="prev" title="Architecture" href="architecture.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.2.1" />
+  <meta name="docsearch:version" content="0.3.0" />
   
     
     <script src="../_static/searchtools.js"></script>
@@ -134,7 +134,7 @@
     <img src="../_static/logos-logo-dark.png" class="logo__image only-dark pst-js-only" alt=""/>
   
   
-    <p class="title logo__title">Delivery Module 0.2.1</p>
+    <p class="title logo__title">Delivery Module 0.3.0</p>
   
 </a></div>
     
@@ -371,6 +371,7 @@
 <li class="toctree-l1"><a class="reference internal" href="run-node.html">Run a delivery node</a></li>
 <li class="toctree-l1"><a class="reference internal" href="query-node.html">Query a running node</a></li>
 <li class="toctree-l1"><a class="reference internal" href="versioning.html">Versioning</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rln.html">RLN bridge</a></li>
 </ul>
 </div>
 </nav></div>
@@ -479,7 +480,7 @@ delivery changes, not to build against.</p>
 </tr>
 <tr class="row-even"><td><p>RLN</p></td>
 <td><p>off</p></td>
-<td><p>off</p></td>
+<td><p>on — LEZ testnet registry, 600 s epochs, validation off</p></td>
 </tr>
 <tr class="row-odd"><td><p>Mix routing</p></td>
 <td><p>on</p></td>
@@ -500,8 +501,14 @@ delivery changes, not to build against.</p>
 </tbody>
 </table>
 </div>
-<p>Cluster ID and entry nodes are the only differences. Both names also accept a
+<p>Cluster ID, entry nodes and RLN are the only differences. Both names also accept a
 dotless spelling (<code class="docutils literal notranslate"><span class="pre">logosdev</span></code>, <code class="docutils literal notranslate"><span class="pre">logostest</span></code>).</p>
+<p>The preset also selects the node’s RLN settings — registry, epoch size and
+application identifier — which is why RLN needs no configuration of its own.
+<code class="docutils literal notranslate"><span class="pre">logos.dev</span></code> runs with it off. <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> runs it on the LEZ testnet
+registry, so a <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> node needs the RLN modules and an active RLN
+membership before it can start; see <a class="reference internal" href="rln.html"><span class="std std-doc"><code class="docutils literal notranslate"><span class="pre">rln.md</span></code></span></a> for how a preset turns
+it on and how a local deployment supplies its own.</p>
 <p>The live node list and status for both fleets is at
 <a class="reference external" href="https://fleets.logos.co/">fleets.logos.co</a>.</p>
 <blockquote>
