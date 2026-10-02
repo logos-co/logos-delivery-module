@@ -11,7 +11,8 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=refs/tags/v0.39.0&submodules=1";
+    # Temporary: logos-delivery#4397, pinning nim-libp2p 99f43f2b for the kad liveness-loop fix.
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=refs/heads/fix/libp2p-liveness-spin&rev=04cdfd2fa0ba448935fe5990e76c30891a7109ee&submodules=1";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
