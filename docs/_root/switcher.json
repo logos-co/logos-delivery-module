@@ -5,18 +5,6 @@
     "preferred": true
   },
   {
-    "version": "0.3.0-rc.3",
-    "url": "https://logos-co.github.io/logos-delivery-module/v0.3.0-rc.3/"
-  },
-  {
-    "version": "0.3.0-rc.2",
-    "url": "https://logos-co.github.io/logos-delivery-module/v0.3.0-rc.2/"
-  },
-  {
-    "version": "0.3.0-rc.1",
-    "url": "https://logos-co.github.io/logos-delivery-module/v0.3.0-rc.1/"
-  },
-  {
     "version": "0.2.1",
     "url": "https://logos-co.github.io/logos-delivery-module/v0.2.1/"
   }
