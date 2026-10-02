@@ -43,8 +43,8 @@ dotless spelling (`logosdev`, `logostest`).
 The preset also selects the node's RLN settings — registry, epoch size and
 application identifier — which is why RLN needs no configuration of its own.
 `logos.dev` runs with it off. `logos.test` runs it on the LEZ testnet
-registry, so a `logos.test` node needs the RLN modules and an active RLN
-membership before it can start; see [`rln.md`](./rln.md) for how a preset turns
+registry, so a `logos.test` node needs the RLN modules, and an active RLN
+membership to send; see [`rln.md`](./rln.md) for how a preset turns
 it on and how a local deployment supplies its own.
 
 The live node list and status for both fleets is at
