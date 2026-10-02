@@ -311,6 +311,30 @@ LOGOS_TEST(discovery_start_reports_absent_libp2p_module) {
     LOGOS_ASSERT_TRUE(reason.find("internal discovery") != std::string::npos);
 }
 
+// libp2p gets every bootstrap peer the node resolved, in order: with only the
+// first, an unreachable first entry left kademlia with nobody to join.
+LOGOS_TEST(discovery_hands_libp2p_every_bootstrap_peer) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule libp2p("delivery_module");
+    DeliveryServiceDiscoveryPlugin plugin(&libp2p, R"({"bootstrapNodes":[
+        {"peerId":"16Uiu2HAmA","addrs":["/ip4/10.0.0.1/tcp/1"]},
+        {"peerId":"16Uiu2HAmB","addrs":["/ip4/10.0.0.2/tcp/1"]},
+        {"peerId":"16Uiu2HAmC","addrs":["/ip4/10.0.0.3/tcp/1"]}],
+        "mountKad":true,"mountServiceDiscovery":true})");
+
+    char err[1024] = {};
+    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
+    const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
+    const auto handed = nlohmann::json::parse(Libp2pModule::lastCreateNodeConfig);
+    Libp2pModule::reset();
+
+    LOGOS_ASSERT_EQ(rc, LD_DISCO_OK);
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"].size(), size_t{3});
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"][2]["peerId"].get<std::string>(), std::string("16Uiu2HAmC"));
+}
+
 // libp2p's start outlives its own 10s call deadline while kademlia bootstraps,
 // and keeps running. A second start issued meanwhile runs a second switch start
 // alongside the first -- two accept loops on one TCP listener, which crashes

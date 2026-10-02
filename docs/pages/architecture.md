@@ -60,9 +60,10 @@ presets included. It sets `libp2p_module` up from that answer — the peers as
 libp2p's own `LIBP2P_MODULE_CONFIG`.
 
 libp2p is first contacted on the first discovery call after `start`, not at
-`createNode`, so a missing module or a bad bootstrap set surfaces there. Only
-the first bootstrap peer is handed over: libp2p dials the set inside a fixed
-10 s call budget, which two DNS-resolved peers exceed.
+`createNode`, so a missing module or a bad bootstrap set surfaces there. Every
+bootstrap peer is handed over. libp2p dials the set inside its `start`, whose
+call deadline is a fixed 10 s; a start that outlasts it carries on and is not
+issued again.
 
 Set `LD_DISCO_TRACE` to a file path to log every call across the plugin
 boundary; logos-core discards a module's stderr, so that file is the only view
