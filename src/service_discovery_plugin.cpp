@@ -18,10 +18,6 @@
 
 namespace {
 
-// Bootstrap peers handed to libp2p's createNode. libp2p's start dials them
-// within its fixed 10s call budget, and two DNS-resolved peers exceed it.
-constexpr size_t kMaxBootstrapNodes = 1;
-
 // The node's per-verb wait; nim-brokers' lane may enforce a shorter one.
 constexpr uint32_t kRequestTimeoutMs = 15000;
 
@@ -255,18 +251,11 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     if (!cfg.is_object()) {
         return "libp2p config is not a JSON object";
     }
+    // Every bootstrap peer goes to libp2p. Dialling several can outlast its
+    // 10s start deadline; that is a notice below, not a failure.
     size_t bootstrapCount = 0;
     if (const auto nodes = cfg.find("bootstrapNodes");
         nodes != cfg.end() && nodes->is_array()) {
-        if (nodes->size() > kMaxBootstrapNodes) {
-            trace("libp2p bootstrapNodes    %zu configured, handing over the first %zu",
-                  nodes->size(), kMaxBootstrapNodes);
-            nlohmann::json kept = nlohmann::json::array();
-            for (size_t i = 0; i < kMaxBootstrapNodes; ++i) {
-                kept.push_back((*nodes)[i]);
-            }
-            *nodes = kept;
-        }
         bootstrapCount = nodes->size();
     }
 
