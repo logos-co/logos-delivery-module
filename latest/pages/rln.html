@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>RLN bridge &#8212; Logos Delivery Module 0.3.0 documentation</title>
+    <title>RLN bridge &#8212; Logos Delivery Module 0.3.1 documentation</title>
   
   
   
@@ -39,14 +39,14 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
 
-    <script src="../_static/documentation_options.js?v=e259d695"></script>
+    <script src="../_static/documentation_options.js?v=4621528c"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'pages/rln';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.17.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://logos-co.github.io/logos-delivery-module/switcher.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.0';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.1';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -57,7 +57,7 @@
     <link rel="prev" title="Versioning" href="versioning.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.0" />
+  <meta name="docsearch:version" content="0.3.1" />
   
     
     <script src="../_static/searchtools.js"></script>
@@ -133,7 +133,7 @@
     <img src="../_static/logos-logo-dark.png" class="logo__image only-dark pst-js-only" alt=""/>
   
   
-    <p class="title logo__title">Delivery Module 0.3.0</p>
+    <p class="title logo__title">Delivery Module 0.3.1</p>
   
 </a></div>
     
@@ -493,10 +493,10 @@ preset-less <code class="docutils literal notranslate"><span class="pre">&quot;&
 <code class="docutils literal notranslate"><span class="pre">logos:testnet</span></code> to that sequencer through their built-in network table, so a
 <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> node needs no LEZ environment. With older RLN modules, set
 <code class="docutils literal notranslate"><span class="pre">LEZ_RLN_SEQUENCER</span></code> to the sequencer URL.</p>
-<p>A <code class="docutils literal notranslate"><span class="pre">logos.test</span></code> node must hold an <strong>active RLN membership</strong> in that registry —
-registered out-of-band through the RLN module, from a funded LEZ testnet
-payer — or bring-up fails the membership gate below and the node does not
-start.</p>
+<p>Sending needs an <strong>active RLN membership</strong> in that registry, registered
+out-of-band through the RLN module from a funded LEZ testnet payer. Receiving
+doesn’t. A node without a membership starts, subscribes, relays and can
+validate proofs. Only its sends fail.</p>
 <ul class="simple">
 <li><p>Installing the library’s RLN plugin is what makes it mount RLN, and it
 reads that at node creation, so <code class="docutils literal notranslate"><span class="pre">createNode</span></code> does it before handing the
@@ -512,17 +512,17 @@ loads it nor requires it: a node whose preset has RLN off runs without the
 RLN stack installed at all. A node on an RLN-enabled preset loads it — and
 its own dep, <code class="docutils literal notranslate"><span class="pre">liblogos_lez_rln_module</span></code> — before
 <code class="docutils literal notranslate"><span class="pre">createNode</span></code>, or bring-up ends in <code class="docutils literal notranslate"><span class="pre">Failed</span></code>.</p></li>
-<li><p>Bring-up fires <code class="docutils literal notranslate"><span class="pre">start</span></code> from this module, then the library’s
-<code class="docutils literal notranslate"><span class="pre">get_membership_state</span></code> gate: the node’s membership must already be
-<code class="docutils literal notranslate"><span class="pre">active</span></code> or <code class="docutils literal notranslate"><span class="pre">grace_period</span></code> — registration happens out-of-band, through the
-RLN module, not through this library or its plugin.
-Without one (e.g. no chain), <code class="docutils literal notranslate"><span class="pre">start</span></code> fails with the RLN module’s own
-error carried verbatim into <code class="docutils literal notranslate"><span class="pre">nodeStarted</span></code>.</p></li>
+<li><p>Bring-up fires <code class="docutils literal notranslate"><span class="pre">start</span></code> from this module. If it fails, <code class="docutils literal notranslate"><span class="pre">rlnState</span></code> goes to
+<code class="docutils literal notranslate"><span class="pre">Failed</span></code> with the RLN module’s error.</p></li>
+<li><p>At startup the library also checks the node’s membership with
+<code class="docutils literal notranslate"><span class="pre">get_membership_state</span></code>. The result doesn’t block startup: a node without an
+<code class="docutils literal notranslate"><span class="pre">active</span></code> or <code class="docutils literal notranslate"><span class="pre">grace_period</span></code> membership logs a notice and starts anyway.</p></li>
 </ul>
 <p><code class="docutils literal notranslate"><span class="pre">Ready</span></code> means the backend started and the bridge answers. It does not mean
 the RLN module’s valid-root window is warm — that is a background refresh
 the RLN module does not currently expose a probe for.</p>
-<p>Every send queries <code class="docutils literal notranslate"><span class="pre">get_epoch_quota</span></code> and is queued while <code class="docutils literal notranslate"><span class="pre">remaining</span></code> is 0.</p>
+<p>With rate limiting on (<code class="docutils literal notranslate"><span class="pre">rate-limit-enabled</span></code>), every send queries
+<code class="docutils literal notranslate"><span class="pre">get_epoch_quota</span></code> and is queued while <code class="docutils literal notranslate"><span class="pre">remaining</span></code> is 0.</p>
 <section id="presets-for-a-test-or-local-deployment">
 <h3>Presets for a test or local deployment<a class="headerlink" href="#presets-for-a-test-or-local-deployment" title="Link to this heading">#</a></h3>
 <p><code class="docutils literal notranslate"><span class="pre">LOGOS_DELIVERY_RLN_PRESETS</span></code> names a JSON file whose entries are merged over

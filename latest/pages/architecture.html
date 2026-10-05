@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Architecture &#8212; Logos Delivery Module 0.3.0 documentation</title>
+    <title>Architecture &#8212; Logos Delivery Module 0.3.1 documentation</title>
   
   
   
@@ -39,14 +39,14 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
 
-    <script src="../_static/documentation_options.js?v=e259d695"></script>
+    <script src="../_static/documentation_options.js?v=4621528c"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'pages/architecture';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.17.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://logos-co.github.io/logos-delivery-module/switcher.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.0';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.1';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -58,7 +58,7 @@
     <link rel="prev" title="Internal docs" href="internal.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.0" />
+  <meta name="docsearch:version" content="0.3.1" />
   
     
     <script src="../_static/searchtools.js"></script>
@@ -134,7 +134,7 @@
     <img src="../_static/logos-logo-dark.png" class="logo__image only-dark pst-js-only" alt=""/>
   
   
-    <p class="title logo__title">Delivery Module 0.3.0</p>
+    <p class="title logo__title">Delivery Module 0.3.1</p>
   
 </a></div>
     
@@ -500,9 +500,10 @@ presets included. It sets <code class="docutils literal notranslate"><span class
 <code class="docutils literal notranslate"><span class="pre">bootstrapNodes</span></code>, <code class="docutils literal notranslate"><span class="pre">mountKad</span></code> and <code class="docutils literal notranslate"><span class="pre">mountServiceDiscovery</span></code> on — laid over
 libp2p’s own <code class="docutils literal notranslate"><span class="pre">LIBP2P_MODULE_CONFIG</span></code>.</p>
 <p>libp2p is first contacted on the first discovery call after <code class="docutils literal notranslate"><span class="pre">start</span></code>, not at
-<code class="docutils literal notranslate"><span class="pre">createNode</span></code>, so a missing module or a bad bootstrap set surfaces there. Only
-the first bootstrap peer is handed over: libp2p dials the set inside a fixed
-10 s call budget, which two DNS-resolved peers exceed.</p>
+<code class="docutils literal notranslate"><span class="pre">createNode</span></code>, so a missing module or a bad bootstrap set surfaces there. Every
+bootstrap peer is handed over. libp2p dials the set inside its <code class="docutils literal notranslate"><span class="pre">start</span></code>, whose
+call deadline is a fixed 10 s; a start that outlasts it carries on and is not
+issued again.</p>
 <p>Set <code class="docutils literal notranslate"><span class="pre">LD_DISCO_TRACE</span></code> to a file path to log every call across the plugin
 boundary; logos-core discards a module’s stderr, so that file is the only view
 into it.</p>
