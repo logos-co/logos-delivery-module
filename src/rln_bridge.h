@@ -12,8 +12,9 @@
 // registry id and rln identifier to every call it forwards.
 //
 // EVERY call rides the generated typed client. Request ops
-// (get_membership_state, get_epoch_quota, generate_proof, validate_proof) use
-// its `<name>AsyncResult` twins: one call that returns immediately, with the
+// (get_membership_state, get_registry_parameters, get_epoch_quota,
+// generate_proof, validate_proof) use its `<name>AsyncResult` twins: one call
+// that returns immediately, with the
 // reply arriving on the client's completion callback and carrying the
 // CallError that says whether there is a reply at all. Lifecycle (start, stop)
 // uses the synchronous twins on the caller's thread — the module wants the
@@ -77,19 +78,25 @@ public:
     // the delivery library, which is agnostic of them.
     void getMembershipState(uint64_t reqId, std::string registryId,
                             std::string rlnIdentifier);
+    void getRegistryParameters(uint64_t reqId, std::string registryId,
+                               std::string rlnIdentifier);
     void getEpochQuota(uint64_t reqId, std::string registryId,
                        std::string rlnIdentifier, uint64_t timestamp);
     void generateProof(uint64_t reqId, std::string registryId,
                        std::string rlnIdentifier, std::string signalHex,
                        uint64_t timestamp);
+    void callMix(uint64_t reqId, const std::string& method, const std::string& args);
+
     void validateProof(uint64_t reqId, std::string registryId,
                        std::string rlnIdentifier, std::string signalHex,
                        uint64_t timestamp, std::string proofJson);
 
 private:
-    enum class Op { Start, Stop, GetState, GetQuota, Generate, Validate };
+    enum class Op {
+        Start, Stop, GetState, GetParameters, GetQuota, Generate, Validate
+    };
 
-    // get_membership_state is the module's one tstr method; the other five
+    // get_membership_state is the module's one tstr method; the other six
     // answer the result envelope. The two dialects fail differently, which is
     // the only reason the bridge tracks which op it is serving.
     static bool isTstrOp(Op op);

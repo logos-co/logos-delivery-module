@@ -1378,6 +1378,22 @@ LOGOS_TEST(rln_bridge_result_transport_failure_answers_the_envelope) {
     LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("transient"));
 }
 
+LOGOS_TEST(rln_bridge_dispatches_registry_parameters) {
+    auto t = LogosTestContext("delivery_module");
+    BridgeFixture f;
+    LOGOS_ASSERT_EQ(f.bridge.enable(), std::string());
+
+    f.bridge.callMix(9, "get_registry_parameters", R"(["reg","rln-id"])");
+
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(9));
+    const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
+    LOGOS_ASSERT_FALSE(reply["success"].get<bool>());
+    const auto inner = nlohmann::json::parse(reply["error"].get<std::string>());
+    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("transient"));
+    LOGOS_ASSERT_EQ(inner["kind"].get<std::string>(),
+                    std::string("rln_bridge_transport"));
+}
+
 LOGOS_TEST(rln_bridge_provider_refusal_is_permanent) {
     auto t = LogosTestContext("delivery_module");
     BridgeFixture f;
@@ -1448,4 +1464,53 @@ LOGOS_TEST(rln_bridge_start_backend_refuses_before_enable) {
 
     LOGOS_ASSERT_EQ(bridge.startBackend("{}"),
                     std::string("rln bridge is not enabled"));
+}
+
+LOGOS_TEST(shared_rln_backend_lifecycle_is_explicit) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
+    LOGOS_ASSERT_TRUE(table.at("logos.test").manageBackend);
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"r","epoch-size-sec":10,"manage-backend":false}})", table).empty());
+    LOGOS_ASSERT_FALSE(table.at("logos.test").manageBackend);
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"manage-backend":"false"}})", table).empty());
+}
+
+LOGOS_TEST(mix_peer_methods_require_a_node_and_forward_library_results) {
+    auto t = LogosTestContext("delivery_module");
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_FALSE(impl.getLocalMixPeerRecord().success);
+    LOGOS_ASSERT_FALSE(impl.addMixPeer("{}").success);
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_mixCallbackSetBeforeRuntime);
+    t.mockCFunction("waku_mix_get_peer_record").returns(std::string(R"({"peerId":"mix-peer"})"));
+    LOGOS_ASSERT_TRUE(impl.getLocalMixPeerRecord().success);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastMixCtxHandle,
+                    delivery_test_rln::g_createdCtxHandle);
+    LOGOS_ASSERT_TRUE(impl.addMixPeer(R"({"peerId":"mix-peer"})").success);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_lastMixCtxHandle,
+                    delivery_test_rln::g_createdCtxHandle);
+}
+
+LOGOS_TEST(mix_rln_callback_remains_until_the_last_instance_is_released) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    auto first = std::make_unique<DeliveryModuleImpl>();
+    auto second = std::make_unique<DeliveryModuleImpl>();
+    LOGOS_ASSERT_TRUE(first->createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT_TRUE(second->createNode(R"({"logLevel":"INFO"})").success);
+    LOGOS_ASSERT(delivery_test_rln::g_mixCallback != nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 1);
+
+    first.reset();
+    LOGOS_ASSERT(delivery_test_rln::g_mixCallback != nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 1);
+
+    second.reset();
+    LOGOS_ASSERT(delivery_test_rln::g_mixCallback == nullptr);
+    LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 2);
 }
