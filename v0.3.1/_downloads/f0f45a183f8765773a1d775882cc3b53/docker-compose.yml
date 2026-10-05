@@ -1,0 +1,25 @@
+services:
+  logos-node:
+    build:
+      context: https://github.com/logos-co/logos-docker.git#de3009825bc76a0b314fb6aed2ae432fc2ae1f4c
+      args:
+        DELIVERY_VERSION: "0.3.0"
+        # logos.test runs RLN: the membership module, which pulls in
+        # liblogos_lez_rln_module (>= 4.2.1 resolves the testnet sequencer
+        # from its built-in network table).
+        RLN_VERSION: "0.10.0"
+    image: logos-node:dev-local
+    container_name: logos-node
+    volumes:
+      - ./conf:/conf:ro
+      - logos-persistence:/var/lib/logos/persistence
+    ports:
+      - "30303:30303/tcp"   # p2p
+      - "30303:30303/udp"   # quic
+      - "9000:9000/udp"     # discv5
+    # The image starts the logosctl daemon (`logosctl daemon start`).
+    # Loading the module and starting the node is a one-shot step run from
+    # the host after `compose up` — see docs/pages/run-node.md.
+
+volumes:
+  logos-persistence:
