@@ -4246,17 +4246,18 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1790795994,
-        "narHash": "sha256-jJGvWeWIfWaAHAjxZiPsO3nYDp3qpFgFOXbYu8+zgWE=",
+        "lastModified": 1791228354,
+        "narHash": "sha256-CaYal4vh8Z3JNKTlCDd+xsSUC1gLBtcQSUCpWDz+g7A=",
         "ref": "main",
-        "rev": "11b2f00b5e53f5cda111f5eb0f800e94c9811266",
-        "revCount": 88,
+        "rev": "c7560fc8d4ec44a866eeda71bf767d2250c757a5",
+        "revCount": 98,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-lez-rln-module",
         "ref": "main",
+        "rev": "c7560fc8d4ec44a866eeda71bf767d2250c757a5",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
@@ -4268,18 +4269,18 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1790796320,
-        "narHash": "sha256-2xN1dNdpuLTihqpZw6TNCxQvLMKg4DdAeaNg1cz2D/Y=",
+        "lastModified": 1791228354,
+        "narHash": "sha256-CaYal4vh8Z3JNKTlCDd+xsSUC1gLBtcQSUCpWDz+g7A=",
         "ref": "main",
-        "rev": "25357cfd877ba18d6e0880564b8fd7ba0abf2d70",
-        "revCount": 90,
+        "rev": "c7560fc8d4ec44a866eeda71bf767d2250c757a5",
+        "revCount": 98,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-rln-module",
         "ref": "main",
-        "rev": "25357cfd877ba18d6e0880564b8fd7ba0abf2d70",
+        "rev": "c7560fc8d4ec44a866eeda71bf767d2250c757a5",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
@@ -46154,17 +46155,17 @@
         "rust-rapidsnark": "rust-rapidsnark"
       },
       "locked": {
-        "lastModified": 1789784436,
-        "narHash": "sha256-PxQ4b7y+x12J1c3kSNXKSFn0WhIqO3mCMR+0GwrD+gU=",
-        "owner": "adklempner",
+        "lastModified": 1790727166,
+        "narHash": "sha256-TdYNTXr7tLwq0j7eac8shLcrkDUO7L4TOebhSbbg+p0=",
+        "owner": "logos-blockchain",
         "repo": "logos-execution-zone",
-        "rev": "2fe8c5ce51c4018b31e8e144350357185db9cc48",
+        "rev": "db66590ab821a4e142c211017a3866d007f6fa77",
         "type": "github"
       },
       "original": {
-        "owner": "adklempner",
+        "owner": "logos-blockchain",
+        "ref": "v0.3.0",
         "repo": "logos-execution-zone",
-        "rev": "2fe8c5ce51c4018b31e8e144350357185db9cc48",
         "type": "github"
       }
     },

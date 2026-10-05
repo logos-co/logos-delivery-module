@@ -3,11 +3,11 @@ services:
     build:
       context: https://github.com/logos-co/logos-docker.git#de3009825bc76a0b314fb6aed2ae432fc2ae1f4c
       args:
-        DELIVERY_VERSION: "0.3.0"
+        DELIVERY_VERSION: "0.4.0"
         # logos.test runs RLN: the membership module, which pulls in
-        # liblogos_lez_rln_module (>= 4.2.1 resolves the testnet sequencer
-        # from its built-in network table).
-        RLN_VERSION: "0.10.0"
+        # liblogos_lez_rln_module (>= 5.0.0 resolves the LEZ v0.3.0 testnet
+        # sequencer from its built-in network table).
+        RLN_VERSION: "0.11.0"
     image: logos-node:dev-local
     container_name: logos-node
     volumes:
