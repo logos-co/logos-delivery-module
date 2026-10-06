@@ -11,7 +11,7 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?submodules=1&rev=890397d97ef31c584c94b7b3f057cf53dc4d78d7";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=refs/tags/v0.39.1&submodules=1";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
