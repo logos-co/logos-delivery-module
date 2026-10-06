@@ -1,6 +1,6 @@
 # Run a delivery node
 
-Runs a delivery node (a Logos Core daemon + `delivery_module` 0.3.0, for Logos
+Runs a delivery node (a Logos Core daemon + `delivery_module` 0.4.0, for Logos
 Testnet v0.3). There is no GUI or HTTP API — interaction is via the daemon's
 CLI (`logosctl`, or `logoscore` in the Nix setup). You can run it three ways:
 
@@ -29,8 +29,8 @@ docker compose up -d --build
 ```
 
 The image is built from [logos-docker](https://github.com/logos-co/logos-docker):
-the `logosctl` daemon with `delivery_module` 0.3.0 and the RLN modules
-(`liblogos_rln_module` 0.10.0, `liblogos_lez_rln_module`) from the Logos
+the `logosctl` daemon with `delivery_module` 0.4.0 and the RLN modules
+(`liblogos_rln_module` 0.11.0, `liblogos_lez_rln_module` 5.0.0) from the Logos
 catalog.
 
 ### Boot the node
@@ -87,8 +87,8 @@ logosctl daemon start --detach
 # Fetch delivery_module and the RLN modules logos.test needs from the Logos
 # catalog and install them (liblogos_lez_rln_module comes in as a dependency)
 logosctl catalog refresh
-logosctl package install delivery_module --version 0.3.0 --yes
-logosctl package install liblogos_rln_module --version 0.10.0 --yes
+logosctl package install delivery_module --version 0.4.0 --yes
+logosctl package install liblogos_rln_module --version 0.11.0 --yes
 
 # logos.test node config (layered createNode shape — see Configuration below)
 cat > logos-test.json <<'JSON'
@@ -145,7 +145,7 @@ Then wait for the membership (typically 1–3 minutes after the funds land):
 ```bash
 printf '%s' '5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977' > /tmp/rln-id.arg
 logosctl call liblogos_rln_module get_membership_state \
-  logos:testnet:841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893 @/tmp/rln-id.arg
+  logos:testnet:5e77e579df942069ef37fcc1ca0a56266e83a710ebc3349fe6171bbfc83c542a @/tmp/rln-id.arg
 # "state":"unknown" with provisioning.step "awaiting_funding" → not funded yet
 # "state":"active"                                            → ready to start
 ```
@@ -177,7 +177,7 @@ the module was built against:
 ```bash
 git clone https://github.com/logos-co/logos-delivery-module.git
 cd logos-delivery-module
-git checkout v0.3.0
+git checkout v0.4.0
 
 # Runtime + package manager
 nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
