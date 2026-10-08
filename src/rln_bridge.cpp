@@ -94,9 +94,10 @@ int RlnBridge::timeoutMsFor(Op op)
     switch (op) {
     case Op::GetState:
     case Op::GetParameters:
-        return 80'000;
+        return 90'000;
     case Op::GetQuota:
     case Op::Generate:
+        return 90'000;
     case Op::Validate:
         return 10'000;
     case Op::Start:
