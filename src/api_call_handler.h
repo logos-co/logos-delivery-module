@@ -86,6 +86,7 @@ void replyTrampoline(int errCode, const char* const* reply, const char* errMsg, 
     context->sem.release();
 }
 
+
 // Binds a generated wrapper, func(ctx, args..., onReply, userData), to its
 // arguments. The wrapper CBOR-encodes them before returning, so borrowed
 // strings need only outlive the call - they do, since it runs inside
@@ -97,6 +98,7 @@ auto bindApiCall(Func func, const LogosDeliveryCtx* ctx, Args... args)
         return func(ctx, args..., static_cast<DeliveryReplyFn>(replyTrampoline), ticket);
     };
 }
+
 
 // Dispatches a bound call and blocks until its reply arrives. The reply text is
 // the result value on success and the error message on failure.

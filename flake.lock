@@ -41127,18 +41127,16 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1791304460,
-        "narHash": "sha256-f/+BKuzrMjUUO1DeJCbLpyBnRMD4D+orcIoolrjGYdM=",
-        "ref": "refs/tags/v0.39.1",
-        "rev": "3a478e90a4813685af47b4f77e1f6232ac5b50bb",
-        "revCount": 2626,
-        "submodules": true,
+        "lastModified": 1791489898,
+        "narHash": "sha256-mTDQ3NzAUet+mhzaNFZRXQBQPg7EhurUZqBj/rmXqJw=",
+        "ref": "master",
+        "rev": "37b4b800acf18c7069c0de7beb61a8b91f274d10",
+        "revCount": 2654,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
-        "ref": "refs/tags/v0.39.1",
-        "submodules": true,
+        "ref": "master",
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       }
