@@ -51,9 +51,9 @@ out-of-band through the RLN module from a funded LEZ testnet payer. Receiving
 doesn't. A node without a membership starts, subscribes, relays and can
 validate proofs. Only its sends fail.
 
-**Upgrading from 0.3.x.** Before 0.4.0 `logos.test` named
+**Upgrading from 0.3.2 or earlier.** Before 0.3.3 `logos.test` named
 `logos:testnet:841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893`,
-a registry 0.4.0 no longer uses. A membership registered there does not carry
+a registry 0.3.3 no longer uses. A membership registered there does not carry
 over: under the new registry
 `get_membership_state` reports `unknown`, and sends fail until the node holds a
 membership in `logos:testnet:fd322d32…7775b971`. Register a new one from a
