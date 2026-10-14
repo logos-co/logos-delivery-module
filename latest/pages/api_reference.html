@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>API reference &#8212; Logos Delivery Module 0.3.2 documentation</title>
+    <title>API reference &#8212; Logos Delivery Module 0.4.0 documentation</title>
   
   
   
@@ -39,14 +39,14 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=55c26ed414f5f8a31ebb" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=55c26ed414f5f8a31ebb" />
 
-    <script src="../_static/documentation_options.js?v=71d9d8e6"></script>
+    <script src="../_static/documentation_options.js?v=6c02275b"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'pages/api_reference';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.17.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://logos-co.github.io/logos-delivery-module/switcher.json';
-        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.3.2';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = '0.4.0';
         DOCUMENTATION_OPTIONS.show_version_warning_banner =
             false;
         </script>
@@ -58,7 +58,7 @@
     <link rel="prev" title="API layers" href="api-layers.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.3.2" />
+  <meta name="docsearch:version" content="0.4.0" />
   
     
     <script src="../_static/searchtools.js"></script>
@@ -134,7 +134,7 @@
     <img src="../_static/logos-logo-dark.png" class="logo__image only-dark pst-js-only" alt=""/>
   
   
-    <p class="title logo__title">Delivery Module 0.3.2</p>
+    <p class="title logo__title">Delivery Module 0.4.0</p>
   
 </a></div>
     
@@ -715,12 +715,12 @@ report back through.</p>
 <dl class="cpp function">
 <dt class="sig sig-object cpp" id="_CPPv4N18DeliveryModuleImpl23getAvailableNodeInfoIDsEv">
 <span id="_CPPv3N18DeliveryModuleImpl23getAvailableNodeInfoIDsEv"></span><span id="_CPPv2N18DeliveryModuleImpl23getAvailableNodeInfoIDsEv"></span><span id="DeliveryModuleImpl::getAvailableNodeInfoIDs"></span><span class="target" id="classDeliveryModuleImpl_1a5eaceed2e031ac6d4d468b1e29ab94ba"></span><span class="n"><span class="pre">StdLogosResult</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">getAvailableNodeInfoIDs</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N18DeliveryModuleImpl23getAvailableNodeInfoIDsEv" title="Link to this definition">#</a><br /></dt>
-<dd><p>Lists the node info items this node advertises, for use with <a class="reference internal" href="#classDeliveryModuleImpl_1a345269f3cd6a0755f11e726a87be5732"><span class="std std-ref">getNodeInfo</span></a>. </p>
+<dd><p>Lists the node info items this node advertises, for use with getNodeInfo. </p>
 <p>The list comes back as a JSON array of strings:</p>
 <div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">[</span><span class="s2">"Version"</span><span class="p">,</span><span class="w"> </span><span class="s2">"Metrics"</span><span class="p">,</span><span class="w"> </span><span class="s2">"MyMultiaddresses"</span><span class="p">,</span><span class="w"> </span><span class="s2">"MyENR"</span><span class="p">,</span><span class="w"> </span><span class="s2">"MyPeerId"</span><span class="p">]</span>
 </pre></div>
 </div>
-<p>Which items a node advertises depends on how it was built and configured, so treat the set as discovered rather than fixed. An advertised item may still return an empty value from <a class="reference internal" href="#classDeliveryModuleImpl_1a345269f3cd6a0755f11e726a87be5732"><span class="std std-ref">getNodeInfo</span></a> when the feature behind it is unconfigured.</p>
+<p>Which items a node advertises depends on how it was built and configured, so treat the set as discovered rather than fixed. An advertised item may still return an empty value from getNodeInfo when the feature behind it is unconfigured.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Returns<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Success with the list above, or error details. Fails before <a class="reference internal" href="#classDeliveryModuleImpl_1a4faa49eb3965146c15fdbf674efa9a65"><span class="std std-ref">createNode</span></a> has run. </p>
@@ -729,8 +729,8 @@ report back through.</p>
 </dd></dl>
 
 <dl class="cpp function">
-<dt class="sig sig-object cpp" id="_CPPv4N18DeliveryModuleImpl11getNodeInfoERKNSt6stringE">
-<span id="_CPPv3N18DeliveryModuleImpl11getNodeInfoERKNSt6stringE"></span><span id="_CPPv2N18DeliveryModuleImpl11getNodeInfoERKNSt6stringE"></span><span id="DeliveryModuleImpl::getNodeInfo__ssCR"></span><span class="target" id="classDeliveryModuleImpl_1a345269f3cd6a0755f11e726a87be5732"></span><span class="n"><span class="pre">StdLogosResult</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">getNodeInfo</span></span></span><span class="sig-paren">(</span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">std</span></span><span class="p"><span class="pre">::</span></span><span class="n"><span class="pre">string</span></span><span class="w"> </span><span class="p"><span class="pre">&amp;</span></span><span class="n sig-param"><span class="pre">nodeInfoId</span></span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N18DeliveryModuleImpl11getNodeInfoERKNSt6stringE" title="Link to this definition">#</a><br /></dt>
+<dt class="sig sig-object cpp" id="_CPPv4N18DeliveryModuleImpl21getLocalMixPeerRecordEv">
+<span id="_CPPv3N18DeliveryModuleImpl21getLocalMixPeerRecordEv"></span><span id="_CPPv2N18DeliveryModuleImpl21getLocalMixPeerRecordEv"></span><span id="DeliveryModuleImpl::getLocalMixPeerRecord"></span><span class="target" id="classDeliveryModuleImpl_1aab2c0cad25f7c5e0bf04c93ee8bfdc73"></span><span class="n"><span class="pre">StdLogosResult</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">getLocalMixPeerRecord</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#_CPPv4N18DeliveryModuleImpl21getLocalMixPeerRecordEv" title="Link to this definition">#</a><br /></dt>
 <dd><p>Returns information for the given node info item. </p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
@@ -1012,7 +1012,7 @@ stamped by the module host when the event is emitted.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl11channelSendERKNSt6stringERKNSt6vectorI7uint8_tEE"><code class="docutils literal notranslate"><span class="pre">channelSend()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl12channelCloseERKNSt6stringE"><code class="docutils literal notranslate"><span class="pre">channelClose()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl23getAvailableNodeInfoIDsEv"><code class="docutils literal notranslate"><span class="pre">getAvailableNodeInfoIDs()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl11getNodeInfoERKNSt6stringE"><code class="docutils literal notranslate"><span class="pre">getNodeInfo()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl21getLocalMixPeerRecordEv"><code class="docutils literal notranslate"><span class="pre">getLocalMixPeerRecord()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl19getConnectionStatusEv"><code class="docutils literal notranslate"><span class="pre">getConnectionStatus()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl19getAvailableConfigsEv"><code class="docutils literal notranslate"><span class="pre">getAvailableConfigs()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#_CPPv4N18DeliveryModuleImpl22collectOpenMetricsTextEv"><code class="docutils literal notranslate"><span class="pre">collectOpenMetricsText()</span></code></a></li>
