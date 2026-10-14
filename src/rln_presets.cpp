@@ -40,13 +40,13 @@ std::string knownPresetNameList()
 // The identifier is this application's and is known; the registry and epoch
 // size belong to a deployment. Only logos.test runs RLN, on the LEZ testnet
 // registry: the CAIP-10 account is the registration program's config account
-// (base58 J3NXPWUspX2zqJU3tUbR6MHmm83aJc5AzvidEaBBKnat) on the LEZ v0.3.0 zone
+// (base58 J3NXPWUspX2zqJU3tUbR6MHmm83aJc5AzvidEaBBKnat) on the LEZ v0.3.1 zone
 // behind sequencer https://testnet.lez.logos.co/, channel
 // 0101010101010101010101010101010101010101010101010101010101010101.
-// liblogos_rln_module >= 0.11.0 / liblogos_lez_rln_module >= 5.0.0 resolve
-// `logos:testnet` to that sequencer themselves; older lez modules speak LEZ
-// v0.2.5 and cannot use this zone. maxEpochGap stays 0 so `start` omits it and the RLN
-// module's own default applies.
+// liblogos_rln_module >= 0.12.0 / liblogos_lez_rln_module >= 5.1.0 resolve
+// `logos:testnet` to that sequencer themselves; older lez modules link an
+// older LEZ wallet that cannot sync this zone. maxEpochGap stays 0 so `start`
+// omits it and the RLN module's own default applies.
 const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {

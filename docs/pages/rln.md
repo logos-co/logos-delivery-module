@@ -43,13 +43,22 @@ preset-less `""` have it off (see [`networks.md`](./networks.md)).
 
 `liblogos_rln_module` ≥ 0.12.0 with `liblogos_lez_rln_module` ≥ 5.1.0 map
 `logos:testnet` to that sequencer through their built-in network table, so a
-`logos.test` node needs no LEZ environment. Older RLN modules speak LEZ v0.2.5
-and cannot use this zone.
+`logos.test` node needs no LEZ environment. Older lez modules link an older
+LEZ wallet that cannot sync this zone.
 
 Sending needs an **active RLN membership** in that registry, registered
 out-of-band through the RLN module from a funded LEZ testnet payer. Receiving
 doesn't. A node without a membership starts, subscribes, relays and can
 validate proofs. Only its sends fail.
+
+**Upgrading from 0.3.x.** Before 0.4.0 `logos.test` named
+`logos:testnet:841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893`,
+a registry 0.4.0 no longer uses. A membership registered there does not carry
+over: under the new registry
+`get_membership_state` reports `unknown`, and sends fail until the node holds a
+membership in `logos:testnet:fd322d32…7775b971`. Register a new one from a
+funded payer on the v0.3.1 zone, with `liblogos_rln_module` ≥ 0.12.0 and
+`liblogos_lez_rln_module` ≥ 5.1.0 installed.
 
 - Installing the library's RLN plugin is what makes it mount RLN, and it
   reads that at node creation, so `createNode` does it before handing the
