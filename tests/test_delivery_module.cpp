@@ -895,7 +895,7 @@ LOGOS_TEST(builtin_presets_enable_rln_only_on_logos_test) {
     LOGOS_ASSERT_FALSE(test.enableValidation);
     LOGOS_ASSERT_EQ(test.registryId,
                     std::string("logos:testnet:"
-                                "841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893"));
+                                "fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971"));
     LOGOS_ASSERT_EQ(test.rlnIdentifier, std::string(kLogosDeliveryRlnIdentifier));
     LOGOS_ASSERT_EQ(test.epochSizeSec, static_cast<uint64_t>(600));
     LOGOS_ASSERT_EQ(test.maxEpochGap, static_cast<uint64_t>(0));

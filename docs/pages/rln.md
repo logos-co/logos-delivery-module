@@ -34,17 +34,17 @@ preset-less `""` have it off (see [`networks.md`](./networks.md)).
 
 | `logos.test` | |
 |---|---|
-| Registry | `logos:testnet:841312e989c77e3f6f58a5d880a8e25b950b8b5ffba2f39748fa44622c20c893` — the LEZ testnet registration program's config account (base58 `9tZgjoUVHHWuE9D1cgQSXbYu2gm6uN9baTSERtTa9Str`) |
-| LEZ zone | sequencer `http://209.38.241.182:3240/`, channel `3cfd6906e8f2468b843bddfb8c08c6d0289996508762c14e2233ba757e8d16d1` |
+| Registry | `logos:testnet:fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971` — the LEZ testnet registration program's config account (base58 `J3NXPWUspX2zqJU3tUbR6MHmm83aJc5AzvidEaBBKnat`) |
+| LEZ zone | LEZ v0.3.1, sequencer `https://testnet.lez.logos.co/`, channel `0101010101010101010101010101010101010101010101010101010101010101` |
 | Epoch size | 600 s |
 | Max epoch gap | the RLN module's default (the preset sets none) |
 | RLN identifier | this application's, `sha256("rln/logos-delivery/v0.0.1")` |
 | Validation | off — nodes attach proofs but do not validate incoming ones |
 
-`liblogos_rln_module` ≥ 0.10.0 with `liblogos_lez_rln_module` ≥ 4.2.1 map
+`liblogos_rln_module` ≥ 0.12.0 with `liblogos_lez_rln_module` ≥ 5.1.0 map
 `logos:testnet` to that sequencer through their built-in network table, so a
-`logos.test` node needs no LEZ environment. With older RLN modules, set
-`LEZ_RLN_SEQUENCER` to the sequencer URL.
+`logos.test` node needs no LEZ environment. Older RLN modules speak LEZ v0.2.5
+and cannot use this zone.
 
 Sending needs an **active RLN membership** in that registry, registered
 out-of-band through the RLN module from a funded LEZ testnet payer. Receiving
