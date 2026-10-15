@@ -256,7 +256,7 @@ logosctl call delivery_module getNodeInfo Metrics --json \
 and advertise its public address in its ENR and listen addresses:
 
 ```bash
-logosctl call delivery_module getNodeInfo MyMultiaddresses --json | jq -r .result.value
+logosctl call delivery_module getNodeInfo Multiaddrs --json | jq -r .result.value
 # /ip4/<public-ip>/tcp/30303/p2p/16Uiu2…,/ip4/<public-ip>/udp/30303/quic-v1/p2p/16Uiu2…
 ```
 

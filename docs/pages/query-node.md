@@ -20,7 +20,7 @@ logoscore call delivery_module getAvailableNodeInfoIDs --json | jq
   "result": {
     "error": null,
     "success": true,
-    "value": "[\"Version\",\"Metrics\",\"MyMultiaddresses\",\"MyENR\",\"MyPeerId\"]"
+    "value": "[\"Version\",\"Metrics\",\"Multiaddrs\",\"ENR\",\"PeerId\"]"
   },
   "status": "ok"
 }
@@ -29,7 +29,7 @@ logoscore call delivery_module getAvailableNodeInfoIDs --json | jq
 ## Read a specific value
 
 ```bash
-logoscore call delivery_module getNodeInfo MyENR --json | jq
+logoscore call delivery_module getNodeInfo ENR --json | jq
 ```
 
 ```json
@@ -48,16 +48,16 @@ logoscore call delivery_module getNodeInfo MyENR --json | jq
 The value lives at `.result.value`. Extract it with `jq -r`:
 
 ```bash
-logoscore call delivery_module getNodeInfo MyPeerId --json | jq -r '.result.value'
+logoscore call delivery_module getNodeInfo PeerId --json | jq -r '.result.value'
 ```
 
 ## Info IDs
 
 | ID                 | Command                        | Returns                       |
 | ------------------ | ------------------------------ | ----------------------------- |
-| `MyPeerId`         | `getNodeInfo MyPeerId`         | libp2p peer ID                |
-| `MyENR`            | `getNodeInfo MyENR`            | discv5 ENR URI                |
-| `MyMultiaddresses` | `getNodeInfo MyMultiaddresses` | Listen multiaddresses         |
+| `PeerId`           | `getNodeInfo PeerId`           | libp2p peer ID                |
+| `ENR`              | `getNodeInfo ENR`              | discv5 ENR URI                |
+| `Multiaddrs`       | `getNodeInfo Multiaddrs`       | Listen multiaddresses         |
 | `Metrics`          | `getNodeInfo Metrics`          | Prometheus text exposition    |
 | `Version`          | `getNodeInfo Version`          | `liblogosdelivery` version    |
 | `IsRunning`        | `getNodeInfo IsRunning`        | `true` once started, else `false` |

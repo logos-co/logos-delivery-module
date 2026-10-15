@@ -41128,11 +41128,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1791489898,
-        "narHash": "sha256-mTDQ3NzAUet+mhzaNFZRXQBQPg7EhurUZqBj/rmXqJw=",
+        "lastModified": 1792087950,
+        "narHash": "sha256-UjdGUmYd8j/yNYrZ0VdanHF8QQSvqhRRoCpXQYssnMA=",
         "ref": "master",
-        "rev": "37b4b800acf18c7069c0de7beb61a8b91f274d10",
-        "revCount": 2654,
+        "rev": "6b1f3a09e2c59442bb592659137c660d64a23baa",
+        "revCount": 2704,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },

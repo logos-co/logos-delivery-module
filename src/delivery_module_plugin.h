@@ -276,7 +276,7 @@ public:
      * The list comes back as a JSON array of strings:
      *
      * @code{.json}
-     * ["Version", "Metrics", "MyMultiaddresses", "MyENR", "MyPeerId"]
+     * ["Version", "Metrics", "Multiaddrs", "ENR", "PeerId"]
      * @endcode
      *
      * Which items a node advertises depends on how it was built and

@@ -119,7 +119,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `store` / `filter` / `lightpush` | `false` | not exercised here |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
-> A peer is reached via `getNodeInfo("MyMultiaddresses")` with the container IP
+> A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP
 > substituted in (`helpers.node_multiaddr`), since the advertised address is `0.0.0.0`.
 
 ## Troubleshooting

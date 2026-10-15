@@ -40,7 +40,7 @@ def test_query_and_subscribe_methods(solo_daemon):
     assert delivery.get_available_configs(), "getAvailableConfigs returned empty"
     assert delivery.get_available_node_info_ids(), "getAvailableNodeInfoIDs returned empty"
 
-    for info_id in ("Version", "MyPeerId", "MyMultiaddresses"):
+    for info_id in ("Version", "PeerId", "Multiaddrs"):
         delivery.get_node_info(info_id)
 
     delivery.subscribe(CONTENT_TOPIC)
