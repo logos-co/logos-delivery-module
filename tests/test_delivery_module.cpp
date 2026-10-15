@@ -654,12 +654,12 @@ LOGOS_TEST(getAvailableNodeInfoIDs_returns_mocked_string) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_ctx_get_available_node_info_ids").returns(R"(["Version","MyPeerId"])");
+    t.mockCFunction("logosdelivery_ctx_get_available_node_info_ids").returns(R"(["Version","PeerId"])");
     StdLogosResult result = impl->getAvailableNodeInfoIDs();
 
     LOGOS_ASSERT_TRUE(result.success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_available_node_info_ids"));
-    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string(R"(["Version","MyPeerId"])"));
+    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string(R"(["Version","PeerId"])"));
 
     delete impl;
 }

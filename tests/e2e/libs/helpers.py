@@ -130,11 +130,11 @@ def setup_delivery_node(daemon, config_json: str, label: str) -> DeliveryNode:
 def node_multiaddr(node: DeliveryNode) -> str:
     """The node's libp2p multiaddr with the container IP substituted in.
 
-    MyMultiaddresses advertises the configured listen address (0.0.0.0), which a
+    Multiaddrs advertises the configured listen address (0.0.0.0), which a
     peer can't dial; rewrite the /ip4/ segment to the container's address on the
     shared docker network so the peer reaches it container-to-container.
     """
-    raw = node.get_node_info("MyMultiaddresses")
+    raw = node.get_node_info("Multiaddrs")
     addr = _first_multiaddr(raw)
     ip = _container_ip(node.daemon)
     routable = re.sub(r"/ip4/[^/]+/", f"/ip4/{ip}/", addr, count=1)
@@ -149,7 +149,7 @@ def _first_multiaddr(raw: str) -> str:
         part = part.strip()
         if part.startswith("/"):
             return part
-    raise AssertionError(f"no multiaddr in MyMultiaddresses: {raw!r}")
+    raise AssertionError(f"no multiaddr in Multiaddrs: {raw!r}")
 
 
 def _container_ip(daemon) -> str:
