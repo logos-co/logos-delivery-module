@@ -13,17 +13,33 @@ import json
 import logging
 import re
 import subprocess
+import time
 from typing import Any, Optional
 
 from logos_integration_test_framework import subscribe as _watch_events
 
-from libs.constants import CLUSTER_ID, NODE_TCP_PORT, NUM_SHARDS_IN_NETWORK
+from libs.constants import (
+    CLUSTER_ID,
+    NODE_TCP_PORT,
+    NUM_SHARDS_IN_NETWORK,
+    RLN_EPOCH_SIZE_SEC,
+    RLN_REGISTRY_ID,
+)
 
 logger = logging.getLogger(__name__)
 
 MODULE = "delivery_module"
+RLN_MODULE = "liblogos_rln_module"
 
 SUBSCRIBE_GRACE_S = 0.5
+
+RLN_PRESETS_ENV = "LOGOS_DELIVERY_RLN_PRESETS"
+RLN_PRESETS_FILE = "rln-presets.json"
+RLN_READY_TIMEOUT_S = 120.0
+
+# getConnectionStatus / connectionStateChanged values for a node with at least
+# one relay peer.
+CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
 
 def make_delivery_config(*, tcp_port: int = NODE_TCP_PORT, static_peers: Optional[list] = None) -> str:
@@ -46,6 +62,26 @@ def make_delivery_config(*, tcp_port: int = NODE_TCP_PORT, static_peers: Optiona
     if static_peers:
         cfg["staticnodes"] = static_peers
     return json.dumps(cfg)
+
+
+def make_rln_presets(*, enable_validation: bool) -> str:
+    """Contents of the RLN presets file for a test node.
+
+    delivery_module reads this file from the path in `LOGOS_DELIVERY_RLN_PRESETS` and
+    lets it override its built-in RLN settings. The `""` entry applies to nodes created
+    without a `preset`, like the ones in these tests. It turns RLN on, using the same
+    LEZ testnet registry as the `logos.test` network, and sets whether the node checks
+    the RLN proofs of incoming messages. The built-in `logos.test` settings always leave
+    that check off, which is why the tests use this file instead.
+    """
+    return json.dumps({
+        "": {
+            "enabled": True,
+            "registry-id": RLN_REGISTRY_ID,
+            "epoch-size-sec": RLN_EPOCH_SIZE_SEC,
+            "enable-validation": enable_validation,
+        },
+    })
 
 
 def call_result(client, method: str, *args: Any, timeout: Optional[float] = None) -> dict:
@@ -103,7 +139,21 @@ class LogosDelivery:
     def get_node_info(self, info_id: str, *, timeout: Optional[float] = None):
         return call_ok(self.client, "getNodeInfo", info_id, timeout=timeout)
 
-    def watch(self, event_name: str):
+    def rln_state(self, *, timeout: Optional[float] = None) -> dict:
+        return call_ok(self.client, "rlnState", timeout=timeout)
+
+    def connection_status(self, *, timeout: Optional[float] = None) -> str:
+        return call_ok(self.client, "getConnectionStatus", timeout=timeout)
+
+    def metric(self, name: str) -> float:
+        """Value of the unlabelled metric `name` in the node's Prometheus text, 0 if absent."""
+        for line in (self.get_node_info("Metrics") or "").splitlines():
+            metric_name, _, value = line.partition(" ")
+            if metric_name == name:
+                return float(value)
+        return 0.0
+
+    def watch(self, event_name: Optional[str] = None):
         return _watch_events(self.client, MODULE, event_name)
 
 
@@ -125,6 +175,48 @@ def setup_delivery_node(daemon, config_json: str, label: str) -> DeliveryNode:
     node.create_node(config_json)
     node.start()
     return node
+
+
+def setup_rln_node(daemon, config_json: str, label: str) -> DeliveryNode:
+    """`setup_delivery_node` for a node whose presets file turns RLN on: the RLN
+    module is loaded before createNode, and RLN is `Ready` before start."""
+    node = DeliveryNode(daemon.client(), daemon, label)
+    node.client.load_module(RLN_MODULE)
+    node.load()
+    node.create_node(config_json)
+    wait_for_rln_ready(node, timeout=RLN_READY_TIMEOUT_S)
+    node.start()
+    return node
+
+
+def wait_until(condition, *, timeout: float, interval: float = 0.5, message: str = "") -> Any:
+    """Call `condition` until it returns a truthy value, and return that value.
+    Raises AssertionError with `message` after `timeout` seconds."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = condition()
+        if result:
+            return result
+        if time.monotonic() >= deadline:
+            raise AssertionError(message or f"condition not met within {timeout}s")
+        time.sleep(interval)
+
+
+def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
+    """Poll `rlnState` until it leaves `Initializing`; RLN comes up after
+    createNode returns. Raises unless the state is `Ready`."""
+    def settled():
+        state = node.rln_state()
+        return state if state.get("state") != "Initializing" else None
+
+    state = wait_until(settled, timeout=timeout, message=f"{node.label}: RLN still Initializing")
+    if state.get("state") != "Ready":
+        raise AssertionError(f"{node.label}: rlnState {state!r}")
+
+
+def is_connected(event: dict) -> bool:
+    """A connectionStateChanged event reporting at least one relay peer."""
+    return event_arg(event, 0) in CONNECTED_STATUSES
 
 
 def node_multiaddr(node: DeliveryNode) -> str:

@@ -26,7 +26,17 @@ from pathlib import Path
 import pytest
 
 from libs.constants import NETWORK_SUBNET
-from libs.helpers import DeliveryNode, make_delivery_config, node_multiaddr, setup_delivery_node
+from libs.helpers import (
+    RLN_MODULE,
+    RLN_PRESETS_ENV,
+    RLN_PRESETS_FILE,
+    DeliveryNode,
+    make_delivery_config,
+    make_rln_presets,
+    node_multiaddr,
+    setup_delivery_node,
+    setup_rln_node,
+)
 
 MESH_STABILIZATION_S = 12.0
 
@@ -71,6 +81,16 @@ def _e2e_env_or_skip() -> tuple[str, Path]:
 
 
 @pytest.fixture(scope="session")
+def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
+    """Skip unless LOGOS_MODULES_DIR also holds the RLN modules (CI stages them
+    next to delivery_module)."""
+    _, modules_dir = _e2e_env_or_skip
+    for module in (RLN_MODULE, "liblogos_lez_rln_module"):
+        if not (modules_dir / module / "manifest.json").is_file():
+            pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
+
+
+@pytest.fixture(scope="session")
 def shared_docker_network(_e2e_env_or_skip: tuple[str, Path]) -> Iterator[str]:
     name = f"logosdelivery-e2e-{uuid.uuid4().hex[:8]}"
     r = subprocess.run(
@@ -85,7 +105,15 @@ def shared_docker_network(_e2e_env_or_skip: tuple[str, Path]) -> Iterator[str]:
         subprocess.run(["docker", "network", "rm", name], capture_output=True)
 
 
-def _new_daemon(image: str, modules_dir: Path, network: str, label: str):
+def _new_daemon(
+    image: str,
+    modules_dir: Path,
+    network: str,
+    label: str,
+    *,
+    persistence_dir: Path | None = None,
+    env: dict[str, str] | None = None,
+):
     from logoscore import LogoscoreDockerDaemon  # noqa: PLC0415
 
     container_name = f"logoscore-{label.lower()}-{uuid.uuid4().hex[:8]}"
@@ -94,6 +122,8 @@ def _new_daemon(image: str, modules_dir: Path, network: str, label: str):
         modules_dir=modules_dir,
         container_name=container_name,
         network=network,
+        persistence_dir=persistence_dir,
+        env=env,
         startup_timeout=60.0,
         extra_args=["--verbose"],
     )
@@ -148,3 +178,33 @@ def node_b(
     node = delivery_node_factory("B", make_delivery_config(static_peers=[peer]))
     time.sleep(MESH_STABILIZATION_S)
     return node
+
+
+@pytest.fixture(scope="module")
+def rln_node_factory(
+    _e2e_env_or_skip: tuple[str, Path],
+    _rln_modules_or_skip: None,
+    shared_docker_network: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[Callable[..., DeliveryNode]]:
+    """`delivery_node_factory` for nodes with RLN on the LEZ testnet registry: each
+    daemon gets a presets file in its persistence dir, named by
+    LOGOS_DELIVERY_RLN_PRESETS. No node holds a membership."""
+    image, modules_dir = _e2e_env_or_skip
+
+    with ExitStack() as stack:
+        def _create(label: str, config_json: str, *, enable_validation: bool) -> DeliveryNode:
+            persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
+            (persistence_dir / RLN_PRESETS_FILE).write_text(
+                make_rln_presets(enable_validation=enable_validation)
+            )
+            daemon, container_name = _new_daemon(
+                image, modules_dir, shared_docker_network, label,
+                persistence_dir=persistence_dir,
+                env={RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}"},
+            )
+            stack.enter_context(daemon)
+            stack.callback(_save_logs, container_name)
+            return setup_rln_node(daemon, config_json, label)
+
+        yield _create
