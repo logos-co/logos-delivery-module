@@ -81,3 +81,64 @@ jobs:
           name: e2e-test-logs
           path: ${{ runner.temp }}/e2e-logs/*.log
           retention-days: 7
+
+  # The e2e tests with RLN membership. Not a required check: a failure never blocks a merge.
+  e2e-rln-membership:
+    # Fork PRs get no secrets.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up e2e environment
+        uses: ./.github/actions/setup-e2e
+        with:
+          attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
+          attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
+
+      # RLN_KEYSTORE is liblogos_rln_module's keystore folder, tar.gz and base64
+      # (tests/e2e/README.md, "CI").
+      - name: Restore the RLN membership
+        shell: bash
+        env:
+          RLN_KEYSTORE: ${{ secrets.RLN_KEYSTORE }}
+          MEMBERSHIP_DIR: ${{ runner.temp }}/rln-membership
+        run: |
+          if [ -z "$RLN_KEYSTORE" ]; then
+            echo "::error::secret RLN_KEYSTORE is not set"
+            exit 1
+          fi
+          mkdir -p "$MEMBERSHIP_DIR"
+          if ! echo "$RLN_KEYSTORE" | base64 -d | tar xz -C "$MEMBERSHIP_DIR"; then
+            echo "::error::RLN_KEYSTORE is not a base64 tar.gz"
+            exit 1
+          fi
+          keystores=("$MEMBERSHIP_DIR"/liblogos_rln_module/*/)
+          if [ ${#keystores[@]} -ne 1 ] || [ ! -f "${keystores[0]}rln_sealed.json" ] || [ ! -f "${keystores[0]}rln_autounlock.secret" ]; then
+            echo "::error::RLN_KEYSTORE holds no single liblogos_rln_module keystore folder with rln_sealed.json and rln_autounlock.secret"
+            find "$MEMBERSHIP_DIR" -type f
+            exit 1
+          fi
+          ls -l "${keystores[0]}"
+          echo "::notice::Restored the RLN membership: ${keystores[0]#"$MEMBERSHIP_DIR"/}"
+          echo "E2E_RLN_MEMBERSHIP_DIR=$MEMBERSHIP_DIR" >> "$GITHUB_ENV"
+
+      - name: Run e2e tests
+        run: |
+          mkdir -p ${{ runner.temp }}/e2e-logs
+          cd tests/e2e
+          pytest -v -m rln_membership
+        env:
+          E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
+          LOGOSCORE_PY_FORWARD_OUTPUT: "1"
+
+      - name: Upload daemon logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-rln-membership-logs
+          path: ${{ runner.temp }}/e2e-logs/*.log
+          retention-days: 7
