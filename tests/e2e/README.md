@@ -79,7 +79,7 @@ of the `logos.test` preset, because that preset always turns proof validation of
 The tests marked `rln_membership` send with a proof, so they need an active
 membership: `E2E_RLN_MEMBERSHIP_DIR` names a directory holding `liblogos_rln_module`'s
 keystore folder (`liblogos_rln_module/<instance>/`), and each sending node starts with
-a copy of it. All runs share that one membership, so they must not overlap.
+a copy of it.
 
 ## Prerequisites
 
@@ -161,13 +161,12 @@ that range, `docker network create` fails with "Pool overlaps"; set
 `.github/workflows/ci.yml` has an `e2e-tests` job (`needs: build-and-test`,
 ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, runs
 `pytest -v`, and uploads logs on failure. `build-and-test` pre-warms the
-`install-portable` cachix cache so the e2e job hits it warm. Both e2e workflows set up
+`install-portable` cachix cache so the e2e job hits it warm. Both e2e jobs set up
 through the composite action `.github/actions/setup-e2e`.
 
-`.github/workflows/rln-membership-e2e.yml` runs the `rln_membership` tests on PRs from
-branches of this repo and pushes to master, one run at a time: runs of
-different PRs and of master queue, and a new commit cancels its PR's earlier run. It is
-not a required check. It restores the membership from the repository secret
+The `e2e-rln-membership` job in `ci.yml` runs the `rln_membership` tests on PRs from
+branches of this repo and pushes to master. It is not a required check. It restores the
+membership from the repository secret
 `RLN_KEYSTORE`, which is replaced after every renewal from the logosctl config dir
 that holds the membership:
 
