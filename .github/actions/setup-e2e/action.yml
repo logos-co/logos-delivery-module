@@ -3,6 +3,8 @@ description: >
   Builds what tests/e2e runs against: the module (install-portable) and its
   dependency modules in LOGOS_MODULES_DIR, the logoscore smoke image in
   LOGOSCORE_IMAGE, the logoscore CLI on PATH, and the Python test dependencies.
+  The smoke image and the dependency modules come from the Actions cache when
+  their pins are unchanged.
 
 inputs:
   attic-token-ci:
@@ -21,9 +23,18 @@ runs:
         attic-token-ci: ${{ inputs.attic-token-ci }}
         attic-token-public: ${{ inputs.attic-token-public }}
 
+    # Keyed on the logos-logoscore-py commit the smoke image is built from.
+    - name: Restore the cached smoke image
+      id: smoke-image
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/logoscore-smoke-image.tar
+        key: logoscore-smoke-image-${{ runner.arch }}-a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
+
     # The gha cache backend needs the docker-container driver;
     # the default docker driver can't export type=gha.
     - name: Set up Docker Buildx
+      if: steps.smoke-image.outputs.cache-hit != 'true'
       uses: docker/setup-buildx-action@v3
 
     # type=gha needs ACTIONS_RUNTIME_TOKEN/ACTIONS_CACHE_URL, which
@@ -31,6 +42,7 @@ runs:
     # steps, so buildx invoked from build_smoke_image.sh can reach
     # the cache API. Without it the gha cache is silently a no-op.
     - name: Expose Actions runtime for buildx gha cache
+      if: steps.smoke-image.outputs.cache-hit != 'true'
       uses: crazy-max/ghaction-github-runtime@v3
 
     - name: Build delivery-module (install-portable layout)
@@ -38,10 +50,18 @@ runs:
       run: |
         nix build -L .#install-portable
 
-    # install-portable bundles only the module's own lib; stage its optional
-    # dependencies (libp2p_module, the RLN chain) next to it, at the revs
+    - name: Restore the cached dependency modules
+      id: dependency-modules
+      uses: actions/cache@v4
+      with:
+        path: dependency-modules
+        key: e2e-dependency-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
+
+    # install-portable bundles only the module's own lib; its optional
+    # dependencies (libp2p_module, the RLN chain) are built at the revs
     # flake.lock pins.
-    - name: Stage dependency modules
+    - name: Build dependency modules
+      if: steps.dependency-modules.outputs.cache-hit != 'true'
       shell: bash
       run: |
         LIBP2P_NODE=$(jq -r '.nodes[.root].inputs.libp2p_module' flake.lock)
@@ -65,14 +85,31 @@ runs:
         nix build -L --out-link result-lez-rln \
           "git+$LEZ_URL?ref=$LEZ_REF&rev=$LEZ_REV&dir=logos-lez-rln-module#install-portable"
 
-        mkdir -p merged-modules
-        for r in result result-libp2p result-rln result-lez-rln; do
-          cp -rL "$r/modules/." merged-modules/
+        mkdir -p dependency-modules
+        for r in result-libp2p result-rln result-lez-rln; do
+          cp -rL "$r/modules/." dependency-modules/
         done
+        chmod -R u+w dependency-modules
+
+    - name: Stage dependency modules
+      shell: bash
+      run: |
+        mkdir -p merged-modules
+        cp -rL result/modules/. merged-modules/
+        cp -r dependency-modules/. merged-modules/
         chmod -R u+w merged-modules
         echo "LOGOS_MODULES_DIR=$PWD/merged-modules" >> $GITHUB_ENV
 
+    - name: Load the cached smoke image
+      if: steps.smoke-image.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        docker load -i "$RUNNER_TEMP/logoscore-smoke-image.tar"
+        rm "$RUNNER_TEMP/logoscore-smoke-image.tar"
+        echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
+
     - name: Checkout logoscore-py and build smoke image
+      if: steps.smoke-image.outputs.cache-hit != 'true'
       shell: bash
       env:
         BUILDX_CACHE_FROM: type=gha
@@ -82,6 +119,7 @@ runs:
         cd /tmp/logoscore-py
         git checkout a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
         bash tests/docker_smoke/build_smoke_image.sh
+        docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-smoke-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
 
     - name: Build logoscore CLI binary (host PATH)
