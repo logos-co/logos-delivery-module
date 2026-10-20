@@ -23,6 +23,7 @@ from libs.constants import (
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
+    RLN_IDENTIFIER,
     RLN_REGISTRY_ID,
 )
 
@@ -37,6 +38,10 @@ SUBSCRIBE_GRACE_S = 0.5
 RLN_PRESETS_ENV = "LOGOS_DELIVERY_RLN_PRESETS"
 RLN_PRESETS_FILE = "rln-presets.json"
 RLN_READY_TIMEOUT_S = 30.0
+# liblogos_rln_module error classes that clear up by themselves, e.g. while the LEZ
+# wallet syncs or the valid-root window fills.
+RLN_RETRY_CLASSES = ("not_ready", "transient")
+RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
 
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
@@ -201,6 +206,47 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
     state = wait_until(settled, timeout=timeout, message=f"{node.label}: RLN still Initializing")
     if state.get("state") != "Ready":
         raise AssertionError(f"{node.label}: rlnState {state!r}")
+
+
+def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
+    """Poll `node`'s `validate_proof` with a proof from `prover`'s membership until
+    its valid-root window can check it, and return the verdict. The window fills in
+    the background and nothing else reports it. The proof spends one of `prover`'s
+    messages in the current epoch."""
+    timestamp = str(int(time.time()))
+    proof = wait_until(
+        lambda: _rln_answer(prover, "generate_proof", RLN_PROBE_SIGNAL, timestamp),
+        timeout=timeout,
+        message=f"{prover.label}: no RLN proof",
+    )
+    proof_json = json.dumps({"proof": proof["proof_canonical"]})
+    answer = wait_until(
+        lambda: _rln_answer(node, "validate_proof", RLN_PROBE_SIGNAL, timestamp, proof_json),
+        timeout=timeout,
+        message=f"{node.label}: valid-root window still cold",
+    )
+    return answer["verdict"]
+
+
+def _rln_answer(node: DeliveryNode, method: str, *args: str) -> Optional[dict]:
+    """The value of a liblogos_rln_module call on the test registry and RLN
+    identifier, or None while the module answers with a retryable error class.
+
+    Every argument is text, sent with the CLI's `str:` prefix so that a digit-only
+    timestamp stays a string. The module returns `error` as JSON text, and `value`
+    can arrive as JSON text too."""
+    texts = [f"str:{arg}" for arg in (RLN_REGISTRY_ID, RLN_IDENTIFIER, *args)]
+    result = node.client.call(RLN_MODULE, method, *texts)
+    if result.get("success"):
+        return _from_json_text(result["value"])
+    error = _from_json_text(result["error"])
+    if error.get("class") not in RLN_RETRY_CLASSES:
+        raise AssertionError(f"{node.label}: {method} failed: {error!r}")
+    return None
+
+
+def _from_json_text(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, str) else value
 
 
 def is_connected(event: dict) -> bool:
