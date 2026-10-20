@@ -1,7 +1,7 @@
 """Fixtures for the delivery_module e2e suite.
 
 Three daemon flavours:
-  * `solo_daemon` (function scope) — one fresh logoscore container per test, used
+  * `solo_daemon` (function scope) — one fresh logosctl container per test, used
     by the single-node lifecycle/query tests. Fresh because createNode is
     once-per-context: a started node can't be re-created, so tests can't share one.
   * `node_a` / `node_b` (module scope) — two daemons in a shared docker network,
@@ -10,7 +10,7 @@ Three daemon flavours:
   * `rln_node_factory` (module scope) — daemons with RLN turned on through a
     presets file in each one's persistence dir, used by the RLN tests.
 
-Every prerequisite (docker, the logoscore image, the built module layout) is
+Every prerequisite (docker, the logosctl image, the built module layout) is
 gated by `_e2e_env_or_skip`, and the RLN modules by `_rln_modules_or_skip`, so the
 suite skips cleanly when run without setup.
 """
@@ -63,17 +63,17 @@ def _save_logs(container_name: str) -> None:
 
 @pytest.fixture(scope="session")
 def _e2e_env_or_skip() -> tuple[str, Path]:
-    """Single gate: skip unless docker, the logoscore image, and the built
+    """Single gate: skip unless docker, the logosctl image, and the built
     delivery_module layout are all present."""
-    from logoscore import docker_available, image_present  # noqa: PLC0415
+    from logosctl import docker_available, image_present  # noqa: PLC0415
 
     if not docker_available():
         pytest.skip("docker not available")
-    image = os.environ.get("LOGOSCORE_IMAGE")
+    image = os.environ.get("LOGOSCTL_IMAGE")
     if not image:
-        pytest.skip("LOGOSCORE_IMAGE not set")
+        pytest.skip("LOGOSCTL_IMAGE not set")
     if not image_present(image):
-        pytest.skip(f"LOGOSCORE_IMAGE={image!r} not present locally")
+        pytest.skip(f"LOGOSCTL_IMAGE={image!r} not present locally")
     modules_dir_env = os.environ.get("LOGOS_MODULES_DIR")
     if not modules_dir_env:
         pytest.skip("LOGOS_MODULES_DIR not set")
@@ -81,14 +81,14 @@ def _e2e_env_or_skip() -> tuple[str, Path]:
     if not (modules_dir / "delivery_module" / "manifest.json").is_file():
         pytest.skip(
             f"LOGOS_MODULES_DIR={modules_dir} doesn't contain "
-            "delivery_module/manifest.json — did you run `nix build .#install-portable`?"
+            "delivery_module/manifest.json — did you install the modules with logosctl?"
         )
     return image, modules_dir
 
 
 @pytest.fixture(scope="session")
 def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
-    """Skip unless LOGOS_MODULES_DIR also holds the RLN modules (CI stages them
+    """Skip unless LOGOS_MODULES_DIR also holds the RLN modules (CI installs them
     next to delivery_module)."""
     _, modules_dir = _e2e_env_or_skip
     for module in (RLN_MODULE, LEZ_RLN_MODULE):
@@ -142,10 +142,10 @@ def _new_daemon(
     persistence_dir: Path | None = None,
     env: dict[str, str] | None = None,
 ):
-    from logoscore import LogoscoreDockerDaemon  # noqa: PLC0415
+    from logosctl import LogosctlDockerDaemon  # noqa: PLC0415
 
-    container_name = f"logoscore-{label.lower()}-{uuid.uuid4().hex[:8]}"
-    daemon = LogoscoreDockerDaemon(
+    container_name = f"logosctl-{label.lower()}-{uuid.uuid4().hex[:8]}"
+    daemon = LogosctlDockerDaemon(
         image=image,
         modules_dir=modules_dir,
         container_name=container_name,
@@ -160,7 +160,7 @@ def _new_daemon(
 
 @pytest.fixture
 def solo_daemon(_e2e_env_or_skip: tuple[str, Path], shared_docker_network: str) -> Iterator:
-    """A fresh, started logoscore container — module mounted, nothing loaded yet.
+    """A fresh, started logosctl container — module mounted, nothing loaded yet.
     The test drives load_module/createNode/start/stop itself."""
     image, modules_dir = _e2e_env_or_skip
     daemon, container_name = _new_daemon(image, modules_dir, shared_docker_network, "solo")
