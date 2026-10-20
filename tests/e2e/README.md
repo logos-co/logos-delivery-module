@@ -15,7 +15,7 @@ Two `delivery_module` daemons in a shared docker network, peered **directly** vi
 A's container-routable multiaddr and dials it; gossipsub/relay handles the rest.
 
 ```
-docker network "logosdelivery-e2e-<uuid>"  (172.31.0.0/16)
+docker network "logosdelivery-e2e-<uuid>"  (one /24 of 172.31.0.0/16 per xdist worker)
   ┌────────────────────────────┐        ┌────────────────────────────┐
   │ logoscore-a  (node A)       │◀──────▶│ logoscore-b  (node B)       │
   │ relay, cluster 198, shard 0 │ relay  │ staticnodes=[A multiaddr]   │
@@ -118,7 +118,7 @@ export PATH="/tmp/logoscore-cli/bin:$PATH"
 # 3. Install deps + run.
 cd tests/e2e
 pip install -r requirements.txt
-pytest -v
+pytest -v -n 4 --dist=loadgroup
 ```
 
 ## Running locally — macOS
@@ -152,17 +152,20 @@ Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, 
 uploaded as the `e2e-test-logs` artifact in CI on failure. Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
-The docker network uses `172.31.0.0/16`. If another network on the host already uses
-that range, `docker network create` fails with "Pool overlaps"; set
+Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
+`gw<n>` the n-th, a run without xdist the first). If another network on the host
+already uses that range, `docker network create` fails with "Pool overlaps"; set
 `E2E_NETWORK_SUBNET` to a free range.
 
 ## CI
 
 `.github/workflows/ci.yml` has an `e2e-tests` job (`needs: build-and-test`,
 ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, runs
-`pytest -v`, and uploads logs on failure. `build-and-test` pre-warms the
-`install-portable` cachix cache so the e2e job hits it warm. Both e2e jobs set up
-through the composite action `.github/actions/setup-e2e`.
+`pytest -v -n 4 --dist=loadgroup`, and uploads logs on failure. `build-and-test`
+pre-warms the `install-portable` cachix cache so the e2e job hits it warm. Both e2e jobs
+set up through the composite action `.github/actions/setup-e2e`, and run the tests on
+four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
+on one.
 
 The `e2e-rln-membership` job in `ci.yml` runs the `rln_membership` tests on PRs from
 branches of this repo and pushes to master. It is not a required check. It restores the

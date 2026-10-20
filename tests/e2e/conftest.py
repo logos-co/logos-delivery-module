@@ -17,6 +17,7 @@ suite skips cleanly when run without setup.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import shutil
 import subprocess
@@ -105,11 +106,18 @@ def rln_membership(_rln_modules_or_skip: None) -> Path:
     return Path(membership_dir)
 
 
+def _worker_subnet(worker_id: str) -> str:
+    """The xdist worker's /24 of NETWORK_SUBNET: worker gw<n> takes the n-th, a run
+    without xdist the first."""
+    index = 0 if worker_id == "master" else int(worker_id.removeprefix("gw"))
+    return str(list(ipaddress.ip_network(NETWORK_SUBNET).subnets(new_prefix=24))[index])
+
+
 @pytest.fixture(scope="session")
-def shared_docker_network(_e2e_env_or_skip: tuple[str, Path]) -> Iterator[str]:
+def shared_docker_network(_e2e_env_or_skip: tuple[str, Path], worker_id: str) -> Iterator[str]:
     name = f"logosdelivery-e2e-{uuid.uuid4().hex[:8]}"
     r = subprocess.run(
-        ["docker", "network", "create", "--subnet", NETWORK_SUBNET, name],
+        ["docker", "network", "create", "--subnet", _worker_subnet(worker_id), name],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
