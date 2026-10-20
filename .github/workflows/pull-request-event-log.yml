@@ -1,7 +1,7 @@
 name: Pull request event log
 
 # Logs each pull_request event a PR receives (the same events ci.yml runs on),
-# without a concurrency group, so that every event leaves its own run.
+# without a concurrency group, so that every event leaves its own run. Something
 on:
   pull_request:
     branches: [master, main]
