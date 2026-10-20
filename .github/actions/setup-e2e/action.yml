@@ -1,0 +1,104 @@
+name: Set up e2e environment
+description: >
+  Builds what tests/e2e runs against: the module (install-portable) and its
+  dependency modules in LOGOS_MODULES_DIR, the logoscore smoke image in
+  LOGOSCORE_IMAGE, the logoscore CLI on PATH, and the Python test dependencies.
+
+inputs:
+  attic-token-ci:
+    description: ATTIC_TOKEN_CI, for the Nix cache.
+    required: true
+  attic-token-public:
+    description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Nix and Logos cache
+      uses: logos-co/setup-nix-cache-action@v1
+      with:
+        attic-token-ci: ${{ inputs.attic-token-ci }}
+        attic-token-public: ${{ inputs.attic-token-public }}
+
+    # The gha cache backend needs the docker-container driver;
+    # the default docker driver can't export type=gha.
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    # type=gha needs ACTIONS_RUNTIME_TOKEN/ACTIONS_CACHE_URL, which
+    # GitHub only injects into actions — this exposes them to run
+    # steps, so buildx invoked from build_smoke_image.sh can reach
+    # the cache API. Without it the gha cache is silently a no-op.
+    - name: Expose Actions runtime for buildx gha cache
+      uses: crazy-max/ghaction-github-runtime@v3
+
+    - name: Build delivery-module (install-portable layout)
+      shell: bash
+      run: |
+        nix build -L .#install-portable
+
+    # install-portable bundles only the module's own lib; stage its optional
+    # dependencies (libp2p_module, the RLN chain) next to it, at the revs
+    # flake.lock pins.
+    - name: Stage dependency modules
+      shell: bash
+      run: |
+        LIBP2P_NODE=$(jq -r '.nodes[.root].inputs.libp2p_module' flake.lock)
+        LIBP2P_URL=$(jq -r --arg n "$LIBP2P_NODE" '.nodes[$n].locked.url' flake.lock)
+        LIBP2P_REV=$(jq -r --arg n "$LIBP2P_NODE" '.nodes[$n].locked.rev' flake.lock)
+
+        RLN_NODE=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
+        RLN_URL=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.url' flake.lock)
+        RLN_REF=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.ref' flake.lock)
+        RLN_REV=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.rev' flake.lock)
+
+        LEZ_NODE=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
+        LEZ_URL=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.url' flake.lock)
+        LEZ_REF=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.ref' flake.lock)
+        LEZ_REV=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.rev' flake.lock)
+
+        nix build -L --out-link result-libp2p \
+          "git+$LIBP2P_URL?rev=$LIBP2P_REV#install-portable"
+        nix build -L --out-link result-rln \
+          "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-rln-module#install-portable"
+        nix build -L --out-link result-lez-rln \
+          "git+$LEZ_URL?ref=$LEZ_REF&rev=$LEZ_REV&dir=logos-lez-rln-module#install-portable"
+
+        mkdir -p merged-modules
+        for r in result result-libp2p result-rln result-lez-rln; do
+          cp -rL "$r/modules/." merged-modules/
+        done
+        chmod -R u+w merged-modules
+        echo "LOGOS_MODULES_DIR=$PWD/merged-modules" >> $GITHUB_ENV
+
+    - name: Checkout logoscore-py and build smoke image
+      shell: bash
+      env:
+        BUILDX_CACHE_FROM: type=gha
+        BUILDX_CACHE_TO: type=gha,mode=max
+      run: |
+        git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
+        cd /tmp/logoscore-py
+        git checkout a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
+        bash tests/docker_smoke/build_smoke_image.sh
+        echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
+
+    - name: Build logoscore CLI binary (host PATH)
+      # Must match the daemon commit baked into the smoke image above.
+      shell: bash
+      run: |
+        nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/665ac28bc77f45e3c610f40fef975a12609de531#cli"
+        echo "/tmp/logoscore-cli/bin" >> $GITHUB_PATH
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+        cache: pip
+        cache-dependency-path: tests/e2e/requirements.txt
+
+    - name: Install e2e test dependencies
+      shell: bash
+      run: |
+        cd tests/e2e
+        pip install -r requirements.txt
