@@ -72,8 +72,9 @@ def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membe
             enable_validation=False,
             membership=rln_membership,
         )
-        wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
+        # The sender dials its static peers only after its startup membership check, which waits for its wallet.
         assert wait_for_valid_roots(validating, sender, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
+        wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
         sender.send(CONTENT_TOPIC, "with-proof")
         wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
 
