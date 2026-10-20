@@ -40,6 +40,9 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
 | `test_send_with_rln_off_propagates` | 2 | a sender with RLN off sees `messagePropagated` |
 | `test_send_without_membership_reports_error` | 2 | a sender with RLN on and no membership sees `messageError` |
+| `test_restored_membership_is_active` | 1 | the membership in `E2E_RLN_MEMBERSHIP_DIR` is `active` on the registry (see "RLN") |
+| `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
+| `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -68,10 +71,15 @@ freshly published message should pin `arg3` to `"live"`.
 
 ## RLN
 
-`test_rln.py` runs nodes with RLN on the LEZ testnet registry used by `logos.test`,
-without a membership. RLN is turned on through a presets file named by
-`LOGOS_DELIVERY_RLN_PRESETS` instead of the `logos.test` preset, because that preset
-always turns proof validation off (see `docs/pages/rln.md`).
+`test_rln.py` runs nodes with RLN on the LEZ testnet registry used by `logos.test`.
+RLN is turned on through a presets file named by `LOGOS_DELIVERY_RLN_PRESETS` instead
+of the `logos.test` preset, because that preset always turns proof validation off (see
+`docs/pages/rln.md`).
+
+The tests marked `rln_membership` send with a proof, so they need an active
+membership: `E2E_RLN_MEMBERSHIP_DIR` names a directory holding `liblogos_rln_module`'s
+keystore folder (`liblogos_rln_module/<instance>/`), and each sending node starts with
+a copy of it. All runs share that one membership, so they must not overlap.
 
 ## Prerequisites
 
@@ -85,6 +93,8 @@ always turns proof validation off (see `docs/pages/rln.md`).
 - For `test_rln.py`: `liblogos_rln_module` and `liblogos_lez_rln_module` in
   `LOGOS_MODULES_DIR` (CI stages them next to `delivery_module`), and outbound HTTPS to
   `testnet.lez.logos.co`. Without the modules the RLN tests skip.
+- For the `rln_membership` tests: `E2E_RLN_MEMBERSHIP_DIR` (see "RLN"). Without it
+  they skip.
 
 If any of these is missing, all e2e tests **skip** with a clear reason.
 
@@ -129,7 +139,8 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `numShardsInNetwork` | `1` | single shard → every content topic maps to shard 0 |
 | `discv5Discovery` | `false` | peering is explicit via `staticnodes`, not discovery |
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
-| `store` / `filter` / `lightpush` | `false` | not exercised here |
+| `store` / `filter` | `false` | not exercised here |
+| `lightpush` / `lightpushnode` | `false` / unset | the light push test only: `true` on its server, and on its client (`relay: false`) the server's multiaddr |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
 > A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP
@@ -151,3 +162,18 @@ that range, `docker network create` fails with "Pool overlaps"; set
 ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, runs
 `pytest -v`, and uploads logs on failure. `build-and-test` pre-warms the
 `install-portable` cachix cache so the e2e job hits it warm.
+
+`.github/workflows/rln-membership-e2e.yml` runs the `rln_membership` tests on PRs from
+branches of this repo, pushes to master, daily and on demand, one run at a time. It is
+not a required check. It restores the membership from the repository secret
+`RLN_KEYSTORE`, which is replaced after every renewal from the logosctl config dir
+that holds the membership:
+
+```bash
+COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \
+  -C <config-dir>/data liblogos_rln_module
+tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four files, no lock
+base64 < rln-keystore.tar.gz > rln-keystore.b64
+gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
+rm rln-keystore.tar.gz rln-keystore.b64
+```

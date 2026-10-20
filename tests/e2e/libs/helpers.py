@@ -48,25 +48,36 @@ RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
 
-def make_delivery_config(*, tcp_port: int = NODE_TCP_PORT, static_peers: Optional[list] = None) -> str:
+def make_delivery_config(
+    *,
+    tcp_port: int = NODE_TCP_PORT,
+    static_peers: Optional[list] = None,
+    relay: bool = True,
+    lightpush: bool = False,
+    lightpush_node: Optional[str] = None,
+) -> str:
     """JSON config for `createNode` — relay-only, single-shard, discovery-off,
-    matching the two-node relay setup proven by logos-delivery-interop-tests."""
+    matching the two-node relay setup proven by logos-delivery-interop-tests.
+    `lightpush` serves light push; a node without relay sends through
+    `lightpush_node`."""
     cfg: dict[str, Any] = {
         "logLevel": "DEBUG",
         "listenAddress": "0.0.0.0",
         "tcpPort": tcp_port,
         "clusterId": CLUSTER_ID,
         "numShardsInNetwork": NUM_SHARDS_IN_NETWORK,
-        "relay": True,
+        "relay": relay,
         "store": False,
         "filter": False,
-        "lightpush": False,
+        "lightpush": lightpush,
         "peerExchange": False,
         "discv5Discovery": False,
         "reliabilityEnabled": True,
     }
     if static_peers:
         cfg["staticnodes"] = static_peers
+    if lightpush_node:
+        cfg["lightpushnode"] = lightpush_node
     return json.dumps(cfg)
 
 
@@ -210,11 +221,25 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
         raise AssertionError(f"{node.label}: rlnState {state!r}")
 
 
+def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> None:
+    """Poll the node's LEZ wallet until its first sync is over; until then every
+    chain read of the RLN modules blocks or answers empty. Raises unless the
+    wallet is `ready`."""
+    def settled():
+        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+        return status if status.get("state") != "pending" else None
+
+    status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
+    if status.get("state") != "ready":
+        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
+
+
 def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
     """Poll `node`'s `validate_proof` with a proof from `prover`'s membership until
     its valid-root window can check it, and return the verdict. The window fills in
     the background and nothing else reports it. The proof spends one of `prover`'s
     messages in the current epoch."""
+    wait_for_lez_wallet(prover, timeout=timeout)
     timestamp = str(int(time.time()))
     proof = wait_until(
         lambda: _rln_answer(prover, "generate_proof", RLN_PROBE_SIGNAL, timestamp),
@@ -230,15 +255,25 @@ def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: f
     return answer["verdict"]
 
 
-def _rln_answer(node: DeliveryNode, method: str, *args: str) -> Optional[dict]:
-    """The value of a liblogos_rln_module call on the test registry and RLN
-    identifier, or None while the module answers with a retryable error class.
+def rln_membership_state(node: DeliveryNode) -> dict:
+    """`get_membership_state` of the node's membership on the test registry, read
+    live from the chain: `{"state": "active" | "grace_period" | "expired" | …}`."""
+    return _from_json_text(_rln_call(node, "get_membership_state"))
 
+
+def _rln_call(node: DeliveryNode, method: str, *args: str) -> Any:
+    """Call a liblogos_rln_module method on the test registry and RLN identifier.
     Every argument is text, sent with the CLI's `str:` prefix so that a digit-only
-    timestamp stays a string. The module returns `error` as JSON text, and `value`
-    can arrive as JSON text too."""
+    timestamp stays a string."""
     texts = [f"str:{arg}" for arg in (RLN_REGISTRY_ID, RLN_IDENTIFIER, *args)]
-    result = node.client.call(RLN_MODULE, method, *texts)
+    return node.client.call(RLN_MODULE, method, *texts)
+
+
+def _rln_answer(node: DeliveryNode, method: str, *args: str) -> Optional[dict]:
+    """The value of a liblogos_rln_module result call, or None while the module
+    answers with a retryable error class. The module returns `error` as JSON text,
+    and `value` can arrive as JSON text too."""
+    result = _rln_call(node, method, *args)
     if result.get("success"):
         return _from_json_text(result["value"])
     error = _from_json_text(result["error"])
