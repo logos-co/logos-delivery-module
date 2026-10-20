@@ -1,7 +1,7 @@
 """Fixtures for the delivery_module e2e suite.
 
 Three daemon flavours:
-  * `solo_daemon` (function scope) — one fresh logoscore container per test, used
+  * `solo_daemon` (function scope) — one fresh logosctl container per test, used
     by the single-node lifecycle/query tests. Fresh because createNode is
     once-per-context: a started node can't be re-created, so tests can't share one.
   * `node_a` / `node_b` (module scope) — two daemons in a shared docker network,
@@ -85,20 +85,20 @@ def _save_logs(container_name: str) -> None:
 
 @pytest.fixture(scope="session")
 def _e2e_env() -> tuple[str, Path]:
-    """The logoscore image (LOGOSCORE_IMAGE) and the built module layout
+    """The logosctl image (LOGOSCTL_IMAGE) and the built module layout
     (LOGOS_MODULES_DIR). Fails if docker, the image or the layout is missing."""
-    from logoscore import docker_available, image_present  # noqa: PLC0415
+    from logosctl import docker_available, image_present  # noqa: PLC0415
 
     if not docker_available():
         pytest.fail("docker not available")
-    image = os.environ["LOGOSCORE_IMAGE"]
+    image = os.environ["LOGOSCTL_IMAGE"]
     if not image_present(image):
-        pytest.fail(f"LOGOSCORE_IMAGE={image!r} not present locally")
+        pytest.fail(f"LOGOSCTL_IMAGE={image!r} not present locally")
     modules_dir = Path(os.environ["LOGOS_MODULES_DIR"])
     if not (modules_dir / "delivery_module" / "manifest.json").is_file():
         pytest.fail(
             f"LOGOS_MODULES_DIR={modules_dir} doesn't contain "
-            "delivery_module/manifest.json — did you run `nix build .#install-portable`?"
+            "delivery_module/manifest.json — did you install the modules with logosctl?"
         )
     return image, modules_dir
 
@@ -287,10 +287,10 @@ def _new_daemon(
     persistence_dir: Path | None = None,
     env: dict[str, str] | None = None,
 ):
-    from logoscore import LogoscoreDockerDaemon  # noqa: PLC0415
+    from logosctl import LogosctlDockerDaemon  # noqa: PLC0415
 
-    container_name = f"logoscore-{label.lower()}-{uuid.uuid4().hex[:8]}"
-    daemon = LogoscoreDockerDaemon(
+    container_name = f"logosctl-{label.lower()}-{uuid.uuid4().hex[:8]}"
+    daemon = LogosctlDockerDaemon(
         image=image,
         modules_dir=modules_dir,
         container_name=container_name,
@@ -305,7 +305,7 @@ def _new_daemon(
 
 @pytest.fixture
 def solo_daemon(_e2e_env: tuple[str, Path], shared_docker_network: str) -> Iterator:
-    """A fresh, started logoscore container — module mounted, nothing loaded yet.
+    """A fresh, started logosctl container — module mounted, nothing loaded yet.
     The test drives load_module/createNode/start/stop itself."""
     image, modules_dir = _e2e_env
     daemon, container_name = _new_daemon(image, modules_dir, shared_docker_network, "solo")
