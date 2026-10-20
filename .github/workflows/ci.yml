@@ -58,7 +58,7 @@ jobs:
           pytest -v -m "not rln" -n 4 --dist=loadgroup
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
-          LOGOSCORE_PY_FORWARD_OUTPUT: "1"
+          LOGOSCTL_PY_FORWARD_OUTPUT: "1"
 
       - name: Upload daemon logs on failure
         if: failure()

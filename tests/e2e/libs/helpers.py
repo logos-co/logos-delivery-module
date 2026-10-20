@@ -1,4 +1,4 @@
-"""Drive `delivery_module` over the logoscore RPC client.
+"""Drive `delivery_module` over the logosctl RPC client.
 
 Unlike chat_module, delivery_module's public methods are SYNCHRONOUS: each
 returns a StdLogosResult `{success, value, error}` that `client.call` hands back
@@ -118,7 +118,7 @@ def call_ok(client, method: str, *args: Any, timeout: Optional[float] = None) ->
 
 
 class LogosDelivery:
-    """RPC-facing interface to delivery_module on one logoscore client."""
+    """RPC-facing interface to delivery_module on one logosctl client."""
 
     def __init__(self, client):
         self.client = client
@@ -420,9 +420,9 @@ def wait_for_event(waiter, event_name: str, *, timeout: float, predicate=None):
 def parse_event(event: dict) -> dict:
     """The event's positional args as a dict {arg0, arg1, ...}.
 
-    The logoscore CLI serializes a typed event as
-    {"event": <name>, "data": {"arg0": <1st arg>, "arg1": <2nd arg>, ...}}
-    (logos-logoscore-cli client.cpp watchModuleEvents), so each codegen event arg
+    `logosctl watch` serializes a typed event as
+    {"event": <name>, "data": {"arg0": <1st arg>, "arg1": <2nd arg>, ...}},
+    so each codegen event arg
     lands at argN by position. The vector<uint8_t> payload arg of messageReceived
     is the one whose serialization is still unverified.
     """
