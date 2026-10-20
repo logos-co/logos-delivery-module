@@ -161,7 +161,8 @@ that range, `docker network create` fails with "Pool overlaps"; set
 `.github/workflows/ci.yml` has an `e2e-tests` job (`needs: build-and-test`,
 ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, runs
 `pytest -v`, and uploads logs on failure. `build-and-test` pre-warms the
-`install-portable` cachix cache so the e2e job hits it warm.
+`install-portable` cachix cache so the e2e job hits it warm. Both e2e workflows set up
+through the composite action `.github/actions/setup-e2e`.
 
 `.github/workflows/rln-membership-e2e.yml` runs the `rln_membership` tests on PRs from
 branches of this repo, pushes to master, daily and on demand, one run at a time. It is
