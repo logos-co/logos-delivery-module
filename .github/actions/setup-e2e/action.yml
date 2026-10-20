@@ -110,4 +110,4 @@ runs:
       run: |
         cd tests/e2e
         pip install -r requirements.txt
-        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@edfe322c2f9e2d54962da752451d1609dcbe3fbf"
+        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@8aef1dbccafd48fcfd39eff66eea05f6300a791a"
