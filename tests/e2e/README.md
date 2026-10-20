@@ -128,6 +128,8 @@ unset LOGOSCTL_CONFIG_DIR
 # 3. Install deps + run.
 cd tests/e2e
 pip install -r requirements.txt
+pip install --no-deps --force-reinstall \
+  "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@8aef1dbccafd48fcfd39eff66eea05f6300a791a"
 pytest -v -n 4 --dist=loadgroup
 ```
 
