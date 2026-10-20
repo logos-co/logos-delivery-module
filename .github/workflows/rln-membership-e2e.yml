@@ -8,12 +8,8 @@ on:
     branches: [master, main]
   push:
     branches: [master, main]
-  schedule:
-    - cron: "17 4 * * *"
-  workflow_dispatch:
 
-# A new commit cancels its PR's earlier run; runs of master, the schedule and
-# workflow_dispatch each get a group of their own.
+# A new commit cancels its PR's earlier run; each master run gets a group of its own.
 concurrency:
   group: rln-membership-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
