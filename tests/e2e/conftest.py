@@ -15,6 +15,7 @@ gated by `_e2e_env_or_skip`, so the suite skips cleanly when run without setup.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -88,6 +89,16 @@ def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
     for module in (RLN_MODULE, "liblogos_lez_rln_module"):
         if not (modules_dir / module / "manifest.json").is_file():
             pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
+
+
+@pytest.fixture(scope="session")
+def rln_membership(_rln_modules_or_skip: None) -> Path:
+    """Skip unless E2E_RLN_MEMBERSHIP_DIR names an RLN membership: module folders
+    laid out like a daemon's persistence dir (`<module>/<instance>/`)."""
+    membership_dir = os.environ.get("E2E_RLN_MEMBERSHIP_DIR")
+    if not membership_dir:
+        pytest.skip("E2E_RLN_MEMBERSHIP_DIR not set")
+    return Path(membership_dir)
 
 
 @pytest.fixture(scope="session")
@@ -189,12 +200,21 @@ def rln_node_factory(
 ) -> Iterator[Callable[..., DeliveryNode]]:
     """`delivery_node_factory` for nodes with RLN on the LEZ testnet registry: each
     daemon gets a presets file in its persistence dir, named by
-    LOGOS_DELIVERY_RLN_PRESETS. No node holds a membership."""
+    LOGOS_DELIVERY_RLN_PRESETS. A node given `membership` starts with a copy of it
+    there."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
-        def _create(label: str, config_json: str, *, enable_validation: bool) -> DeliveryNode:
+        def _create(
+            label: str,
+            config_json: str,
+            *,
+            enable_validation: bool,
+            membership: Path | None = None,
+        ) -> DeliveryNode:
             persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
+            if membership:
+                shutil.copytree(membership, persistence_dir, dirs_exist_ok=True)
             (persistence_dir / RLN_PRESETS_FILE).write_text(
                 make_rln_presets(enable_validation=enable_validation)
             )

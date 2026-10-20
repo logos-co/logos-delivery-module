@@ -10,11 +10,13 @@ from libs.helpers import (
     make_delivery_config,
     node_multiaddr,
     wait_for_event,
+    wait_for_valid_roots,
     wait_until,
 )
 
 CONNECTED_TIMEOUT_S = 60.0
 RECEIVED_TIMEOUT_S = 20.0
+VALID_ROOTS_TIMEOUT_S = 180.0
 REJECTED_TIMEOUT_S = 20.0
 PROPAGATED_TIMEOUT_S = 40.0
 SEND_ERROR_TIMEOUT_S = 120.0
@@ -48,6 +50,24 @@ def test_validating_node_drops_message_without_proof(rln_node_factory, delivery_
         timeout=REJECTED_TIMEOUT_S,
         message="validating node rejected no message",
     )
+
+
+@pytest.mark.rln_membership
+def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membership):
+    validating = rln_node_factory("validating", make_delivery_config(), enable_validation=True)
+    validating.subscribe(CONTENT_TOPIC)
+
+    with validating.watch() as events:
+        sender = rln_node_factory(
+            "sender-with-membership",
+            make_delivery_config(static_peers=[node_multiaddr(validating)]),
+            enable_validation=False,
+            membership=rln_membership,
+        )
+        wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
+        assert wait_for_valid_roots(validating, sender, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
+        sender.send(CONTENT_TOPIC, "with-proof")
+        wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
 
 
 def test_send_with_rln_off_propagates(delivery_node_factory):
