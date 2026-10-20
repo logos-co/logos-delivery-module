@@ -8,7 +8,9 @@ from libs.helpers import (
     is_connected,
     make_delivery_config,
     node_multiaddr,
+    rln_membership_state,
     wait_for_event,
+    wait_for_lez_wallet,
     wait_for_valid_roots,
     wait_until,
 )
@@ -16,6 +18,7 @@ from libs.helpers import (
 CONNECTED_TIMEOUT_S = 60.0
 RECEIVED_TIMEOUT_S = 20.0
 VALID_ROOTS_TIMEOUT_S = 180.0
+WALLET_TIMEOUT_S = 180.0
 REJECTED_TIMEOUT_S = 20.0
 PROPAGATED_TIMEOUT_S = 40.0
 SEND_ERROR_TIMEOUT_S = 120.0
@@ -49,6 +52,15 @@ def test_validating_node_drops_message_without_proof(rln_node_factory, delivery_
 
 
 @pytest.mark.rln_membership
+def test_restored_membership_is_active(rln_node_factory, rln_membership):
+    node = rln_node_factory(
+        "membership", make_delivery_config(), enable_validation=False, membership=rln_membership
+    )
+    wait_for_lez_wallet(node, timeout=WALLET_TIMEOUT_S)
+    assert rln_membership_state(node)["state"] == "active"
+
+
+@pytest.mark.rln_membership
 def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membership):
     validating = rln_node_factory("validating", make_delivery_config(), enable_validation=True)
     validating.subscribe(CONTENT_TOPIC)
@@ -63,6 +75,31 @@ def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membe
         wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
         assert wait_for_valid_roots(validating, sender, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
         sender.send(CONTENT_TOPIC, "with-proof")
+        wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
+
+
+@pytest.mark.rln_membership
+def test_validating_service_relays_lightpush_with_proof(
+    rln_node_factory, delivery_node_factory, rln_membership
+):
+    receiver = delivery_node_factory("receiver", make_delivery_config())
+    receiver.subscribe(CONTENT_TOPIC)
+
+    with receiver.watch() as events:
+        service = rln_node_factory(
+            "lightpush-service",
+            make_delivery_config(lightpush=True, static_peers=[node_multiaddr(receiver)]),
+            enable_validation=True,
+        )
+        wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
+        client = rln_node_factory(
+            "lightpush-client",
+            make_delivery_config(relay=False, lightpush_node=node_multiaddr(service)),
+            enable_validation=False,
+            membership=rln_membership,
+        )
+        assert wait_for_valid_roots(service, client, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
+        client.send(CONTENT_TOPIC, "lightpush-with-proof")
         wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
 
 
