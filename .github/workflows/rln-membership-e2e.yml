@@ -12,14 +12,20 @@ on:
     - cron: "17 4 * * *"
   workflow_dispatch:
 
+# A new commit cancels its PR's earlier run; runs of master, the schedule and
+# workflow_dispatch each get a group of their own.
 concurrency:
-  group: rln-membership
-  cancel-in-progress: false
+  group: rln-membership-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   e2e-rln-membership:
     # Fork PRs get no secrets.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Runs of different PRs and of master take turns on the one membership.
+    concurrency:
+      group: rln-membership
+      queue: max
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
