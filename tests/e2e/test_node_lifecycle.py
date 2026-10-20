@@ -1,6 +1,6 @@
 """Single-daemon e2e checks.
 
-These prove delivery_module loads into a real logoscore daemon and answers over
+These prove delivery_module loads into a real logosctl daemon and answers over
 RPC — the codegen + transport + StdLogosResult path the in-process C++ tests
 don't exercise. Each uses a fresh daemon (createNode is once-per-context).
 """
