@@ -165,7 +165,7 @@ ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, r
 through the composite action `.github/actions/setup-e2e`.
 
 `.github/workflows/rln-membership-e2e.yml` runs the `rln_membership` tests on PRs from
-branches of this repo, pushes to master, daily and on demand, one run at a time: runs of
+branches of this repo and pushes to master, one run at a time: runs of
 different PRs and of master queue, and a new commit cancels its PR's earlier run. It is
 not a required check. It restores the membership from the repository secret
 `RLN_KEYSTORE`, which is replaced after every renewal from the logosctl config dir
