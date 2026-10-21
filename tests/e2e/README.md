@@ -100,10 +100,14 @@ If any of these is missing, all e2e tests **skip** with a clear reason.
 
 ## Running locally — Linux
 
+The smoke image and the Python client come from the logos-logoscore-py commit that CI
+pins as `LOGOSCORE_PY_REV` in `.github/workflows/ci.yml`. Set the same variable before
+these steps.
+
 ```bash
 # 1. Build the logosctl smoke image (one-time) and copy its CLI out of it.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-cd /tmp/logoscore-py && git checkout 8aef1dbccafd48fcfd39eff66eea05f6300a791a
+cd /tmp/logoscore-py && git checkout "$LOGOSCORE_PY_REV"
 bash tests/logosctl/docker_smoke/build_smoke_image.sh
 export LOGOSCTL_IMAGE=logosctl:smoke-portable
 cd -
@@ -129,7 +133,7 @@ unset LOGOSCTL_CONFIG_DIR
 cd tests/e2e
 pip install -r requirements.txt
 pip install --no-deps --force-reinstall \
-  "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@8aef1dbccafd48fcfd39eff66eea05f6300a791a"
+  "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@$LOGOSCORE_PY_REV"
 pytest -v -n 4 --dist=loadgroup
 ```
 
