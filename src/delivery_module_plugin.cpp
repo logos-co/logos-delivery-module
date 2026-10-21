@@ -340,8 +340,8 @@ void DeliveryModuleImpl::releaseServiceDiscoveryPlugin()
     if (!discoPlugin) {
         return;
     }
-    // A timed-out call may leave a thread inside the plugin; leak the object
-    // rather than free it under that thread.
+    // A verb still inside libp2p keeps the plugin's executor thread; leak the
+    // object rather than free it under that thread.
     if (discoPlugin->quiesce(kQuiesceTimeout)) {
         discoPlugin.reset();
         return;
@@ -407,9 +407,9 @@ void DeliveryModuleImpl::releaseNode()
         deliveryCtx = nullptr;
     }
 
-    // After ctx_destroy, unlike RLN above: destroying the node joins the
-    // discovery worker, the only caller of the plugin, so no new call can
-    // arrive once it returns.
+    // After ctx_destroy, unlike RLN above: destroying the node unregisters the
+    // plugin's reverse implementations, so no new call can arrive once it
+    // returns.
     releaseServiceDiscoveryPlugin();
 }
 
@@ -867,21 +867,12 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
     Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
     discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2p, libp2pConfig);
 
-    // The vtable is borrowed for the duration of the call and copied by the
-    // node, but discoPlugin owns the object every entry point dispatches on,
-    // so it must outlive the context -- hence a member, not a local.
-    const StdLogosResult installed = callApiRetVoid(
-        "install service discovery plugin", CALLBACK_TIMEOUT,
-        [this](void* ticket) {
-            return logosdelivery_install_service_discovery_plugin(
-                static_cast<const LogosDeliveryCtx*>(deliveryCtxHandle),
-                discoPlugin->vtable(),
-                replyTrampoline,
-                ticket);
-        });
-
-    if (!installed.success) {
-        return installed.error;
+    // The node calls back into discoPlugin until its context is destroyed, so
+    // it must outlive the context -- hence a member, not a local. Registering
+    // is synchronous: nothing waits on a reply.
+    const std::string failure = discoPlugin->registerOn(deliveryCtx);
+    if (!failure.empty()) {
+        return failure;
     }
 
     fprintf(stderr, "DeliveryModuleImpl: service discovery plugin installed\n");
