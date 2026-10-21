@@ -98,11 +98,16 @@ def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
 
 @pytest.fixture(scope="session")
 def rln_membership(_rln_modules_or_skip: None) -> Path:
-    """Skip unless E2E_RLN_MEMBERSHIP_DIR names an RLN membership: module folders
-    laid out like a daemon's persistence dir (`<module>/<instance>/`)."""
+    """The RLN membership in E2E_RLN_MEMBERSHIP_DIR: module folders laid out like a
+    daemon's persistence dir (`<module>/<instance>/`). Skips when the variable is
+    unset, fails when it holds no keystore."""
     membership_dir = os.environ.get("E2E_RLN_MEMBERSHIP_DIR")
     if not membership_dir:
         pytest.skip("E2E_RLN_MEMBERSHIP_DIR not set")
+    if not any(Path(membership_dir).glob(f"{RLN_MODULE}/*/rln_sealed.json")):
+        pytest.fail(
+            f"E2E_RLN_MEMBERSHIP_DIR={membership_dir} holds no {RLN_MODULE}/<instance>/rln_sealed.json"
+        )
     return Path(membership_dir)
 
 
@@ -213,7 +218,8 @@ def rln_node_factory(
     """`delivery_node_factory` for nodes with RLN on the LEZ testnet registry: each
     daemon gets a presets file in its persistence dir, named by
     LOGOS_DELIVERY_RLN_PRESETS. A node given `membership` starts with a copy of it
-    there."""
+    there. Copies of one membership share its `message_id` counters, so two nodes
+    started from it must never send through the same validator."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
