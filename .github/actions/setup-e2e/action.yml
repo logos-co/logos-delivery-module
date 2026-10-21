@@ -86,9 +86,12 @@ runs:
         docker rm logosctl-cli
         echo "$RUNNER_TEMP/logosctl/bin" >> $GITHUB_PATH
 
-    # The released dependencies at pinned versions, then this commit's module from
-    # disk. liblogos_rln_module names liblogos_lez_rln_module without a version, so
-    # lez is pinned on its own and rln installs without dependencies.
+    # This step installs the released RLN modules at pinned versions, then the module
+    # built from this commit. liblogos_rln_module depends on liblogos_lez_rln_module
+    # without naming a version, so the step installs lez first at its own pin and
+    # installs rln without its dependencies. Bump these versions by hand when
+    # flake.lock moves the RLN modules. The step skips libp2p_module because no test
+    # uses kad service discovery.
     - name: Install the modules with logosctl
       shell: bash
       env:
