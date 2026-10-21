@@ -41128,18 +41128,18 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1792087950,
-        "narHash": "sha256-UjdGUmYd8j/yNYrZ0VdanHF8QQSvqhRRoCpXQYssnMA=",
-        "ref": "master",
-        "rev": "6b1f3a09e2c59442bb592659137c660d64a23baa",
-        "revCount": 2704,
+        "lastModified": 1792613524,
+        "narHash": "sha256-2jg2Pg8khew8gd+UKzpHrrB+GiabOrsCz4UBcnw7kso=",
+        "ref": "poc/discovery-plugin-through-reverseffi",
+        "rev": "775a6a5d707c81c145544b1a3176c31b63928895",
+        "revCount": 2724,
         "type": "git",
-        "url": "https://github.com/logos-messaging/logos-delivery"
+        "url": "file:///Users/schwarzy/dev/status/logos-delivery"
       },
       "original": {
-        "ref": "master",
+        "ref": "poc/discovery-plugin-through-reverseffi",
         "type": "git",
-        "url": "https://github.com/logos-messaging/logos-delivery"
+        "url": "file:///Users/schwarzy/dev/status/logos-delivery"
       }
     },
     "logos-design-system": {
@@ -328746,17 +328746,17 @@
     "nim-ffi": {
       "flake": false,
       "locked": {
-        "lastModified": 1790013241,
-        "narHash": "sha256-JOaIKblHnRZNYxS+wKEw0qYWI7KAQhVdPZKgAspH1u4=",
+        "lastModified": 1792611917,
+        "narHash": "sha256-JP+ApVHcJuPi40sNLTtlWj8ceAXARmeaFzuX9gw3zR4=",
         "owner": "logos-messaging",
         "repo": "nim-ffi",
-        "rev": "4c1218626bbbf89e19836845b690937cd255c3f0",
+        "rev": "c3d5e7a0ab89cbb296531c3c241b175685f09683",
         "type": "github"
       },
       "original": {
         "owner": "logos-messaging",
         "repo": "nim-ffi",
-        "rev": "4c1218626bbbf89e19836845b690937cd255c3f0",
+        "rev": "c3d5e7a0ab89cbb296531c3c241b175685f09683",
         "type": "github"
       }
     },
