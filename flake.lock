@@ -41134,12 +41134,12 @@
         "rev": "775a6a5d707c81c145544b1a3176c31b63928895",
         "revCount": 2724,
         "type": "git",
-        "url": "file:///Users/schwarzy/dev/status/logos-delivery"
+        "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
         "ref": "poc/discovery-plugin-through-reverseffi",
         "type": "git",
-        "url": "file:///Users/schwarzy/dev/status/logos-delivery"
+        "url": "https://github.com/logos-messaging/logos-delivery"
       }
     },
     "logos-design-system": {
