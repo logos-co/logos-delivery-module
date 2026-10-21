@@ -51,6 +51,7 @@ def test_validating_node_drops_message_without_proof(rln_node_factory, delivery_
     )
 
 
+@pytest.mark.rln
 @pytest.mark.rln_membership
 def test_restored_membership_is_active(rln_node_factory, rln_membership):
     node = rln_node_factory(
@@ -60,6 +61,7 @@ def test_restored_membership_is_active(rln_node_factory, rln_membership):
     assert rln_membership_state(node)["state"] == "active"
 
 
+@pytest.mark.rln
 @pytest.mark.rln_membership
 def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membership):
     validating = rln_node_factory("validating", make_delivery_config(), enable_validation=True)
@@ -79,6 +81,7 @@ def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membe
         wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
 
 
+@pytest.mark.rln
 @pytest.mark.rln_membership
 def test_validating_service_relays_lightpush_with_proof(
     rln_node_factory, delivery_node_factory, rln_membership
