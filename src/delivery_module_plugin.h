@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -12,6 +13,7 @@
 #include <logos_result.h>
 
 class DeliveryServiceDiscoveryPlugin;
+class LogosDeliveryCtx; // liblogosdelivery.hpp
 class RlnBridge;
 
 // Everything the delivery library no longer knows about RLN. Resolved from
@@ -29,7 +31,7 @@ struct DeliveryRlnConfig {
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
  *
- * This class adapts the universal module API to liblogosdelivery C-FFI calls
+ * This class adapts the universal module API to liblogosdelivery calls, through its generated C++ binding
  * and forwards asynchronous events back to the host through typed events
  * declared in the `logos_events:` section.
  *
@@ -150,7 +152,7 @@ public:
     /**
      * @brief Sends a message over the active node.
      *
-     * Builds a JSON envelope expected by `logosdelivery_ctx_send`:
+     * Builds a JSON envelope expected by the node's `send`:
      * `{ "contentTopic": string, "payload": base64, "ephemeral": false }`.
      *
      * Returns a requestId on success. Async results come via typed events:
@@ -183,7 +185,7 @@ public:
      * @brief Runs a Store (historical message) query against a specific store
      *        service peer.
      *
-     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`logosdelivery_ctx_waku_store_query`,
+     * ⚠️ USE AT YOUR OWN RISK: backed by the kernel API (`waku_store_query`,
      * `liblogosdelivery_kernel.h`), which is subject to change at any point
      * without a deprecation cycle. This method's JSON contract follows it.
      *
@@ -245,7 +247,7 @@ public:
     /**
      * @brief Sends a message on a reliable channel.
      *
-     * Builds the JSON envelope expected by `logosdelivery_ctx_channel_send`:
+     * Builds the JSON envelope expected by the node's `channel_send`:
      * `{ "payload": base64, "ephemeral": false }`.
      *
      * Returns a requestId on success. Async results come via typed events:
@@ -610,15 +612,10 @@ private:
     // ordered against the writers -- the RLN trampolines.
     std::shared_ptr<const DeliveryRlnConfig> rlnConfigSnapshot() const;
 
-    // Raw FFI context: what the event registry takes. Every other call goes
-    // through the generated logosdelivery_ctx_* wrappers, which want the handle
-    // below instead.
-    void* deliveryCtx;
-    // Owning handle from logosdelivery_ctx_create (a LogosDeliveryCtx*), which
-    // every logosdelivery_ctx_* call takes. Held as void* so the C ABI header
-    // stays out of this header's includers. Released with
-    // logosdelivery_ctx_destroy.
-    void* deliveryCtxHandle;
+    // The node, through liblogosdelivery's generated C++ binding: created by
+    // createNode, destroyed (which stops the node) by releaseNode. Forward
+    // declared so the binding stays out of this header's includers.
+    std::unique_ptr<LogosDeliveryCtx> node;
 
     std::mutex createNodeMutex;
 
@@ -635,7 +632,7 @@ private:
     static constexpr std::chrono::seconds CALLBACK_TIMEOUT{30};
 
     /**
-     * @brief Installs the discovery vtable for a node configured with
+     * @brief Installs the discovery host for a node configured with
      *        `pluginKadDiscovery`; runs in createNode, before start.
      *
      * @param libp2pConfig JSON for libp2p's createNode (see discovery_config.h).
@@ -643,34 +640,20 @@ private:
      */
     std::string installServiceDiscoveryPlugin(const std::string& libp2pConfig);
 
-    /**
-     * @brief Global C callback used by liblogosdelivery to report async events.
-     * @param callerRet FFI return code associated with callback dispatch.
-     * @param msg UTF-8 JSON event payload buffer.
-     * @param len Message length in bytes.
-     * @param userData Opaque pointer expected to be `DeliveryModuleImpl*`.
-     */
-    static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
+    /// Forwards the node's typed events (MessageSentPayload, ...) to this
+    /// module's events. The listeners run on the library's event thread and
+    /// go away with the context.
+    void registerEventListeners();
 
-    // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
-    // userData is the DeliveryModuleImpl*.
-    // Both take the generated reply shape -- `reply` points at the result on
-    // success, `errMsg` carries the reason otherwise -- and ignore
-    // RET_STALE_WARN, the non-terminal progress tick a long start/stop emits.
-    static void start_callback(int errCode, const char* const* reply, const char* errMsg,
-                               void* userData);
-    static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
-                              void* userData);
-
-    // A failed start leaves the node half up, so start_callback stops it
-    // again -- from our own thread, as the library's refuses re-entrant calls.
-    void stopAfterFailedStart();
-    // Disarms stopAfterFailedStart and joins a stop it already issued. start()
-    // calls it before arming a new one, releaseNode() before the context goes.
-    void joinFailedStartStop();
-    std::mutex failedStartStopMutex;
-    bool failedStartStopArmed{false};
-    std::thread failedStartStopThread;
+    /// start() and stop() return once dispatched: node start can block for a
+    /// long time (relay reconnect backoff). Each runs its blocking call on a
+    /// thread of its own, which reports through nodeStarted / nodeStopped; a
+    /// failed start stops the node and the RLN backend again from there.
+    /// releaseNode joins them before the context goes.
+    void runLifecycleCall(std::function<void()> call);
+    void joinLifecycleCalls();
+    std::mutex lifecycleMutex;
+    std::vector<std::thread> lifecycleThreads;
 
     // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by

@@ -62,10 +62,11 @@ libp2p's own `LIBP2P_MODULE_CONFIG`.
 The node calls the module through nim-ffi reverse calls, one per verb
 (`sd_start`, `sd_lookup`, `sd_start_advertising`, ...; the reply lists them
 under `requiredHostImpls`). The module registers an implementation of each
-with `logosdelivery_set_<wire>_impl` before `start_node`, and the node refuses
-to start until all are there. An implementation only queues the verb; one
-executor thread runs them in order against `libp2p_module` and answers each
-asynchronously with `logosdelivery_reverse_reply_<wire>`.
+through liblogosdelivery's C++ binding (`setSdLookupImpl`, ...) before
+`start_node`, and the node refuses to start until all are there. An
+implementation only queues the verb with its call token; one executor thread
+runs them in order against `libp2p_module` and answers each asynchronously
+through that token.
 
 libp2p is first contacted on the first discovery call after `start`, not at
 `createNode`, so a missing module or a bad bootstrap set surfaces there. Every
