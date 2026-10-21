@@ -104,7 +104,7 @@ the RLN tests out.
 # 1. Build the logosctl smoke image (one-time) and copy its CLI out of it, at the
 #    commit of .github/actions/setup-e2e.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-cd /tmp/logoscore-py && git checkout <smoke-image-commit>
+cd /tmp/logoscore-py && git checkout <logoscore-py-commit>
 bash tests/logosctl/docker_smoke/build_smoke_image.sh
 export LOGOSCTL_IMAGE=logosctl:smoke-portable
 cd -
