@@ -1,10 +1,10 @@
 name: Set up e2e environment
 description: >
-  Builds what tests/e2e runs against: the module (install-portable) and its
-  dependency modules in LOGOS_MODULES_DIR, the logoscore smoke image in
-  LOGOSCORE_IMAGE, the logoscore CLI on PATH, and the Python test dependencies.
-  The smoke image and the dependency modules come from the Actions cache when
-  their pins are unchanged.
+  Builds what tests/e2e runs against: the logosctl smoke image in
+  LOGOSCTL_IMAGE, the logosctl CLI on PATH, the module (lgx-portable) installed
+  with logosctl next to its released dependencies in LOGOS_MODULES_DIR, and the
+  Python test dependencies. The smoke image comes from the Actions cache when
+  its pin is unchanged.
 
 inputs:
   attic-token-ci:
@@ -12,6 +12,9 @@ inputs:
     required: true
   attic-token-public:
     description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
+    required: true
+  logoscore-py-rev:
+    description: The logos-logoscore-py commit of the smoke image and the Python client.
     required: true
 
 runs:
@@ -28,8 +31,8 @@ runs:
       id: smoke-image
       uses: actions/cache@v4
       with:
-        path: ${{ runner.temp }}/logoscore-smoke-image.tar
-        key: logoscore-smoke-image-${{ runner.arch }}-a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
+        path: ${{ runner.temp }}/logosctl-smoke-image.tar
+        key: logosctl-smoke-image-${{ runner.arch }}-${{ inputs.logoscore-py-rev }}
 
     # The gha cache backend needs the docker-container driver;
     # the default docker driver can't export type=gha.
@@ -45,68 +48,18 @@ runs:
       if: steps.smoke-image.outputs.cache-hit != 'true'
       uses: crazy-max/ghaction-github-runtime@v3
 
-    - name: Build delivery-module (install-portable layout)
+    - name: Build delivery-module (lgx-portable)
       shell: bash
       run: |
-        nix build -L .#install-portable
-
-    - name: Restore the cached dependency modules
-      id: dependency-modules
-      uses: actions/cache@v4
-      with:
-        path: dependency-modules
-        key: e2e-dependency-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
-
-    # install-portable bundles only the module's own lib; its optional
-    # dependencies (libp2p_module, the RLN chain) are built at the revs
-    # flake.lock pins.
-    - name: Build dependency modules
-      if: steps.dependency-modules.outputs.cache-hit != 'true'
-      shell: bash
-      run: |
-        LIBP2P_NODE=$(jq -r '.nodes[.root].inputs.libp2p_module' flake.lock)
-        LIBP2P_URL=$(jq -r --arg n "$LIBP2P_NODE" '.nodes[$n].locked.url' flake.lock)
-        LIBP2P_REV=$(jq -r --arg n "$LIBP2P_NODE" '.nodes[$n].locked.rev' flake.lock)
-
-        RLN_NODE=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
-        RLN_URL=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.url' flake.lock)
-        RLN_REF=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.ref' flake.lock)
-        RLN_REV=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.rev' flake.lock)
-
-        LEZ_NODE=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
-        LEZ_URL=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.url' flake.lock)
-        LEZ_REF=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.ref' flake.lock)
-        LEZ_REV=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.rev' flake.lock)
-
-        nix build -L --out-link result-libp2p \
-          "git+$LIBP2P_URL?rev=$LIBP2P_REV#install-portable"
-        nix build -L --out-link result-rln \
-          "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-rln-module#install-portable"
-        nix build -L --out-link result-lez-rln \
-          "git+$LEZ_URL?ref=$LEZ_REF&rev=$LEZ_REV&dir=logos-lez-rln-module#install-portable"
-
-        mkdir -p dependency-modules
-        for r in result-libp2p result-rln result-lez-rln; do
-          cp -rL "$r/modules/." dependency-modules/
-        done
-        chmod -R u+w dependency-modules
-
-    - name: Stage dependency modules
-      shell: bash
-      run: |
-        mkdir -p merged-modules
-        cp -rL result/modules/. merged-modules/
-        cp -r dependency-modules/. merged-modules/
-        chmod -R u+w merged-modules
-        echo "LOGOS_MODULES_DIR=$PWD/merged-modules" >> $GITHUB_ENV
+        nix build -L .#lgx-portable
 
     - name: Load the cached smoke image
       if: steps.smoke-image.outputs.cache-hit == 'true'
       shell: bash
       run: |
-        docker load -i "$RUNNER_TEMP/logoscore-smoke-image.tar"
-        rm "$RUNNER_TEMP/logoscore-smoke-image.tar"
-        echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
+        docker load -i "$RUNNER_TEMP/logosctl-smoke-image.tar"
+        rm "$RUNNER_TEMP/logosctl-smoke-image.tar"
+        echo "LOGOSCTL_IMAGE=logosctl:smoke-portable" >> $GITHUB_ENV
 
     - name: Checkout logoscore-py and build smoke image
       if: steps.smoke-image.outputs.cache-hit != 'true'
@@ -114,20 +67,43 @@ runs:
       env:
         BUILDX_CACHE_FROM: type=gha
         BUILDX_CACHE_TO: type=gha,mode=max
+        LOGOSCORE_PY_REV: ${{ inputs.logoscore-py-rev }}
       run: |
         git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
         cd /tmp/logoscore-py
-        git checkout a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
-        bash tests/docker_smoke/build_smoke_image.sh
-        docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-smoke-image.tar"
-        echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
+        git checkout "$LOGOSCORE_PY_REV"
+        bash tests/logosctl/docker_smoke/build_smoke_image.sh
+        docker save logosctl:smoke-portable -o "$RUNNER_TEMP/logosctl-smoke-image.tar"
+        echo "LOGOSCTL_IMAGE=logosctl:smoke-portable" >> $GITHUB_ENV
 
-    - name: Build logoscore CLI binary (host PATH)
-      # Must match the daemon commit baked into the smoke image above.
+    # The image's own CLI, so the host client matches the daemon; through tar, because
+    # `docker cp` to a directory fails on the bundle's read-only directories.
+    - name: Copy the logosctl CLI out of the smoke image (host PATH)
       shell: bash
       run: |
-        nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/665ac28bc77f45e3c610f40fef975a12609de531#cli"
-        echo "/tmp/logoscore-cli/bin" >> $GITHUB_PATH
+        docker create --name logosctl-cli logosctl:smoke-portable
+        docker cp logosctl-cli:/opt/logosctl - | tar -x -C "$RUNNER_TEMP"
+        docker rm logosctl-cli
+        echo "$RUNNER_TEMP/logosctl/bin" >> $GITHUB_PATH
+
+    # This step installs the released RLN modules at pinned versions, then the module
+    # built from this commit. liblogos_rln_module depends on liblogos_lez_rln_module
+    # without naming a version, so the step installs lez first at its own pin and
+    # installs rln without its dependencies. Bump these versions by hand when
+    # flake.lock moves the RLN modules. The step skips libp2p_module because no test
+    # uses kad service discovery.
+    - name: Install the modules with logosctl
+      shell: bash
+      env:
+        LOGOSCTL_CONFIG_DIR: ${{ runner.temp }}/logosctl-modules
+      run: |
+        logosctl daemon start --detach
+        logosctl catalog refresh
+        logosctl install liblogos_lez_rln_module --version 5.1.0 -y
+        logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
+        logosctl install result/*.lgx -y
+        logosctl daemon stop
+        echo "LOGOS_MODULES_DIR=$LOGOSCTL_CONFIG_DIR/modules" >> $GITHUB_ENV
 
     - uses: actions/setup-python@v5
       with:
@@ -137,6 +113,9 @@ runs:
 
     - name: Install e2e test dependencies
       shell: bash
+      env:
+        LOGOSCORE_PY_REV: ${{ inputs.logoscore-py-rev }}
       run: |
         cd tests/e2e
         pip install -r requirements.txt
+        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@$LOGOSCORE_PY_REV"
