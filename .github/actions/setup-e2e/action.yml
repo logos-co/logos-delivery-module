@@ -12,8 +12,8 @@ inputs:
   attic-token-public:
     description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
     required: true
-  smoke-image-commit:
-    description: The logos-logoscore-py commit the smoke image is built from.
+  logoscore-py-commit:
+    description: The logos-logoscore-py commit of the smoke image and the Python client.
     default: 8aef1dbccafd48fcfd39eff66eea05f6300a791a
 
 runs:
@@ -30,7 +30,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/logosctl-smoke-image.tar
-        key: logosctl-smoke-image-${{ runner.arch }}-${{ inputs.smoke-image-commit }}
+        key: logosctl-smoke-image-${{ runner.arch }}-${{ inputs.logoscore-py-commit }}
 
     # The default docker driver can't export to the gha cache backend.
     - name: Set up Docker Buildx
@@ -65,7 +65,7 @@ runs:
       run: |
         git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
         cd /tmp/logoscore-py
-        git checkout ${{ inputs.smoke-image-commit }}
+        git checkout ${{ inputs.logoscore-py-commit }}
         bash tests/logosctl/docker_smoke/build_smoke_image.sh
         docker save logosctl:smoke-portable -o "$RUNNER_TEMP/logosctl-smoke-image.tar"
         echo "LOGOSCTL_IMAGE=logosctl:smoke-portable" >> $GITHUB_ENV
@@ -115,4 +115,4 @@ runs:
       run: |
         cd tests/e2e
         pip install -r requirements.txt
-        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@8aef1dbccafd48fcfd39eff66eea05f6300a791a"
+        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@${{ inputs.logoscore-py-commit }}"
