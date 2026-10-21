@@ -37,7 +37,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for its `requestId` |
 | `test_bidirectional_propagation` | 2 | A→B and B→A both propagate |
 | `test_two_nodes_message_received` | 2 | receiver sees `messageReceived` (see below) |
-| `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof reaches the non-validating node, not the validating one (see "RLN") |
+| `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
 | `test_send_with_rln_off_propagates` | 2 | a sender with RLN off sees `messagePropagated` |
 | `test_send_without_membership_reports_error` | 2 | a sender with RLN on and no membership sees `messageError` |
 
