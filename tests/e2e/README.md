@@ -149,13 +149,15 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 ## Troubleshooting
 
 Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
-uploaded as the `e2e-test-logs` artifact in CI on failure. Set
+uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-membership-logs`
+for the membership job). Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
 `gw<n>` the n-th, a run without xdist the first). If another network on the host
 already uses that range, `docker network create` fails with "Pool overlaps"; set
-`E2E_NETWORK_SUBNET` to a free range.
+`E2E_NETWORK_SUBNET` to a free range with a /24 for each worker, such as a /22 for
+`-n 4`.
 
 ## CI
 

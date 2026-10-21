@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from libs.constants import CONTENT_TOPIC
+from libs.constants import CONTENT_TOPIC, PUBSUB_TOPIC
 from libs.helpers import (
     event_request_id,
     is_connected,
@@ -24,6 +24,7 @@ PROPAGATED_TIMEOUT_S = 40.0
 SEND_ERROR_TIMEOUT_S = 120.0
 
 VALIDATION_FAILURES = "libp2p_pubsub_validation_failure_total"
+RLN_VALID_MESSAGES = "logos_delivery_rln_valid_messages_total_total"
 
 
 @pytest.mark.rln
@@ -58,7 +59,8 @@ def test_restored_membership_is_active(rln_node_factory, rln_membership):
         "membership", make_delivery_config(), enable_validation=False, membership=rln_membership
     )
     wait_for_lez_wallet(node, timeout=WALLET_TIMEOUT_S)
-    assert rln_membership_state(node)["state"] == "active"
+    state = rln_membership_state(node)
+    assert state.get("state") == "active", state
 
 
 @pytest.mark.rln
@@ -79,6 +81,8 @@ def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membe
         wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
         sender.send(CONTENT_TOPIC, "with-proof")
         wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
+
+    assert validating.metric(RLN_VALID_MESSAGES, shard=PUBSUB_TOPIC) >= 1
 
 
 @pytest.mark.rln
@@ -105,6 +109,8 @@ def test_validating_service_relays_lightpush_with_proof(
         assert wait_for_valid_roots(service, client, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
         client.send(CONTENT_TOPIC, "lightpush-with-proof")
         wait_for_event(events, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
+
+    assert service.metric(RLN_VALID_MESSAGES, shard=PUBSUB_TOPIC) >= 1
 
 
 def test_send_with_rln_off_propagates(delivery_node_factory):

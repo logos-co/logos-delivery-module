@@ -150,11 +150,13 @@ class LogosDelivery:
     def rln_state(self, *, timeout: Optional[float] = None) -> dict:
         return call_ok(self.client, "rlnState", timeout=timeout)
 
-    def metric(self, name: str) -> float:
-        """Value of the unlabelled metric `name` in the node's Prometheus text, 0 if absent."""
+    def metric(self, name: str, **labels: str) -> float:
+        """Value of the metric `name` with `labels` in the node's Prometheus text, 0 if absent."""
+        label_text = ",".join(f'{key}="{value}"' for key, value in labels.items())
+        series = f"{name}{{{label_text}}}" if labels else name
         for line in (self.get_node_info("Metrics") or "").splitlines():
             metric_name, _, value = line.partition(" ")
-            if metric_name == name:
+            if metric_name == series:
                 return float(value)
         return 0.0
 
@@ -234,9 +236,10 @@ def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> None:
 
 def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
     """Poll `node`'s `validate_proof` with a proof from `prover`'s membership until
-    its valid-root window can check it, and return the verdict. The window fills in
-    the background and nothing else reports it. The proof spends one of `prover`'s
-    messages in the current epoch."""
+    its valid-root window holds the proof's root, and return the verdict. The window
+    fills in the background and nothing else reports it; a warm window answers
+    `invalid` until it holds the root. The proof spends one of `prover`'s messages in
+    the current epoch."""
     wait_for_lez_wallet(prover, timeout=timeout)
     timestamp = str(int(time.time()))
     proof = wait_until(
@@ -245,10 +248,15 @@ def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: f
         message=f"{prover.label}: no RLN proof",
     )
     proof_json = json.dumps({"proof": proof["proof_canonical"]})
+
+    def settled():
+        answer = _rln_answer(node, "validate_proof", RLN_PROBE_SIGNAL, timestamp, proof_json)
+        return answer if answer and answer["verdict"] != "invalid" else None
+
     answer = wait_until(
-        lambda: _rln_answer(node, "validate_proof", RLN_PROBE_SIGNAL, timestamp, proof_json),
+        settled,
         timeout=timeout,
-        message=f"{node.label}: valid-root window still cold",
+        message=f"{node.label}: valid-root window still cold, or answers invalid",
     )
     return answer["verdict"]
 
