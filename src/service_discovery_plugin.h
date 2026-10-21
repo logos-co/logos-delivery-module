@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -16,21 +15,22 @@
 #include <nlohmann/json.hpp>
 
 class Libp2pModule;
+class LogosDeliveryCtx; // liblogosdelivery.hpp
 
 /**
  * @brief Hosts logos-delivery's external service discovery on libp2p_module.
  *
  * The node calls its host through nim-ffi reverse calls, one per verb
  * (`sd_start`, `sd_lookup`, ...): registerOn() installs an implementation of
- * each with `logosdelivery_set_<wire>_impl`, and every one forwards to
+ * each with the binding's `setSd<Verb>Impl`, and every one forwards to
  * libp2p_module's `disco*` API. libp2p_module is an optional dependency: a
  * node configured for external discovery without it fails its start (see
  * ensureBackend).
  *
  * The replies are asynchronous. An implementation runs on a nim-ffi reverse
- * worker; it copies its arguments, queues the verb for this object's executor
- * thread and returns at once. The executor runs the verbs one at a time, in
- * order, and answers each with `logosdelivery_reverse_reply_<wire>`. The SDK's
+ * worker; it queues the verb, with its decoded arguments and its call token,
+ * for this object's executor thread and returns at once. The executor runs the
+ * verbs one at a time, in order, and answers each through its token. The SDK's
  * synchronous calls need no Qt event loop there; the `*Async` variants are
  * unused because they complete on the Qt main thread.
  */
@@ -65,10 +65,10 @@ public:
      * After `ctx_create`, before `start_node`: the node checks at start that
      * every one is there.
      *
-     * @param ctx The raw context (LogosDeliveryCtx::ptr).
+     * @param node The node's context; must outlive this object's executor.
      * @return empty on success, otherwise which registration was refused.
      */
-    std::string registerOn(void* ctx);
+    std::string registerOn(LogosDeliveryCtx& node);
 
     /**
      * @brief Stops the executor; queued verbs are answered with an error.
@@ -94,34 +94,12 @@ public:
     Outcome unregisterInterest(const std::string& key);
 
 private:
-    /// The reverse calls the node makes, indexed as kWires in the .cpp.
-    enum Wire : int {
-        SdStart,
-        SdStop,
-        SdLookup,
-        SdRandomLookup,
-        SdStartAdvertising,
-        SdStopAdvertising,
-        SdRegisterInterest,
-        SdUnregisterInterest,
-        WireCount
-    };
-
-    /// One verb the node is waiting on: who to answer, and its arguments.
+    /// One verb the node is waiting on: the verb with its arguments bound,
+    /// and how to answer it. `reply` holds the binding's call token, which is
+    /// safe to use from any thread, also after the context is gone.
     struct Call {
-        Wire wire;
-        void* ctx; ///< The calling context's token; safe after its destroy.
-        uint64_t id;
-        std::string key;
-        int64_t limit = 0;
-        std::vector<uint8_t> data;
-        std::vector<uint8_t> record;
-    };
-
-    /// The user_data of one registered implementation.
-    struct Binding {
-        DeliveryServiceDiscoveryPlugin* self;
-        Wire wire;
+        std::function<Outcome()> run;
+        std::function<void(const Outcome&)> reply;
     };
 
     /**
@@ -151,12 +129,7 @@ private:
     /// Queues a decoded call; false once the executor is stopping.
     bool enqueue(Call call);
     void runExecutor();
-    Outcome serve(const Call& call);
-    static void answer(const Call& call, const Outcome& outcome);
 
-    /// The nim-ffi reverse implementation of every wire; user_data is a Binding.
-    static void cImpl(void* ctx, uint64_t callId, const uint8_t* args, size_t argsLen,
-                      void* userData);
 
     Libp2pModule* libp2p_;
     std::string libp2pConfig_;
@@ -164,7 +137,6 @@ private:
     bool nodeCreated_;
     bool startIssued_; ///< libp2p start succeeded or timed out; never issue it again.
 
-    std::array<Binding, WireCount> bindings_;
     std::mutex mutex_;
     std::condition_variable wake_;
     std::deque<Call> queue_;

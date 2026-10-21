@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -17,7 +18,6 @@
 #include <nlohmann/json.hpp>
 #include "base64.h"
 
-#include "api_call_handler.h"
 #include "discovery_config.h"
 #include "service_discovery_plugin.h"
 #include "rln_bridge.h"
@@ -27,13 +27,14 @@
 // #optional_dependencies; defines the
 // LogosModules aggregate behind LogosModuleContext::modules().
 #include "logos_sdk.h"
+// The node's API: liblogosdelivery's generated C++ binding (LogosDeliveryCtx).
+// The kernel tier (waku_store_query) is methods of the same class.
+#include <liblogosdelivery.hpp>
 extern "C" {
-#include <liblogosdelivery.h>
-// Kernel tier: unstable, may change without a deprecation cycle. Only
-// waku_store_query is consumed from it; everything else goes through the
-// stable surface above.
-#include <liblogosdelivery_kernel.h>
 #include <liblogosdelivery_rln.h>
+// Hand-written export, outside the generated binding: initializes the Nim
+// runtime (see installRlnPlugin).
+const char* logosdelivery_version(void);
 }
 
 namespace {
@@ -49,40 +50,21 @@ std::string toStringOrEmpty(const char* s) {
     return s ? std::string(s) : std::string();
 }
 
-// The text a generated reply carries: the result on success, else the error.
-std::string replyText(int errCode, const char* const* reply, const char* errMsg) {
-    return toStringOrEmpty(errCode == RET_OK ? (reply ? *reply : nullptr) : errMsg);
-}
-
-const LogosDeliveryCtx* asCtx(void* handle) {
-    return static_cast<const LogosDeliveryCtx*>(handle);
-}
-
-// message_received and channel_message_received: base64 string.
-std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
-    if (!payloadValue.is_string()) {
-        return {};
+// A binding call's result as this module's: the reply text as the value on
+// success, the reason otherwise.
+StdLogosResult toLogos(const Result<std::string>& r) {
+    if (r.isErr()) {
+        return {false, {}, r.error()};
     }
-    return delivery_base64::decode(payloadValue.get<std::string>());
+    return {true, r.value()};
 }
 
-// Wire names of the events this module forwards. nim-ffi 0.3.0 replaced the
-// single global event callback with a per-event listener registry, so each name
-// is registered separately; the JSON payload still carries the snake_case
-// "eventType" that event_callback dispatches on. Upstream also emits
-// onTopicHealthChange, onConnectionChange and onReceivedMessage, which the
-// module does not surface.
-constexpr const char* kEventNames[] = {
-    "onMessageQueued",
-    "onMessageSent",
-    "onMessageError",
-    "onMessagePropagated",
-    "onMessageReceived",
-    "onConnectionStatusChange",
-    "onChannelMessageReceived",
-    "onChannelMessageSent",
-    "onChannelMessageError",
-};
+StdLogosResult toLogosVoid(const Result<std::string>& r) {
+    if (r.isErr()) {
+        return {false, {}, r.error()};
+    }
+    return {true, {}};
+}
 
 std::mutex gMixRlnBridgeMutex;
 std::vector<RlnBridge*> gMixRlnBridges;
@@ -135,61 +117,24 @@ void unregisterMixRlnBridge(RlnBridge* bridge)
 }
 } // namespace
 
-void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
-                                        const char* errMsg, void* userData)
+void DeliveryModuleImpl::runLifecycleCall(std::function<void()> call)
 {
-    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) {
-        fprintf(stderr, "DeliveryModuleImpl::start_callback: Invalid userData\n");
-        return;
-    }
-    impl->nodeStarted(errCode == RET_OK, replyText(errCode, reply, errMsg),
-                      currentTimestampNs());
-    if (errCode != RET_OK) {
-        impl->stopAfterFailedStart();
-    }
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    lifecycleThreads.emplace_back(std::move(call));
 }
 
-void DeliveryModuleImpl::stopAfterFailedStart()
+void DeliveryModuleImpl::joinLifecycleCalls()
 {
-    std::lock_guard<std::mutex> lock(failedStartStopMutex);
-    if (!failedStartStopArmed) {
-        return;
-    }
-    failedStartStopArmed = false;
-    // The same two halves as stop(): the node, then the RLN backend this
-    // module started for it.
-    failedStartStopThread = std::thread([this] {
-        if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
-            fprintf(stderr, "DeliveryModuleImpl: failed to stop the node after a failed start\n");
-            return;
-        }
-        stopRlnBackend();
-    });
-}
-
-void DeliveryModuleImpl::joinFailedStartStop()
-{
+    std::vector<std::thread> threads;
     {
-        std::lock_guard<std::mutex> lock(failedStartStopMutex);
-        failedStartStopArmed = false;
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        threads.swap(lifecycleThreads);
     }
-    // Disarmed under the lock, so no thread can be assigned after this point.
-    if (failedStartStopThread.joinable()) {
-        failedStartStopThread.join();
+    for (auto& t : threads) {
+        if (t.joinable()) {
+            t.join();
+        }
     }
-}
-
-void DeliveryModuleImpl::stop_callback(int errCode, const char* const* reply,
-                                       const char* errMsg, void* userData)
-{
-    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) {
-        fprintf(stderr, "DeliveryModuleImpl::stop_callback: Invalid userData\n");
-        return;
-    }
-    impl->nodeStopped(errCode == RET_OK, replyText(errCode, reply, errMsg),
-                      currentTimestampNs());
 }
 
 // The rln_*_callback trampolines are C callbacks invoked from the Nim runtime,
@@ -308,8 +253,6 @@ void DeliveryModuleImpl::rln_validate_proof_callback(uint64_t reqId, const char*
 
 DeliveryModuleImpl::DeliveryModuleImpl()
     : rlnBridge(std::make_unique<RlnBridge>())
-    , deliveryCtx(nullptr)
-    , deliveryCtxHandle(nullptr)
 {
     fprintf(stderr, "DeliveryModuleImpl: Initializing...\n");
 }
@@ -382,10 +325,10 @@ void DeliveryModuleImpl::abortRln()
 
 void DeliveryModuleImpl::releaseNode()
 {
-    // A stop issued after a failed start holds the context handle, and joins
-    // the bring-up thread itself: finish it first, so that join is not racing
-    // the one below.
-    joinFailedStartStop();
+    // A start or stop still running holds the node, and a failed start joins
+    // the bring-up thread itself: finish them first, so that join is not
+    // racing the one below.
+    joinLifecycleCalls();
     // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
     // run while it is still in flight. A no-op when no thread was started.
     joinRlnBringUp();
@@ -399,13 +342,9 @@ void DeliveryModuleImpl::releaseNode()
     // instance's RLN.
     abortRln();
     unregisterMixRlnBridge(rlnBridge.get());
-    if (deliveryCtxHandle) {
-        // Frees the handle and stops the node, tearing down the event
-        // listeners registered against it along the way.
-        logosdelivery_ctx_destroy(static_cast<LogosDeliveryCtx*>(deliveryCtxHandle));
-        deliveryCtxHandle = nullptr;
-        deliveryCtx = nullptr;
-    }
+    // Destroying the context stops the node, tearing down the event
+    // listeners registered against it along the way.
+    node.reset();
 
     // After ctx_destroy, unlike RLN above: destroying the node unregisters the
     // plugin's reverse implementations, so no new call can arrive once it
@@ -423,109 +362,38 @@ StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
     return {false, {}, std::move(reason)};
 }
 
-void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t len, void* userData)
+void DeliveryModuleImpl::registerEventListeners()
 {
-    (void)callerRet;
-    DeliveryModuleImpl* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) {
-        fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid userData\n");
-        return;
-    }
-
-    if (msg && len > 0) {
-        std::string message(msg, len);
-
-        // This function is a C callback invoked from the Nim runtime: a C++
-        // exception escaping here would unwind into Nim frames and terminate
-        // the process. Catch the whole nlohmann exception hierarchy (parse
-        // errors and type mismatches from .value()/.get()) and drop the event.
-        try {
-            nlohmann::json jsonObj = nlohmann::json::parse(message);
-
-            if (!jsonObj.is_object()) {
-                fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid JSON\n");
-                return;
-            }
-
-            std::string eventType = jsonObj.value("eventType", "");
-            int64_t timestamp = currentTimestampNs();
-
-            if (eventType == "message_queued") {
-                impl->messageQueued(
-                    jsonObj.value("requestId", ""),
-                    jsonObj.value("messageHash", ""),
-                    timestamp);
-
-            } else if (eventType == "message_sent") {
-                impl->messageSent(
-                    jsonObj.value("requestId", ""),
-                    jsonObj.value("messageHash", ""),
-                    timestamp);
-
-            } else if (eventType == "message_error") {
-                impl->messageError(
-                    jsonObj.value("requestId", ""),
-                    jsonObj.value("messageHash", ""),
-                    jsonObj.value("error", ""),
-                    timestamp);
-
-            } else if (eventType == "message_propagated") {
-                impl->messagePropagated(
-                    jsonObj.value("requestId", ""),
-                    jsonObj.value("messageHash", ""),
-                    timestamp);
-
-            } else if (eventType == "message_received") {
-                auto msgObj = jsonObj.value("message", nlohmann::json::object());
-
-                std::string hash = jsonObj.value("messageHash", "");
-                std::string topic = msgObj.value("contentTopic", "");
-                std::string source = jsonObj.value("source", "");
-
-                std::vector<uint8_t> payloadBytes;
-                if (msgObj.contains("payload")) {
-                    payloadBytes = decodeBase64Payload(msgObj["payload"]);
-                }
-
-                int64_t msgTimestamp = static_cast<int64_t>(msgObj.value("timestamp", 0.0));
-                impl->messageReceived(hash, topic, payloadBytes, source, msgTimestamp);
-
-            } else if (eventType == "connection_status_change") {
-                impl->connectionStateChanged(
-                    jsonObj.value("connectionStatus", ""),
-                    timestamp);
-
-            } else if (eventType == "channel_message_received") {
-                std::vector<uint8_t> payloadBytes;
-                if (jsonObj.contains("payload")) {
-                    payloadBytes = decodeBase64Payload(jsonObj["payload"]);
-                }
-                impl->channelMessageReceived(
-                    jsonObj.value("channelId", ""),
-                    jsonObj.value("senderId", ""),
-                    payloadBytes,
-                    timestamp);
-
-            } else if (eventType == "channel_message_sent") {
-                impl->channelMessageSent(
-                    jsonObj.value("channelId", ""),
-                    jsonObj.value("requestId", ""),
-                    timestamp);
-
-            } else if (eventType == "channel_message_error") {
-                impl->channelMessageError(
-                    jsonObj.value("channelId", ""),
-                    jsonObj.value("requestId", ""),
-                    jsonObj.value("error", ""),
-                    timestamp);
-
-            } else {
-                fprintf(stderr, "DeliveryModuleImpl::event_callback: Unknown event type: %s\n", eventType.c_str());
-            }
-        } catch (const nlohmann::json::exception& e) {
-            fprintf(stderr, "DeliveryModuleImpl::event_callback: Invalid event JSON: %s\n", e.what());
-        }
-    }
+    // The listeners run on the library's event thread; the binding decodes the
+    // CBOR payload, and the forwarding below cannot throw past it.
+    node->addOnMessageQueuedListener([this](const MessageQueuedPayload& e) {
+        messageQueued(e.requestId, e.messageHash, currentTimestampNs());
+    });
+    node->addOnMessageSentListener([this](const MessageSentPayload& e) {
+        messageSent(e.requestId, e.messageHash, currentTimestampNs());
+    });
+    node->addOnMessageErrorListener([this](const MessageErrorPayload& e) {
+        messageError(e.requestId, e.messageHash, e.error, currentTimestampNs());
+    });
+    node->addOnMessagePropagatedListener([this](const MessagePropagatedPayload& e) {
+        messagePropagated(e.requestId, e.messageHash, currentTimestampNs());
+    });
+    node->addOnMessageReceivedListener([this](const MessageReceivedPayload& e) {
+        messageReceived(e.messageHash, e.message.contentTopic, e.message.payload, e.source,
+                        e.message.timestamp);
+    });
+    node->addOnConnectionStatusChangeListener([this](const ConnectionStatusChangePayload& e) {
+        connectionStateChanged(e.connectionStatus, currentTimestampNs());
+    });
+    node->addOnChannelMessageReceivedListener([this](const ChannelMessageReceivedPayload& e) {
+        channelMessageReceived(e.channelId, e.senderId, e.payload, currentTimestampNs());
+    });
+    node->addOnChannelMessageSentListener([this](const ChannelMessageSentPayload& e) {
+        channelMessageSent(e.channelId, e.requestId, currentTimestampNs());
+    });
+    node->addOnChannelMessageErrorListener([this](const ChannelMessageErrorPayload& e) {
+        channelMessageError(e.channelId, e.requestId, e.error, currentTimestampNs());
+    });
 }
 
 static std::string toLowerCopy(std::string s)
@@ -648,7 +516,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 {
     std::lock_guard<std::mutex> createNodeLock(createNodeMutex);
 
-    if (deliveryCtx != nullptr) {
+    if (node) {
         fprintf(stderr, "DeliveryModuleImpl: createNode rejected - context already initialized\n");
         return {false, {}, "Context already initialized"};
     }
@@ -698,99 +566,15 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         setRlnState("Initializing", {});
     }
 
-    // logosdelivery_ctx_create encodes the config and turns the context address
-    // the FFI reports back into a LogosDeliveryCtx handle.
-    struct CreateContext {
-        std::binary_semaphore sem{0};
-        int callerRet{RET_ERR};
-        std::string message;
-        LogosDeliveryCtx* ctx{nullptr};
-    };
-
-    static std::mutex pendingMutex;
-    static std::unordered_map<void*, std::shared_ptr<CreateContext>> pendingContexts;
-
-    // Keyed by a counter, not the context's address: a createNode that timed
-    // out leaves its key behind, and a retry allocating its CreateContext at
-    // the recycled address would let that late reply wake the retry and hand
-    // it the abandoned node. Same reasoning as the ticket in api_call_handler.h.
-    static std::atomic<uintptr_t> createTicket{0};
-
-    auto callbackCtx = std::make_shared<CreateContext>();
-    void* callbackKey = reinterpret_cast<void*>(++createTicket);
-
-    {
-        std::lock_guard<std::mutex> lock(pendingMutex);
-        pendingContexts[callbackKey] = callbackCtx;
+    // create encodes the config, waits for the ctor, and owns the context it
+    // returns; one that times out is destroyed by the binding when it settles.
+    fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode...\n");
+    auto created = LogosDeliveryCtx::create(cfgWithPorts, CALLBACK_TIMEOUT);
+    if (created.isErr()) {
+        fprintf(stderr, "DeliveryModuleImpl: createNode failed: %s\n", created.error().c_str());
+        return releaseAndFail("Failed to create Delivery context: " + created.error());
     }
-
-    auto callback = +[](int errCode, LogosDeliveryCtx* ctx, const char* errMsg, void* userData) {
-        fprintf(stderr, "DeliveryModuleImpl::createNode callback called with ret: %d\n", errCode);
-
-        std::shared_ptr<CreateContext> callbackCtx;
-        {
-            std::lock_guard<std::mutex> lock(pendingMutex);
-            auto it = pendingContexts.find(userData);
-            if (it == pendingContexts.end()) {
-                // createNode already gave up waiting. Destroy the node we were
-                // handed rather than leaving it running with no owner.
-                if (ctx) {
-                    logosdelivery_ctx_destroy(ctx);
-                }
-                return;
-            }
-            callbackCtx = it->second;
-            pendingContexts.erase(it);
-        }
-
-        if (!callbackCtx) {
-            return;
-        }
-
-        callbackCtx->callerRet = errCode;
-        callbackCtx->ctx = ctx;
-        if (errCode != RET_OK && errMsg) {
-            callbackCtx->message = errMsg;
-            fprintf(stderr, "DeliveryModuleImpl::createNode callback message: %s\n", errMsg);
-        }
-
-        callbackCtx->sem.release();
-    };
-
-    if (logosdelivery_ctx_create(cfgWithPorts.c_str(), callback, callbackKey) != RET_OK) {
-        std::lock_guard<std::mutex> lock(pendingMutex);
-        pendingContexts.erase(callbackKey);
-
-        fprintf(stderr, "DeliveryModuleImpl: Failed to initiate createNode\n");
-        return releaseAndFail("Failed to initiate createNode");
-    }
-
-    fprintf(stderr, "DeliveryModuleImpl: Waiting for createNode callback...\n");
-
-    if (!callbackCtx->sem.try_acquire_for(CALLBACK_TIMEOUT)) {
-        std::lock_guard<std::mutex> lock(pendingMutex);
-        pendingContexts.erase(callbackKey);
-
-        fprintf(stderr, "DeliveryModuleImpl: Timeout waiting for createNode callback\n");
-        return releaseAndFail("Timeout waiting for createNode callback");
-    }
-
-    if (callbackCtx->callerRet != RET_OK || callbackCtx->ctx == nullptr
-        || callbackCtx->ctx->ptr == nullptr) {
-        if (!callbackCtx->message.empty()) {
-            fprintf(stderr, "DeliveryModuleImpl: createNode callback error: %s\n", callbackCtx->message.c_str());
-        }
-        // A handle carrying a null context is still a handle: free it.
-        if (callbackCtx->ctx) {
-            logosdelivery_ctx_destroy(callbackCtx->ctx);
-        }
-
-        fprintf(stderr, "DeliveryModuleImpl: Failed to create Delivery context\n");
-        return releaseAndFail("Failed to create Delivery context");
-    }
-
-    deliveryCtxHandle = callbackCtx->ctx;
-    deliveryCtx = callbackCtx->ctx->ptr;
+    node = created.take();
 
     fprintf(stderr, "DeliveryModuleImpl: Delivery context created successfully\n");
 
@@ -801,17 +585,11 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return releaseAndFail("Failed to install the Mix RLN callback");
     }
 
-    for (const char* eventName : kEventNames) {
-        if (logosdelivery_add_event_listener(deliveryCtx, eventName, event_callback, this) == 0) {
-            fprintf(stderr, "DeliveryModuleImpl: Failed to register listener for event %s\n", eventName);
-        }
-    }
+    registerEventListeners();
 
     // Only the node knows whether it wants a discovery plugin and which DHT
     // peers its config resolved; ask it.
-    const StdLogosResult result = callApiRetValue(
-        "get_discovery_requirements", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_get_discovery_requirements, asCtx(deliveryCtxHandle)));
+    const StdLogosResult result = toLogos(node->get_discovery_requirements());
     delivery_discovery::PluginRequest discovery;
     std::string failure;
     // Fail only when the node asked for a plugin and we cannot provide it. An
@@ -858,7 +636,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
 std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string& libp2pConfig)
 {
-    if (!deliveryCtx) {
+    if (!node) {
         return "context not initialized";
     }
 
@@ -870,7 +648,7 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
     // The node calls back into discoPlugin until its context is destroyed, so
     // it must outlive the context -- hence a member, not a local. Registering
     // is synchronous: nothing waits on a reply.
-    const std::string failure = discoPlugin->registerOn(deliveryCtx);
+    const std::string failure = discoPlugin->registerOn(*node);
     if (!failure.empty()) {
         return failure;
     }
@@ -883,22 +661,26 @@ StdLogosResult DeliveryModuleImpl::start()
 {
     fprintf(stderr, "DeliveryModuleImpl::start called\n");
 
-    if (!deliveryCtx) {
+    if (!node) {
         return {false, {}, "Context not initialized"};
-    }
-
-    joinFailedStartStop();
-    {
-        std::lock_guard<std::mutex> lock(failedStartStopMutex);
-        failedStartStopArmed = true;
     }
 
     // Node start can block for a long time (relay reconnect backoff), so return
     // once dispatched. Completion arrives via nodeStarted.
-    if (logosdelivery_ctx_start_node(asCtx(deliveryCtxHandle), start_callback, this) != RET_OK) {
-        joinFailedStartStop();
-        return {false, {}, "failed to initiate start"};
-    }
+    runLifecycleCall([this] {
+        const auto started = node->start_node();
+        nodeStarted(started.isOk(), started.isOk() ? started.value() : started.error(),
+                    currentTimestampNs());
+        if (started.isOk()) {
+            return;
+        }
+        // A failed start leaves the node half up: stop it again, and the RLN
+        // backend this module started for it -- the same two halves as stop().
+        const auto stopped = node->stop_node();
+        nodeStopped(stopped.isOk(), stopped.isOk() ? stopped.value() : stopped.error(),
+                    currentTimestampNs());
+        stopRlnBackend();
+    });
     return {true, {}};
 }
 
@@ -906,13 +688,15 @@ StdLogosResult DeliveryModuleImpl::stop()
 {
     fprintf(stderr, "DeliveryModuleImpl::stop called\n");
 
-    if (!deliveryCtx) {
+    if (!node) {
         return {false, {}, "Context not initialized"};
     }
 
-    if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
-        return {false, {}, "failed to initiate stop"};
-    }
+    runLifecycleCall([this] {
+        const auto stopped = node->stop_node();
+        nodeStopped(stopped.isOk(), stopped.isOk() ? stopped.value() : stopped.error(),
+                    currentTimestampNs());
+    });
     stopRlnBackend();
     return {true, {}};
 }
@@ -937,7 +721,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 {
     fprintf(stderr, "DeliveryModuleImpl::send called with contentTopic: %s\n", contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -949,10 +733,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
 
     std::string messageJson = messageObj.dump();
 
-    auto outcome = callApiRetValue(
-        "send",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_send, asCtx(deliveryCtxHandle), messageJson.c_str()));
+    auto outcome = toLogos(node->send(messageJson));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Send failed for topic: %s, reason: %s\n",
@@ -970,15 +751,12 @@ StdLogosResult DeliveryModuleImpl::subscribe(const std::string& contentTopic)
 {
     fprintf(stderr, "DeliveryModuleImpl::subscribe called with contentTopic: %s\n", contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot subscribe - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetVoid(
-        "subscribe",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_subscribe, asCtx(deliveryCtxHandle), contentTopic.c_str()));
+    auto outcome = toLogosVoid(node->subscribe(contentTopic));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Subscribe failed for topic: %s, reason: %s\n",
@@ -993,15 +771,12 @@ StdLogosResult DeliveryModuleImpl::unsubscribe(const std::string& contentTopic)
 {
     fprintf(stderr, "DeliveryModuleImpl::unsubscribe called with contentTopic: %s\n", contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot unsubscribe - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetVoid(
-        "unsubscribe",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_unsubscribe, asCtx(deliveryCtxHandle), contentTopic.c_str()));
+    auto outcome = toLogosVoid(node->unsubscribe(contentTopic));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Unsubscribe failed for topic: %s, reason: %s\n",
@@ -1018,22 +793,16 @@ StdLogosResult DeliveryModuleImpl::storeQuery(const std::string& jsonQuery,
 {
     fprintf(stderr, "DeliveryModuleImpl::storeQuery called with peerAddr: %s\n", peerAddr.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot run store query - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    // timeoutMs bounds the query on the FFI side; wait longer than that for the
-    // completion callback so the query's own timeout error reaches the caller
-    // instead of a callback timeout.
-    auto callbackTimeout = std::max(
-        CALLBACK_TIMEOUT, std::chrono::seconds(timeoutMs / 1000 + 5));
-
-    auto outcome = callApiRetValue(
-        "store_query",
-        callbackTimeout,
-        bindApiCall(logosdelivery_ctx_waku_store_query, asCtx(deliveryCtxHandle),
-                    jsonQuery.c_str(), peerAddr.c_str(), static_cast<int32_t>(timeoutMs)));
+    // timeoutMs bounds the query on the FFI side. The binding waits its
+    // context-wide timeout (CALLBACK_TIMEOUT) for the reply, with no per-call
+    // override: a query allowed longer than that is cut off here first.
+    auto outcome = toLogos(node->waku_store_query(jsonQuery, peerAddr,
+                                                  static_cast<int32_t>(timeoutMs)));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Store query failed for peer: %s, reason: %s\n",
@@ -1049,18 +818,14 @@ StdLogosResult DeliveryModuleImpl::channelCreate(const std::string& channelId,
     fprintf(stderr, "DeliveryModuleImpl::channelCreate called with channelId: %s, contentTopic: %s\n",
             channelId.c_str(), contentTopic.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot create channel - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetValue(
-        "channel_create",
-        CALLBACK_TIMEOUT,
-        // Zero cipher callbacks and user data: an unencrypted channel.
-        bindApiCall(logosdelivery_ctx_channel_create, asCtx(deliveryCtxHandle),
-                    channelId.c_str(), contentTopic.c_str(), senderId.c_str(),
-                    uint64_t{0}, uint64_t{0}, uint64_t{0}));
+    // Zero cipher callbacks and user data: an unencrypted channel.
+    auto outcome = toLogos(node->channel_create(channelId, contentTopic, senderId,
+                                                uint64_t{0}, uint64_t{0}, uint64_t{0}));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel create failed for id: %s, reason: %s\n",
@@ -1073,15 +838,12 @@ StdLogosResult DeliveryModuleImpl::channelExists(const std::string& channelId)
 {
     fprintf(stderr, "DeliveryModuleImpl::channelExists called with channelId: %s\n", channelId.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot query channel - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetValue(
-        "channel_exists",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_channel_exists, asCtx(deliveryCtxHandle), channelId.c_str()));
+    auto outcome = toLogos(node->channel_exists(channelId));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel exists failed for id: %s, reason: %s\n",
@@ -1094,7 +856,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
 {
     fprintf(stderr, "DeliveryModuleImpl::channelSend called with channelId: %s\n", channelId.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot send channel message - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
@@ -1105,11 +867,7 @@ StdLogosResult DeliveryModuleImpl::channelSend(const std::string& channelId, con
 
     std::string messageJson = messageObj.dump();
 
-    auto outcome = callApiRetValue(
-        "channel_send",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_channel_send, asCtx(deliveryCtxHandle),
-                    channelId.c_str(), messageJson.c_str()));
+    auto outcome = toLogos(node->channel_send(channelId, messageJson));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel send failed for id: %s, reason: %s\n",
@@ -1127,15 +885,12 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
 {
     fprintf(stderr, "DeliveryModuleImpl::channelClose called with channelId: %s\n", channelId.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot close channel - context not initialized.\n");
         return {false, {}, "Context not initialized"};
     }
 
-    auto outcome = callApiRetVoid(
-        "channel_close",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_channel_close, asCtx(deliveryCtxHandle), channelId.c_str()));
+    auto outcome = toLogosVoid(node->channel_close(channelId));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Channel close failed for id: %s, reason: %s\n",
@@ -1147,14 +902,11 @@ StdLogosResult DeliveryModuleImpl::channelClose(const std::string& channelId)
 StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableNodeInfoIDs called\n");
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available node info IDs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApiRetValue(
-        "get_available_node_info_ids",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_get_available_node_info_ids, asCtx(deliveryCtxHandle)));
+    auto outcome = toLogos(node->get_available_node_info_ids());
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available node info IDs failed, reason: %s\n", outcome.error.c_str());
@@ -1165,14 +917,11 @@ StdLogosResult DeliveryModuleImpl::getAvailableNodeInfoIDs() {
 StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
     fprintf(stderr, "DeliveryModuleImpl::getNodeInfo called with nodeInfoId: %s\n", nodeInfoId.c_str());
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get node info - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApiRetValue(
-        "get_node_info",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_get_node_info, asCtx(deliveryCtxHandle), nodeInfoId.c_str()));
+    auto outcome = toLogos(node->get_node_info(nodeInfoId));
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get node info failed for ID: %s, reason: %s\n",
@@ -1183,14 +932,11 @@ StdLogosResult DeliveryModuleImpl::getNodeInfo(const std::string& nodeInfoId) {
 }
 
 StdLogosResult DeliveryModuleImpl::getConnectionStatus() {
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get connection status - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApiRetValue(
-        "get_connection_status",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_get_connection_status, asCtx(deliveryCtxHandle)));
+    auto outcome = toLogos(node->get_connection_status());
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get connection status failed, reason: %s\n",
@@ -1203,14 +949,11 @@ StdLogosResult DeliveryModuleImpl::getConnectionStatus() {
 StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
     fprintf(stderr, "DeliveryModuleImpl::getAvailableConfigs called\n");
 
-    if (!deliveryCtx) {
+    if (!node) {
         fprintf(stderr, "DeliveryModuleImpl: Cannot get available configs - context not initialized. Call createNode first.\n");
         return {false, {}, "Context not initialized"};
     }
-    auto outcome = callApiRetValue(
-        "get_available_configs",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_get_available_configs, asCtx(deliveryCtxHandle)));
+    auto outcome = toLogos(node->get_available_configs());
 
     if (!outcome.success) {
         fprintf(stderr, "DeliveryModuleImpl: Get available configs failed, reason: %s\n", outcome.error.c_str());
@@ -1221,16 +964,13 @@ StdLogosResult DeliveryModuleImpl::getAvailableConfigs() {
 
 std::string DeliveryModuleImpl::collectOpenMetricsText()
 {
-    if (!deliveryCtx) {
+    if (!node) {
         // No node yet — empty document; the openmetrics scraper renders nothing
         // for this module rather than treating the scrape as a hard error.
         return "";
     }
 
-    auto outcome = callApiRetValue(
-        "get_node_info",
-        CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_get_node_info, asCtx(deliveryCtxHandle), "Metrics"));
+    auto outcome = toLogos(node->get_node_info("Metrics"));
 
     if (!outcome.success || !outcome.value.is_string()) {
         fprintf(stderr, "DeliveryModuleImpl: collectOpenMetricsText failed to read Metrics node info: %s\n",
@@ -1344,7 +1084,7 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
     fprintf(stderr, "DeliveryModuleImpl::rlnRespond called with reqId: %lld\n",
             static_cast<long long>(reqId));
 
-    if (!deliveryCtx) {
+    if (!node) {
         return {false, {}, "Context not initialized"};
     }
 
@@ -1362,14 +1102,11 @@ StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& 
 }
 
 StdLogosResult DeliveryModuleImpl::getLocalMixPeerRecord() {
-    if (!deliveryCtx) return {false, {}, "Context not initialized"};
-    return callApiRetValue("waku_mix_get_peer_record", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_waku_mix_get_peer_record, asCtx(deliveryCtxHandle)));
+    if (!node) return {false, {}, "Context not initialized"};
+    return toLogos(node->waku_mix_get_peer_record());
 }
 
 StdLogosResult DeliveryModuleImpl::addMixPeer(const std::string& recordJson) {
-    if (!deliveryCtx) return {false, {}, "Context not initialized"};
-    return callApiRetValue("waku_mix_add_peer", CALLBACK_TIMEOUT,
-        bindApiCall(logosdelivery_ctx_waku_mix_add_peer, asCtx(deliveryCtxHandle),
-                    recordJson.c_str()));
+    if (!node) return {false, {}, "Context not initialized"};
+    return toLogos(node->waku_mix_add_peer(recordJson));
 }

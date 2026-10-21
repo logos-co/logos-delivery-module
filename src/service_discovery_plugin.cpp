@@ -10,9 +10,7 @@
 #include <cctype>
 #include <thread>
 
-extern "C" {
-#include <liblogosdelivery.h>
-}
+#include <liblogosdelivery.hpp>
 
 // Generated at build time from metadata.json#optional_dependencies.
 #include "libp2p_module_api.h"
@@ -32,19 +30,6 @@ constexpr const char* kLibp2pUnavailable =
     "Install and load libp2p_module, or configure internal discovery instead "
     "(e.g. discv5, without plugin-kad-discovery); on Windows internal "
     "discovery is the only option";
-
-// The node's reverse-call wire names, in Wire order; also the names its
-// get_discovery_requirements lists under requiredHostImpls.
-constexpr const char* kWires[] = {
-    "sd_start",
-    "sd_stop",
-    "sd_lookup",
-    "sd_random_lookup",
-    "sd_start_advertising",
-    "sd_stop_advertising",
-    "sd_register_interest",
-    "sd_unregister_interest",
-};
 
 // Opt-in trace of the plugin boundary to the file named by LD_DISCO_TRACE:
 // logos-core discards a module's own stdout/stderr, so there is no other view.
@@ -167,101 +152,70 @@ Outcome guarded(const char* verb, Body&& body)
     return failed(std::string(verb) + ": " + what);
 }
 
-/// Owns the C view of a lookup's records for one typed reply: the generated
-/// SdPeerRecords points into the strings and vectors kept here.
-class PeerRecordsView
+/// libp2p's lookup records as the node's typed reply. Records without a string
+/// peer id are skipped, as the node would drop them anyway; a service's base64
+/// `data` is decoded to its bytes.
+SdPeerRecords toPeerRecords(const nlohmann::json& records)
 {
-public:
-    /// Records without a string peer id are skipped, as the node would drop
-    /// them anyway; a service's base64 `data` is decoded to its bytes.
-    explicit PeerRecordsView(const nlohmann::json& records)
-    {
-        if (!records.is_array()) {
-            return;
-        }
-        for (const auto& rec : records) {
-            if (!rec.is_object() || !rec.contains("peerId") || !rec["peerId"].is_string()) {
-                continue;
-            }
-            Peer p;
-            p.peerId = rec["peerId"].get<std::string>();
-            if (const auto s = rec.find("seqNo"); s != rec.end() && s->is_number_integer() &&
-                                                  s->get<int64_t>() >= 0) {
-                p.seqNo = s->get<uint64_t>();
-            }
-            if (const auto a = rec.find("addrs"); a != rec.end() && a->is_array()) {
-                for (const auto& addr : *a) {
-                    if (addr.is_string()) p.addrs.push_back(addr.get<std::string>());
-                }
-            }
-            if (const auto svcs = rec.find("services"); svcs != rec.end() && svcs->is_array()) {
-                for (const auto& svc : *svcs) {
-                    if (!svc.is_object() || !svc.contains("id") || !svc["id"].is_string()) continue;
-                    Service s;
-                    s.id = svc["id"].get<std::string>();
-                    if (svc.contains("data") && svc["data"].is_string()) {
-                        s.data = delivery_base64::decode(svc["data"].get<std::string>());
-                    }
-                    p.services.push_back(std::move(s));
-                }
-            }
-            peers_.push_back(std::move(p));
-        }
-        // Pointers are taken only now: peers_ no longer moves.
-        for (auto& p : peers_) {
-            for (const auto& a : p.addrs) p.addrPtrs.push_back(a.c_str());
-            for (auto& s : p.services) {
-                p.serviceViews.push_back(SdService{
-                    s.id.c_str(), NimFfiBytes{s.data.empty() ? nullptr : s.data.data(), s.data.size()}});
-            }
-            records_.push_back(SdPeerRecord{
-                p.peerId.c_str(),
-                p.seqNo,
-                LogosDeliverySeq_Str{p.addrPtrs.empty() ? nullptr : p.addrPtrs.data(), p.addrPtrs.size()},
-                LogosDeliverySeq_SdService{p.serviceViews.empty() ? nullptr : p.serviceViews.data(),
-                                           p.serviceViews.size()},
-            });
-        }
-        view_.peers = LogosDeliverySeq_SdPeerRecord{records_.empty() ? nullptr : records_.data(),
-                                                    records_.size()};
+    SdPeerRecords out;
+    if (!records.is_array()) {
+        return out;
     }
+    for (const auto& rec : records) {
+        if (!rec.is_object() || !rec.contains("peerId") || !rec["peerId"].is_string()) {
+            continue;
+        }
+        SdPeerRecord p{};
+        p.peerId = rec["peerId"].get<std::string>();
+        if (const auto s = rec.find("seqNo"); s != rec.end() && s->is_number_integer() &&
+                                              s->get<int64_t>() >= 0) {
+            p.seqNo = s->get<uint64_t>();
+        }
+        if (const auto a = rec.find("addrs"); a != rec.end() && a->is_array()) {
+            for (const auto& addr : *a) {
+                if (addr.is_string()) p.addrs.push_back(addr.get<std::string>());
+            }
+        }
+        if (const auto svcs = rec.find("services"); svcs != rec.end() && svcs->is_array()) {
+            for (const auto& svc : *svcs) {
+                if (!svc.is_object() || !svc.contains("id") || !svc["id"].is_string()) continue;
+                SdService s;
+                s.id = svc["id"].get<std::string>();
+                if (svc.contains("data") && svc["data"].is_string()) {
+                    s.data = delivery_base64::decode(svc["data"].get<std::string>());
+                }
+                p.services.push_back(std::move(s));
+            }
+        }
+        out.peers.push_back(std::move(p));
+    }
+    return out;
+}
 
-    const SdPeerRecords* get() const { return &view_; }
-
-private:
-    struct Service {
-        std::string id;
-        std::vector<uint8_t> data;
-    };
-    struct Peer {
-        std::string peerId;
-        uint64_t seqNo = 0;
-        std::vector<std::string> addrs;
-        std::vector<Service> services;
-        std::vector<const char*> addrPtrs;
-        std::vector<SdService> serviceViews;
-    };
-    std::vector<Peer> peers_;
-    std::vector<SdPeerRecord> records_;
-    SdPeerRecords view_{};
-};
-
-/// Decodes a key-only reverse call's argument; false (and an error reply
-/// already sent) when it does not decode.
-template <typename Decode>
-bool decodeKey(Decode decode, void* ctx, uint64_t callId, const uint8_t* args, size_t len,
-               std::string& key)
+/// The reply of a verb whose success carries nothing.
+template <typename Token>
+std::function<void(const Outcome&)> voidReply(Token token)
 {
-    const char* out = nullptr;
-    char* err = nullptr;
-    if (decode(args, len, &out, &err) != 0) {
-        logosdelivery_reverse_reply_err(ctx, callId, err ? err : "args decode failed");
-        free(err);
-        return false;
-    }
-    key = out ? out : "";
-    free(const_cast<char*>(out));
-    return true;
+    return [token](const Outcome& o) {
+        if (o.ok) {
+            token.reply();
+        } else {
+            token.fail(o.error);
+        }
+    };
+}
+
+/// The reply of a lookup: the records, typed.
+template <typename Token>
+std::function<void(const Outcome&)> recordsReply(Token token)
+{
+    return [token](const Outcome& o) {
+        if (o.ok) {
+            token.reply(toPeerRecords(o.records));
+        } else {
+            token.fail(o.error);
+        }
+    };
 }
 
 } // namespace
@@ -274,9 +228,6 @@ DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* lib
     , nodeCreated_(false)
     , startIssued_(false)
 {
-    for (int w = 0; w < WireCount; ++w) {
-        bindings_[w] = Binding{this, static_cast<Wire>(w)};
-    }
 }
 
 DeliveryServiceDiscoveryPlugin::~DeliveryServiceDiscoveryPlugin()
@@ -303,83 +254,55 @@ std::string DeliveryServiceDiscoveryPlugin::toServiceId(const std::string& key)
 
 // --- reverse-call plumbing ---------------------------------------------------
 
-std::string DeliveryServiceDiscoveryPlugin::registerOn(void* ctx)
+std::string DeliveryServiceDiscoveryPlugin::registerOn(LogosDeliveryCtx& node)
 {
     if (!executor_.joinable()) {
         executor_ = std::thread([this] { runExecutor(); });
     }
-    using SetImpl = int (*)(void*, FFIReverseImpl, void*, FFIReverseRelease);
-    const SetImpl setters[WireCount] = {
-        logosdelivery_set_sd_start_impl,
-        logosdelivery_set_sd_stop_impl,
-        logosdelivery_set_sd_lookup_impl,
-        logosdelivery_set_sd_random_lookup_impl,
-        logosdelivery_set_sd_start_advertising_impl,
-        logosdelivery_set_sd_stop_advertising_impl,
-        logosdelivery_set_sd_register_interest_impl,
-        logosdelivery_set_sd_unregister_interest_impl,
+    // On a nim-ffi reverse worker: queue and return. The arguments are the
+    // binding's decoded copies, so the queued call owns them.
+    const auto queue = [this](auto token, std::function<Outcome()> run, auto reply) {
+        if (!enqueue(Call{std::move(run), reply(token)})) {
+            token.fail("service discovery host is shutting down");
+        }
     };
-    for (int w = 0; w < WireCount; ++w) {
-        // No release: this object owns its bindings and outlives the context.
-        const int rc = setters[w](ctx, &DeliveryServiceDiscoveryPlugin::cImpl, &bindings_[w], nullptr);
-        if (rc != NIMFFI_REVERSE_ACCEPTED) {
-            return std::string("registering ") + kWires[w] + " was refused (" + std::to_string(rc) + ")";
-        }
+    using L = LogosDeliveryCtx;
+    const bool ok =
+        node.setSdStartImpl([this, queue](L::SdStartCall c) {
+            queue(c, [this] { return start(); }, voidReply<L::SdStartCall>);
+        }) &&
+        node.setSdStopImpl([this, queue](L::SdStopCall c) {
+            queue(c, [this] { return stop(); }, voidReply<L::SdStopCall>);
+        }) &&
+        node.setSdLookupImpl([this, queue](L::SdLookupCall c, const SdLookupArgs& a) {
+            queue(c, [this, a] { return lookup(a.key, a.limit); }, recordsReply<L::SdLookupCall>);
+        }) &&
+        node.setSdRandomLookupImpl([this, queue](L::SdRandomLookupCall c) {
+            queue(c, [this] { return randomLookup(); }, recordsReply<L::SdRandomLookupCall>);
+        }) &&
+        node.setSdStartAdvertisingImpl([this, queue](L::SdStartAdvertisingCall c,
+                                           const SdStartAdvertisingArgs& a) {
+            queue(c, [this, a] { return startAdvertising(a.key, a.data, a.record); },
+                  voidReply<L::SdStartAdvertisingCall>);
+        }) &&
+        node.setSdStopAdvertisingImpl([this, queue](L::SdStopAdvertisingCall c, const std::string& key) {
+            queue(c, [this, key] { return stopAdvertising(key); },
+                  voidReply<L::SdStopAdvertisingCall>);
+        }) &&
+        node.setSdRegisterInterestImpl([this, queue](L::SdRegisterInterestCall c, const std::string& key) {
+            queue(c, [this, key] { return registerInterest(key); },
+                  voidReply<L::SdRegisterInterestCall>);
+        }) &&
+        node.setSdUnregisterInterestImpl([this, queue](L::SdUnregisterInterestCall c,
+                                             const std::string& key) {
+            queue(c, [this, key] { return unregisterInterest(key); },
+                  voidReply<L::SdUnregisterInterestCall>);
+        });
+    if (!ok) {
+        return "registering the sd_* reverse implementations was refused";
     }
-    trace("reverse impls            REGISTERED  %d wires", static_cast<int>(WireCount));
+    trace("reverse impls            REGISTERED  8 wires");
     return {};
-}
-
-void DeliveryServiceDiscoveryPlugin::cImpl(void* ctx, uint64_t callId, const uint8_t* args,
-                                           size_t argsLen, void* userData)
-{
-    // On a nim-ffi reverse worker: decode, queue, return. `args` is the
-    // library's until this returns, so the call keeps its own copy.
-    const Binding* b = static_cast<const Binding*>(userData);
-    Call call{b->wire, ctx, callId, {}, 0, {}, {}};
-    switch (b->wire) {
-    case SdLookup: {
-        SdLookupArgs a{};
-        char* err = nullptr;
-        if (logosdelivery_decode_sd_lookup_args(args, argsLen, &a, &err) != 0) {
-            logosdelivery_reverse_reply_err(ctx, callId, err ? err : "args decode failed");
-            free(err);
-            return;
-        }
-        call.key = a.key ? a.key : "";
-        call.limit = a.limit;
-        logosdelivery_free_SdLookupArgs(&a);
-        break;
-    }
-    case SdStartAdvertising: {
-        SdStartAdvertisingArgs a{};
-        char* err = nullptr;
-        if (logosdelivery_decode_sd_start_advertising_args(args, argsLen, &a, &err) != 0) {
-            logosdelivery_reverse_reply_err(ctx, callId, err ? err : "args decode failed");
-            free(err);
-            return;
-        }
-        call.key = a.key ? a.key : "";
-        call.data.assign(a.data.data, a.data.data + a.data.len);
-        call.record.assign(a.record.data, a.record.data + a.record.len);
-        logosdelivery_free_SdStartAdvertisingArgs(&a);
-        break;
-    }
-    case SdStopAdvertising:
-        if (!decodeKey(logosdelivery_decode_sd_stop_advertising_args, ctx, callId, args, argsLen, call.key)) return;
-        break;
-    case SdRegisterInterest:
-        if (!decodeKey(logosdelivery_decode_sd_register_interest_args, ctx, callId, args, argsLen, call.key)) return;
-        break;
-    case SdUnregisterInterest:
-        if (!decodeKey(logosdelivery_decode_sd_unregister_interest_args, ctx, callId, args, argsLen, call.key)) return;
-        break;
-    default: // sd_start, sd_stop, sd_random_lookup take no arguments
-        break;
-    }
-    if (!b->self->enqueue(std::move(call))) {
-        logosdelivery_reverse_reply_err(ctx, callId, "service discovery host is shutting down");
-    }
 }
 
 bool DeliveryServiceDiscoveryPlugin::enqueue(Call call)
@@ -408,7 +331,7 @@ void DeliveryServiceDiscoveryPlugin::runExecutor()
             call = std::move(queue_.front());
             queue_.pop_front();
         }
-        answer(call, serve(call));
+        call.reply(call.run());
     }
     // Whatever is still queued is answered, so the node is not left waiting
     // for its deadline. After ctx_destroy the replies are refused, harmlessly.
@@ -418,51 +341,9 @@ void DeliveryServiceDiscoveryPlugin::runExecutor()
         rest.swap(queue_);
     }
     for (const auto& call : rest) {
-        logosdelivery_reverse_reply_err(call.ctx, call.id, "service discovery host is shutting down");
+        call.reply(failed("service discovery host is shutting down"));
     }
     executorExited_.store(true);
-}
-
-DeliveryServiceDiscoveryPlugin::Outcome DeliveryServiceDiscoveryPlugin::serve(const Call& call)
-{
-    switch (call.wire) {
-    case SdStart:              return start();
-    case SdStop:               return stop();
-    case SdLookup:             return lookup(call.key, call.limit);
-    case SdRandomLookup:       return randomLookup();
-    case SdStartAdvertising:   return startAdvertising(call.key, call.data, call.record);
-    case SdStopAdvertising:    return stopAdvertising(call.key);
-    case SdRegisterInterest:   return registerInterest(call.key);
-    case SdUnregisterInterest: return unregisterInterest(call.key);
-    default:                   return failed("unknown reverse call");
-    }
-}
-
-void DeliveryServiceDiscoveryPlugin::answer(const Call& call, const Outcome& outcome)
-{
-    if (!outcome.ok) {
-        logosdelivery_reverse_reply_err(call.ctx, call.id, outcome.error.c_str());
-        return;
-    }
-    switch (call.wire) {
-    case SdStart:              logosdelivery_reverse_reply_sd_start(call.ctx, call.id); break;
-    case SdStop:               logosdelivery_reverse_reply_sd_stop(call.ctx, call.id); break;
-    case SdLookup: {
-        const PeerRecordsView view(outcome.records);
-        logosdelivery_reverse_reply_sd_lookup(call.ctx, call.id, view.get());
-        break;
-    }
-    case SdRandomLookup: {
-        const PeerRecordsView view(outcome.records);
-        logosdelivery_reverse_reply_sd_random_lookup(call.ctx, call.id, view.get());
-        break;
-    }
-    case SdStartAdvertising:   logosdelivery_reverse_reply_sd_start_advertising(call.ctx, call.id); break;
-    case SdStopAdvertising:    logosdelivery_reverse_reply_sd_stop_advertising(call.ctx, call.id); break;
-    case SdRegisterInterest:   logosdelivery_reverse_reply_sd_register_interest(call.ctx, call.id); break;
-    case SdUnregisterInterest: logosdelivery_reverse_reply_sd_unregister_interest(call.ctx, call.id); break;
-    default: break;
-    }
 }
 
 bool DeliveryServiceDiscoveryPlugin::quiesce(std::chrono::milliseconds timeout)
