@@ -12,7 +12,7 @@ concurrency:
 
 env:
   # The logos-logoscore-py commit of the e2e smoke image and the Python client.
-  LOGOSCORE_PY_REV: 8aef1dbccafd48fcfd39eff66eea05f6300a791a
+  LOGOSCORE_PY_REV: 41bbc3b45f6a0691caed259683922163930afc49
 
 jobs:
   build-and-test:
