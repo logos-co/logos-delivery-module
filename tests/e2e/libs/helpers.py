@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 MODULE = "delivery_module"
 RLN_MODULE = "liblogos_rln_module"
+LEZ_RLN_MODULE = "liblogos_lez_rln_module"
 
 SUBSCRIBE_GRACE_S = 0.5
 
@@ -65,15 +66,8 @@ def make_delivery_config(*, tcp_port: int = NODE_TCP_PORT, static_peers: Optiona
 
 
 def make_rln_presets(*, enable_validation: bool) -> str:
-    """Contents of the RLN presets file for a test node.
-
-    delivery_module reads this file from the path in `LOGOS_DELIVERY_RLN_PRESETS` and
-    lets it override its built-in RLN settings. The `""` entry applies to nodes created
-    without a `preset`, like the ones in these tests. It turns RLN on, using the same
-    LEZ testnet registry as the `logos.test` network, and sets whether the node checks
-    the RLN proofs of incoming messages. The built-in `logos.test` settings always leave
-    that check off, which is why the tests use this file instead.
-    """
+    """Contents of the RLN presets file for a test node: its `""` entry applies to
+    nodes created without a `preset`."""
     return json.dumps({
         "": {
             "enabled": True,
@@ -141,9 +135,6 @@ class LogosDelivery:
 
     def rln_state(self, *, timeout: Optional[float] = None) -> dict:
         return call_ok(self.client, "rlnState", timeout=timeout)
-
-    def connection_status(self, *, timeout: Optional[float] = None) -> str:
-        return call_ok(self.client, "getConnectionStatus", timeout=timeout)
 
     def metric(self, name: str) -> float:
         """Value of the unlabelled metric `name` in the node's Prometheus text, 0 if absent."""

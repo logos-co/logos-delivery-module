@@ -1,15 +1,18 @@
 """Fixtures for the delivery_module e2e suite.
 
-Two daemon flavours:
+Three daemon flavours:
   * `solo_daemon` (function scope) — one fresh logoscore container per test, used
     by the single-node lifecycle/query tests. Fresh because createNode is
     once-per-context: a started node can't be re-created, so tests can't share one.
   * `node_a` / `node_b` (module scope) — two daemons in a shared docker network,
     peered directly via staticnodes (node A's container-routable multiaddr), used
     by the two-node delivery tests.
+  * `rln_node_factory` (module scope) — daemons with RLN turned on through a
+    presets file in each one's persistence dir, used by the RLN tests.
 
 Every prerequisite (docker, the logoscore image, the built module layout) is
-gated by `_e2e_env_or_skip`, so the suite skips cleanly when run without setup.
+gated by `_e2e_env_or_skip`, and the RLN modules by `_rln_modules_or_skip`, so the
+suite skips cleanly when run without setup.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import pytest
 
 from libs.constants import NETWORK_SUBNET
 from libs.helpers import (
+    LEZ_RLN_MODULE,
     RLN_MODULE,
     RLN_PRESETS_ENV,
     RLN_PRESETS_FILE,
@@ -85,7 +89,7 @@ def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
     """Skip unless LOGOS_MODULES_DIR also holds the RLN modules (CI stages them
     next to delivery_module)."""
     _, modules_dir = _e2e_env_or_skip
-    for module in (RLN_MODULE, "liblogos_lez_rln_module"):
+    for module in (RLN_MODULE, LEZ_RLN_MODULE):
         if not (modules_dir / module / "manifest.json").is_file():
             pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
 
