@@ -2,11 +2,10 @@ name: delivery-module Doc-Tests
 
 # Runs the executable delivery-module doc-test
 # (doctests/delivery-module-runtime.test.yaml) end-to-end via the shared doctest
-# CLI: builds logoscore, lgpm, and lgpd; downloads delivery_module from the
-# catalog; installs it; starts the daemon; calls createNode and start; and
-# asserts on the output. A separate step verifies this commit still builds as
-# .#lgx from source (the runtime test uses the published package to avoid
-# rebuilding the logos-delivery Rust/Nim chain on every doc-test run).
+# CLI: builds logosctl and this commit's .#lgx (plus the libp2p and RLN modules
+# it can use); starts the daemon; installs them into its session; calls
+# createNode and start; and asserts on the output. A separate step first
+# verifies this commit still builds as .#lgx from source.
 #
 # ──────────────────────────────────────────────────────────────────────────────
 # One-time setup required for the clickable report links to work:
@@ -135,18 +134,19 @@ jobs:
           echo "Generated markdown successfully"
 
   windows:
-    # Shared CI stages logoscore-cli from its own flake, as the Unix doctests do.
+    # Shared CI stages logosctl from the logos-logoscore-cli flake, as the Unix
+    # doctests do.
     uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
     secrets: inherit
     with:
       # Stage the module's DLL closure and installable layout.
       targets: default install-portable
       extra-targets: >-
-        {"windows-logoscore": {
-          "ref": "github:logos-co/logos-logoscore-cli#packages.x86_64-windows.cli-bundle-dir",
+        {"windows-logosctl": {
+          "ref": "github:logos-co/logos-logoscore-cli#packages.x86_64-windows.ctl-bundle-dir",
           "omit": ["lib/qt-6/plugins"]
         }}
-      assemble: '{"install-portable": ["default/lib", "windows-logoscore/bin"]}'
+      assemble: '{"install-portable": ["default/lib", "windows-logosctl/bin"]}'
       doctest-spec: doctests/delivery-module-runtime.test.yaml
       doctest-artifact: delivery-doctest-report
 
@@ -238,7 +238,7 @@ jobs:
             const body =
               `${marker}\n` +
               `### 📊 delivery-module doc-test report\n\n` +
-              `This commit of the delivery module, run through a logoscore daemon ` +
+              `This commit of the delivery module, run through a logosctl daemon ` +
               `on each platform — rendered alongside the commands actually ` +
               `run and their output (updated each run, commit \`${context.sha.slice(0,7)}\`):\n\n` +
               `${links}\n\n` +
