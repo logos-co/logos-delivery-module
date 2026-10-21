@@ -24,6 +24,7 @@
 #include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
 #include "mocks/mock_rln_state.h"
+#include "mocks/mock_reverse_state.h"
 #include "rln_bridge.h"
 #include "liblogos_rln_module_api.h"
 
@@ -300,15 +301,12 @@ LOGOS_TEST(discovery_start_reports_absent_libp2p_module) {
     Libp2pModule::createNodeErrorCode = "object_unavailable";
     DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
 
-    char err[1024] = {};
-    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-    const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
+    const auto out = plugin.start();
     Libp2pModule::createNodeErrorCode.clear();
 
-    LOGOS_ASSERT_EQ(rc, LD_DISCO_ERROR);
-    const std::string reason(err);
-    LOGOS_ASSERT_TRUE(reason.find("libp2p_module is not available") != std::string::npos);
-    LOGOS_ASSERT_TRUE(reason.find("internal discovery") != std::string::npos);
+    LOGOS_ASSERT_FALSE(out.ok);
+    LOGOS_ASSERT_TRUE(out.error.find("libp2p_module is not available") != std::string::npos);
+    LOGOS_ASSERT_TRUE(out.error.find("internal discovery") != std::string::npos);
 }
 
 // libp2p gets every bootstrap peer the node resolved, in order: with only the
@@ -323,13 +321,11 @@ LOGOS_TEST(discovery_hands_libp2p_every_bootstrap_peer) {
         {"peerId":"16Uiu2HAmC","addrs":["/ip4/10.0.0.3/tcp/1"]}],
         "mountKad":true,"mountServiceDiscovery":true})");
 
-    char err[1024] = {};
-    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-    const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
+    const auto out = plugin.start();
     const auto handed = nlohmann::json::parse(Libp2pModule::lastCreateNodeConfig);
     Libp2pModule::reset();
 
-    LOGOS_ASSERT_EQ(rc, LD_DISCO_OK);
+    LOGOS_ASSERT_TRUE(out.ok);
     LOGOS_ASSERT_EQ(handed["bootstrapNodes"].size(), size_t{3});
     LOGOS_ASSERT_EQ(handed["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
     LOGOS_ASSERT_EQ(handed["bootstrapNodes"][2]["peerId"].get<std::string>(), std::string("16Uiu2HAmC"));
@@ -352,20 +348,18 @@ LOGOS_TEST(discovery_start_timeout_is_a_notice_and_never_reissued) {
         Libp2pModule libp2p("delivery_module");
         DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
 
-        char err[1024] = {};
-        const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-        const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
-        vt->registerInterest(vt->pluginCtx, "service:/logos/delivery", err, sizeof(err));
+        const auto out = plugin.start();
+        plugin.registerInterest("service:/logos/delivery");
         const int startCalls = Libp2pModule::startCalls;
         Libp2pModule::reset();
 
-        LOGOS_ASSERT_EQ(rc, LD_DISCO_OK);
+        LOGOS_ASSERT_TRUE(out.ok);
         LOGOS_ASSERT_EQ(startCalls, 1);
     }
 }
 
-// The plugin's entry points are called from Nim over the C ABI: a malformed
-// record must not reach std::terminate, and whatever throws is an error reply.
+// A malformed record must not take the executor down; the lookup hands back
+// libp2p's records and the typed reply skips what it cannot use.
 LOGOS_TEST(discovery_lookup_survives_a_record_with_a_non_string_peer_id) {
     Libp2pModule::reset();
     Libp2pModule::bringUpSucceeds = true;
@@ -374,33 +368,25 @@ LOGOS_TEST(discovery_lookup_survives_a_record_with_a_non_string_peer_id) {
     Libp2pModule libp2p("delivery_module");
     DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
 
-    char err[1024] = {};
-    char* out = nullptr;
-    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-    const int rc = vt->lookup(vt->pluginCtx, "service:/logos/delivery", 0, &out, err, sizeof(err));
+    const auto out = plugin.lookup("service:/logos/delivery", 0);
     Libp2pModule::reset();
 
-    LOGOS_ASSERT_EQ(rc, LD_DISCO_OK);
-    LOGOS_ASSERT_TRUE(out != nullptr);
-    LOGOS_ASSERT_EQ(nlohmann::json::parse(out).size(), size_t{3});
-    vt->freeString(vt->pluginCtx, out);
+    LOGOS_ASSERT_TRUE(out.ok);
+    LOGOS_ASSERT_EQ(out.records.size(), size_t{3});
 }
 
-LOGOS_TEST(discovery_entry_point_turns_an_exception_into_an_error) {
+LOGOS_TEST(discovery_verb_turns_an_exception_into_an_error) {
     Libp2pModule::reset();
     Libp2pModule::bringUpSucceeds = true;
     Libp2pModule::lookupThrows = true;
     Libp2pModule libp2p("delivery_module");
     DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
 
-    char err[1024] = {};
-    char* out = nullptr;
-    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-    const int rc = vt->lookup(vt->pluginCtx, "service:/logos/delivery", 0, &out, err, sizeof(err));
+    const auto out = plugin.lookup("service:/logos/delivery", 0);
     Libp2pModule::reset();
 
-    LOGOS_ASSERT_EQ(rc, LD_DISCO_ERROR);
-    LOGOS_ASSERT_TRUE(std::string(err).find("stub lookup threw") != std::string::npos);
+    LOGOS_ASSERT_FALSE(out.ok);
+    LOGOS_ASSERT_TRUE(out.error.find("stub lookup threw") != std::string::npos);
 }
 
 // An explicit refusal is not a start in flight: the bring-up fails, and the
@@ -412,26 +398,73 @@ LOGOS_TEST(discovery_start_refusal_fails_the_bring_up) {
     Libp2pModule libp2p("delivery_module");
     DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
 
-    char err[1024] = {};
-    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-    const int rc = vt->start(vt->pluginCtx, err, sizeof(err));
-    const std::string reason(err);
-    vt->registerInterest(vt->pluginCtx, "service:/logos/delivery", err, sizeof(err));
+    const auto out = plugin.start();
+    plugin.registerInterest("service:/logos/delivery");
     const int startCalls = Libp2pModule::startCalls;
     Libp2pModule::reset();
 
-    LOGOS_ASSERT_EQ(rc, LD_DISCO_ERROR);
-    LOGOS_ASSERT_TRUE(reason.find("address already in use") != std::string::npos);
+    LOGOS_ASSERT_FALSE(out.ok);
+    LOGOS_ASSERT_TRUE(out.error.find("address already in use") != std::string::npos);
     LOGOS_ASSERT_EQ(startCalls, 2);
 }
 
 LOGOS_TEST(discovery_start_without_libp2p_client_fails_cleanly) {
     DeliveryServiceDiscoveryPlugin plugin(nullptr, "{}");
 
-    char err[256] = {};
-    const LdServiceDiscoveryPlugin* vt = plugin.vtable();
-    LOGOS_ASSERT_EQ(vt->start(vt->pluginCtx, err, sizeof(err)), LD_DISCO_ERROR);
-    LOGOS_ASSERT_TRUE(std::string(err).find("no libp2p_module client") != std::string::npos);
+    const auto out = plugin.start();
+    LOGOS_ASSERT_FALSE(out.ok);
+    LOGOS_ASSERT_TRUE(out.error.find("no libp2p_module client") != std::string::npos);
+}
+
+// The node's reverse calls reach the verbs through the executor and are
+// answered asynchronously, from its thread, with the typed reply.
+LOGOS_TEST(discovery_reverse_calls_are_answered_from_the_executor) {
+    delivery_test_reverse::reset();
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule::lookupRecords = nlohmann::json::parse(
+        R"([{"peerId":"16Uiu2HAmA","seqNo":3,"addrs":["/ip4/10.0.0.1/tcp/1"],
+            "services":[{"id":"/logos/delivery","data":"AQI="}]}])");
+    Libp2pModule libp2p("delivery_module");
+    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+
+    int token = 0;
+    LOGOS_ASSERT_TRUE(plugin.registerOn(&token).empty());
+    LOGOS_ASSERT_EQ(delivery_test_reverse::registeredCount(), 8);
+
+    // What the node would send: a lookup's args, then a parameterless start.
+    delivery_test_reverse::invoke("sd_lookup", &token, 7, "service:/logos/delivery", 5);
+    delivery_test_reverse::invoke("sd_start", &token, 8, "", 0);
+    const auto lookup = delivery_test_reverse::waitReply(7);
+    const auto start = delivery_test_reverse::waitReply(8);
+    LOGOS_ASSERT_TRUE(plugin.quiesce(std::chrono::seconds(5)));
+    Libp2pModule::reset();
+
+    LOGOS_ASSERT_TRUE(lookup.answered);
+    LOGOS_ASSERT_TRUE(lookup.ok);
+    LOGOS_ASSERT_EQ(lookup.ctx, static_cast<void*>(&token));
+    LOGOS_ASSERT_EQ(lookup.peers.size(), size_t{1});
+    LOGOS_ASSERT_EQ(lookup.peers[0], std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_TRUE(lookup.firstServiceData == (std::vector<uint8_t>{1, 2}));
+    LOGOS_ASSERT_TRUE(lookup.onOtherThread);
+    LOGOS_ASSERT_TRUE(start.answered);
+    LOGOS_ASSERT_TRUE(start.ok);
+}
+
+// Shutting the host down answers what is still queued instead of leaving the
+// node to its deadline, and refuses what arrives after.
+LOGOS_TEST(discovery_quiesce_answers_late_calls_with_an_error) {
+    delivery_test_reverse::reset();
+    DeliveryServiceDiscoveryPlugin plugin(nullptr, "{}");
+    int token = 0;
+    LOGOS_ASSERT_TRUE(plugin.registerOn(&token).empty());
+    LOGOS_ASSERT_TRUE(plugin.quiesce(std::chrono::seconds(5)));
+
+    delivery_test_reverse::invoke("sd_register_interest", &token, 9, "service:/x", 0);
+    const auto late = delivery_test_reverse::waitReply(9);
+    LOGOS_ASSERT_TRUE(late.answered);
+    LOGOS_ASSERT_FALSE(late.ok);
+    LOGOS_ASSERT_TRUE(late.error.find("shutting down") != std::string::npos);
 }
 
 // send
@@ -1291,7 +1324,7 @@ LOGOS_TEST(createNode_installs_plugin_when_the_node_asks_for_it) {
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.dev","messagingOverrides":{"pluginKadDiscovery":true}})").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_discovery_requirements"));
-    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+    LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_set_sd_start_impl"));
 }
 
 LOGOS_TEST(createNode_skips_plugin_when_the_node_wants_none) {
@@ -1302,7 +1335,7 @@ LOGOS_TEST(createNode_skips_plugin_when_the_node_wants_none) {
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_discovery_requirements"));
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_sd_start_impl"));
 }
 
 // A reply that cannot be read, or no reply at all, says nothing about a
@@ -1315,7 +1348,7 @@ LOGOS_TEST(createNode_installs_no_plugin_on_an_unreadable_requirements_reply) {
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_sd_start_impl"));
 }
 
 LOGOS_TEST(createNode_installs_no_plugin_when_the_requirements_call_fails) {
@@ -1326,7 +1359,7 @@ LOGOS_TEST(createNode_installs_no_plugin_when_the_requirements_call_fails) {
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.test"})").success);
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_get_discovery_requirements"));
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_sd_start_impl"));
 }
 
 // Asked for, but the node's own data is unusable: fail where the reason is
@@ -1341,7 +1374,7 @@ LOGOS_TEST(createNode_fails_when_a_requested_plugin_cannot_be_set_up) {
     const auto r = impl.createNode(R"({"preset":"logos.test"})");
     LOGOS_ASSERT_FALSE(r.success);
     LOGOS_ASSERT_TRUE(r.error.find("discovery") != std::string::npos);
-    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_set_service_discovery_plugin"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_set_sd_start_impl"));
 }
 
 // ---------------------------------------------------------------------------

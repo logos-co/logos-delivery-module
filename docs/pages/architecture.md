@@ -59,6 +59,14 @@ presets included. It sets `libp2p_module` up from that answer — the peers as
 `bootstrapNodes`, `mountKad` and `mountServiceDiscovery` on — laid over
 libp2p's own `LIBP2P_MODULE_CONFIG`.
 
+The node calls the module through nim-ffi reverse calls, one per verb
+(`sd_start`, `sd_lookup`, `sd_start_advertising`, ...; the reply lists them
+under `requiredHostImpls`). The module registers an implementation of each
+with `logosdelivery_set_<wire>_impl` before `start_node`, and the node refuses
+to start until all are there. An implementation only queues the verb; one
+executor thread runs them in order against `libp2p_module` and answers each
+asynchronously with `logosdelivery_reverse_reply_<wire>`.
+
 libp2p is first contacted on the first discovery call after `start`, not at
 `createNode`, so a missing module or a bad bootstrap set surfaces there. Every
 bootstrap peer is handed over. libp2p dials the set inside its `start`, whose
