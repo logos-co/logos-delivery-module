@@ -17,7 +17,9 @@ suite skips cleanly when run without setup.
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -95,10 +97,32 @@ def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
 
 
 @pytest.fixture(scope="session")
-def shared_docker_network(_e2e_env_or_skip: tuple[str, Path]) -> Iterator[str]:
+def rln_membership(_rln_modules_or_skip: None) -> Path:
+    """The RLN membership in E2E_RLN_MEMBERSHIP_DIR: module folders laid out like a
+    daemon's persistence dir (`<module>/<instance>/`). Skips when the variable is
+    unset, fails when it holds no keystore."""
+    membership_dir = os.environ.get("E2E_RLN_MEMBERSHIP_DIR")
+    if not membership_dir:
+        pytest.skip("E2E_RLN_MEMBERSHIP_DIR not set")
+    if not any(Path(membership_dir).glob(f"{RLN_MODULE}/*/rln_sealed.json")):
+        pytest.fail(
+            f"E2E_RLN_MEMBERSHIP_DIR={membership_dir} holds no {RLN_MODULE}/<instance>/rln_sealed.json"
+        )
+    return Path(membership_dir)
+
+
+def _worker_subnet(worker_id: str) -> str:
+    """The xdist worker's /24 of NETWORK_SUBNET: worker gw<n> takes the n-th, a run
+    without xdist the first."""
+    index = 0 if worker_id == "master" else int(worker_id.removeprefix("gw"))
+    return str(list(ipaddress.ip_network(NETWORK_SUBNET).subnets(new_prefix=24))[index])
+
+
+@pytest.fixture(scope="session")
+def shared_docker_network(_e2e_env_or_skip: tuple[str, Path], worker_id: str) -> Iterator[str]:
     name = f"logosdelivery-e2e-{uuid.uuid4().hex[:8]}"
     r = subprocess.run(
-        ["docker", "network", "create", "--subnet", NETWORK_SUBNET, name],
+        ["docker", "network", "create", "--subnet", _worker_subnet(worker_id), name],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
@@ -193,12 +217,22 @@ def rln_node_factory(
 ) -> Iterator[Callable[..., DeliveryNode]]:
     """`delivery_node_factory` for nodes with RLN on the LEZ testnet registry: each
     daemon gets a presets file in its persistence dir, named by
-    LOGOS_DELIVERY_RLN_PRESETS. No node holds a membership."""
+    LOGOS_DELIVERY_RLN_PRESETS. A node given `membership` starts with a copy of it
+    there. Copies of one membership share its `message_id` counters, so two nodes
+    started from it must never send through the same validator."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
-        def _create(label: str, config_json: str, *, enable_validation: bool) -> DeliveryNode:
+        def _create(
+            label: str,
+            config_json: str,
+            *,
+            enable_validation: bool,
+            membership: Path | None = None,
+        ) -> DeliveryNode:
             persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
+            if membership:
+                shutil.copytree(membership, persistence_dir, dirs_exist_ok=True)
             (persistence_dir / RLN_PRESETS_FILE).write_text(
                 make_rln_presets(enable_validation=enable_validation)
             )

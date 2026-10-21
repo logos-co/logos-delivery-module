@@ -23,6 +23,7 @@ from libs.constants import (
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
+    RLN_IDENTIFIER,
     RLN_REGISTRY_ID,
 )
 
@@ -37,31 +38,46 @@ SUBSCRIBE_GRACE_S = 0.5
 RLN_PRESETS_ENV = "LOGOS_DELIVERY_RLN_PRESETS"
 RLN_PRESETS_FILE = "rln-presets.json"
 RLN_READY_TIMEOUT_S = 120.0
+# liblogos_rln_module error classes that clear up by themselves, e.g. while the LEZ
+# wallet syncs or the valid-root window fills.
+RLN_RETRY_CLASSES = ("not_ready", "transient")
+RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
 
 # getConnectionStatus / connectionStateChanged values for a node with at least
 # one relay peer.
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
 
-def make_delivery_config(*, tcp_port: int = NODE_TCP_PORT, static_peers: Optional[list] = None) -> str:
+def make_delivery_config(
+    *,
+    tcp_port: int = NODE_TCP_PORT,
+    static_peers: Optional[list] = None,
+    relay: bool = True,
+    lightpush: bool = False,
+    lightpush_node: Optional[str] = None,
+) -> str:
     """JSON config for `createNode` — relay-only, single-shard, discovery-off,
-    matching the two-node relay setup proven by logos-delivery-interop-tests."""
+    matching the two-node relay setup proven by logos-delivery-interop-tests.
+    `lightpush` serves light push; a node without relay sends through
+    `lightpush_node`."""
     cfg: dict[str, Any] = {
         "logLevel": "DEBUG",
         "listenAddress": "0.0.0.0",
         "tcpPort": tcp_port,
         "clusterId": CLUSTER_ID,
         "numShardsInNetwork": NUM_SHARDS_IN_NETWORK,
-        "relay": True,
+        "relay": relay,
         "store": False,
         "filter": False,
-        "lightpush": False,
+        "lightpush": lightpush,
         "peerExchange": False,
         "discv5Discovery": False,
         "reliabilityEnabled": True,
     }
     if static_peers:
         cfg["staticnodes"] = static_peers
+    if lightpush_node:
+        cfg["lightpushnode"] = lightpush_node
     return json.dumps(cfg)
 
 
@@ -136,11 +152,13 @@ class LogosDelivery:
     def rln_state(self, *, timeout: Optional[float] = None) -> dict:
         return call_ok(self.client, "rlnState", timeout=timeout)
 
-    def metric(self, name: str) -> float:
-        """Value of the unlabelled metric `name` in the node's Prometheus text, 0 if absent."""
+    def metric(self, name: str, **labels: str) -> float:
+        """Value of the metric `name` with `labels` in the node's Prometheus text, 0 if absent."""
+        label_text = ",".join(f'{key}="{value}"' for key, value in labels.items())
+        series = f"{name}{{{label_text}}}" if labels else name
         for line in (self.get_node_info("Metrics") or "").splitlines():
             metric_name, _, value = line.partition(" ")
-            if metric_name == name:
+            if metric_name == series:
                 return float(value)
         return 0.0
 
@@ -203,6 +221,77 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
     state = wait_until(settled, timeout=timeout, message=f"{node.label}: RLN still Initializing")
     if state.get("state") != "Ready":
         raise AssertionError(f"{node.label}: rlnState {state!r}")
+
+
+def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> None:
+    """Poll the node's LEZ wallet until its first sync is over; until then every
+    chain read of the RLN modules blocks or answers empty. Raises unless the
+    wallet is `ready`."""
+    def settled():
+        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+        return status if status.get("state") != "pending" else None
+
+    status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
+    if status.get("state") != "ready":
+        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
+
+
+def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
+    """Poll `node`'s `validate_proof` with a proof from `prover`'s membership until
+    its valid-root window holds the proof's root, and return the verdict. The window
+    fills in the background and nothing else reports it; a warm window answers
+    `invalid` until it holds the root. The proof spends one of `prover`'s messages in
+    the current epoch."""
+    wait_for_lez_wallet(prover, timeout=timeout)
+    timestamp = str(int(time.time()))
+    proof = wait_until(
+        lambda: _rln_answer(prover, "generate_proof", RLN_PROBE_SIGNAL, timestamp),
+        timeout=timeout,
+        message=f"{prover.label}: no RLN proof",
+    )
+    proof_json = json.dumps({"proof": proof["proof_canonical"]})
+
+    def settled():
+        answer = _rln_answer(node, "validate_proof", RLN_PROBE_SIGNAL, timestamp, proof_json)
+        return answer if answer and answer["verdict"] != "invalid" else None
+
+    answer = wait_until(
+        settled,
+        timeout=timeout,
+        message=f"{node.label}: valid-root window still cold, or answers invalid",
+    )
+    return answer["verdict"]
+
+
+def rln_membership_state(node: DeliveryNode) -> dict:
+    """`get_membership_state` of the node's membership on the test registry, read
+    live from the chain: `{"state": "active" | "grace_period" | "expired" | …}`."""
+    return _from_json_text(_rln_call(node, "get_membership_state"))
+
+
+def _rln_call(node: DeliveryNode, method: str, *args: str) -> Any:
+    """Call a liblogos_rln_module method on the test registry and RLN identifier.
+    Every argument is text, sent with the CLI's `str:` prefix so that a digit-only
+    timestamp stays a string."""
+    texts = [f"str:{arg}" for arg in (RLN_REGISTRY_ID, RLN_IDENTIFIER, *args)]
+    return node.client.call(RLN_MODULE, method, *texts)
+
+
+def _rln_answer(node: DeliveryNode, method: str, *args: str) -> Optional[dict]:
+    """The value of a liblogos_rln_module result call, or None while the module
+    answers with a retryable error class. The module returns `error` as JSON text,
+    and `value` can arrive as JSON text too."""
+    result = _rln_call(node, method, *args)
+    if result.get("success"):
+        return _from_json_text(result["value"])
+    error = _from_json_text(result["error"])
+    if error.get("class") not in RLN_RETRY_CLASSES:
+        raise AssertionError(f"{node.label}: {method} failed: {error!r}")
+    return None
+
+
+def _from_json_text(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, str) else value
 
 
 def is_connected(event: dict) -> bool:

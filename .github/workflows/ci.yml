@@ -37,124 +37,94 @@ jobs:
       - name: Run tests
         run: nix build .#unit-tests -L
 
-      - name: Pre-warm cache for install-portable
-        if: startsWith(matrix.os, 'ubuntu')
-        run: nix build -L .#install-portable
-
   e2e-tests:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Nix and Logos cache
-        uses: logos-co/setup-nix-cache-action@v1
+      - name: Set up e2e environment
+        uses: ./.github/actions/setup-e2e
         with:
           attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
           attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
-
-      # The gha cache backend needs the docker-container driver;
-      # the default docker driver can't export type=gha.
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # type=gha needs ACTIONS_RUNTIME_TOKEN/ACTIONS_CACHE_URL, which
-      # GitHub only injects into actions — this exposes them to run
-      # steps, so buildx invoked from build_smoke_image.sh can reach
-      # the cache API. Without it the gha cache is silently a no-op.
-      - name: Expose Actions runtime for buildx gha cache
-        uses: crazy-max/ghaction-github-runtime@v3
-
-      - name: Build delivery-module (install-portable layout)
-        run: |
-          nix build -L .#install-portable
-
-      # install-portable bundles only the module's own lib; stage its optional
-      # dependencies (libp2p_module, the RLN chain) next to it, at the revs
-      # flake.lock pins.
-      - name: Stage dependency modules
-        run: |
-          LIBP2P_NODE=$(jq -r '.nodes[.root].inputs.libp2p_module' flake.lock)
-          LIBP2P_URL=$(jq -r --arg n "$LIBP2P_NODE" '.nodes[$n].locked.url' flake.lock)
-          LIBP2P_REV=$(jq -r --arg n "$LIBP2P_NODE" '.nodes[$n].locked.rev' flake.lock)
-
-          RLN_NODE=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
-          RLN_URL=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.url' flake.lock)
-          RLN_REF=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.ref' flake.lock)
-          RLN_REV=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].locked.rev' flake.lock)
-
-          LEZ_NODE=$(jq -r --arg n "$RLN_NODE" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
-          LEZ_URL=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.url' flake.lock)
-          LEZ_REF=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.ref' flake.lock)
-          LEZ_REV=$(jq -r --arg n "$LEZ_NODE" '.nodes[$n].locked.rev' flake.lock)
-
-          nix build -L --out-link result-libp2p \
-            "git+$LIBP2P_URL?rev=$LIBP2P_REV#install-portable"
-          nix build -L --out-link result-rln \
-            "git+$RLN_URL?ref=$RLN_REF&rev=$RLN_REV&dir=logos-rln-module#install-portable"
-          nix build -L --out-link result-lez-rln \
-            "git+$LEZ_URL?ref=$LEZ_REF&rev=$LEZ_REV&dir=logos-lez-rln-module#install-portable"
-
-          mkdir -p merged-modules
-          for r in result result-libp2p result-rln result-lez-rln; do
-            cp -rL "$r/modules/." merged-modules/
-          done
-          chmod -R u+w merged-modules
-          echo "LOGOS_MODULES_DIR=$PWD/merged-modules" >> $GITHUB_ENV
-
-      - name: Checkout logoscore-py and build smoke image
-        env:
-          BUILDX_CACHE_FROM: type=gha
-          BUILDX_CACHE_TO: type=gha,mode=max
-        run: |
-          git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-          cd /tmp/logoscore-py
-          git checkout a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
-          bash tests/docker_smoke/build_smoke_image.sh
-          echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
-
-      - name: Build logoscore CLI binary (host PATH)
-        # Must match the daemon commit baked into the smoke image above.
-        run: |
-          nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/665ac28bc77f45e3c610f40fef975a12609de531#cli"
-          echo "/tmp/logoscore-cli/bin" >> $GITHUB_PATH
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-          cache: pip
-          cache-dependency-path: tests/e2e/requirements.txt
-
-      - name: Install e2e test dependencies
-        run: |
-          cd tests/e2e
-          pip install -r requirements.txt
 
       - name: Run e2e tests
         run: |
           mkdir -p ${{ runner.temp }}/e2e-logs
           cd tests/e2e
-          pytest -v
+          pytest -v -n 4 --dist=loadgroup
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           LOGOSCORE_PY_FORWARD_OUTPUT: "1"
-
-      - name: Collect docker container logs on failure
-        if: failure()
-        run: |
-          mkdir -p ${{ runner.temp }}/e2e-logs
-          for c in $(docker ps -a --filter "name=logoscore-a" --filter "name=logoscore-b" --filter "name=logoscore-solo" -q); do
-            name=$(docker inspect --format '{{.Name}}' "$c" | tr -d '/')
-            docker logs "$c" > "${{ runner.temp }}/e2e-logs/${name}.log" 2>&1 || true
-          done
 
       - name: Upload daemon logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-logs
+          path: ${{ runner.temp }}/e2e-logs/*.log
+          retention-days: 7
+
+  # The e2e tests with RLN membership. Not a required check: a failure never blocks a merge.
+  e2e-rln-membership:
+    # Fork PRs get no secrets.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up e2e environment
+        uses: ./.github/actions/setup-e2e
+        with:
+          attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
+          attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
+
+      # RLN_KEYSTORE is liblogos_rln_module's keystore folder, tar.gz and base64
+      # (tests/e2e/README.md, "CI").
+      - name: Restore the RLN membership
+        shell: bash
+        env:
+          RLN_KEYSTORE: ${{ secrets.RLN_KEYSTORE }}
+          MEMBERSHIP_DIR: ${{ runner.temp }}/rln-membership
+        run: |
+          if [ -z "$RLN_KEYSTORE" ]; then
+            echo "::error::secret RLN_KEYSTORE is not set"
+            exit 1
+          fi
+          mkdir -p "$MEMBERSHIP_DIR"
+          if ! echo "$RLN_KEYSTORE" | base64 -d | tar xz -C "$MEMBERSHIP_DIR"; then
+            echo "::error::RLN_KEYSTORE is not a base64 tar.gz"
+            exit 1
+          fi
+          keystores=("$MEMBERSHIP_DIR"/liblogos_rln_module/*/)
+          if [ ${#keystores[@]} -ne 1 ] || [ ! -f "${keystores[0]}rln_sealed.json" ] || [ ! -f "${keystores[0]}rln_autounlock.secret" ]; then
+            echo "::error::RLN_KEYSTORE holds no single liblogos_rln_module keystore folder with rln_sealed.json and rln_autounlock.secret"
+            find "$MEMBERSHIP_DIR" -type f
+            exit 1
+          fi
+          ls -l "${keystores[0]}"
+          echo "::notice::Restored the RLN membership: ${keystores[0]#"$MEMBERSHIP_DIR"/}"
+          echo "E2E_RLN_MEMBERSHIP_DIR=$MEMBERSHIP_DIR" >> "$GITHUB_ENV"
+
+      - name: Run e2e tests
+        run: |
+          mkdir -p ${{ runner.temp }}/e2e-logs
+          cd tests/e2e
+          pytest -v -m rln_membership -n 4 --dist=loadgroup
+        env:
+          E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
+          LOGOSCORE_PY_FORWARD_OUTPUT: "1"
+
+      - name: Upload daemon logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-rln-membership-logs
           path: ${{ runner.temp }}/e2e-logs/*.log
           retention-days: 7
