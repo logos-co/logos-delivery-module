@@ -37,6 +37,9 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for its `requestId` |
 | `test_bidirectional_propagation` | 2 | A→B and B→A both propagate |
 | `test_two_nodes_message_received` | 2 | receiver sees `messageReceived` (see below) |
+| `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
+| `test_send_with_rln_off_propagates` | 2 | a sender with RLN off sees `messagePropagated` |
+| `test_send_without_membership_reports_error` | 2 | a sender with RLN on and no membership sees `messageError` |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -63,6 +66,13 @@ the logs and confirm the decoding in `libs/helpers.py` first.
 comes back can replay what it missed as `"history"`, so a test asserting on a
 freshly published message should pin `arg3` to `"live"`.
 
+## RLN
+
+`test_rln.py` runs nodes with RLN on the LEZ testnet registry used by `logos.test`,
+without a membership. RLN is turned on through a presets file named by
+`LOGOS_DELIVERY_RLN_PRESETS` instead of the `logos.test` preset, because that preset
+always turns proof validation off (see `docs/pages/rln.md`).
+
 ## Prerequisites
 
 - `docker` available on host.
@@ -72,6 +82,9 @@ freshly published message should pin `arg3` to `"live"`.
   (the output of `nix build .#install-portable` → `result/modules`).
 - A host-side `logoscore` CLI on `PATH` (the client shells out to it). Build it from
   `logos-co/logos-logoscore-cli` pinned to the same commit as the smoke image.
+- For `test_rln.py`: `liblogos_rln_module` and `liblogos_lez_rln_module` in
+  `LOGOS_MODULES_DIR` (CI stages them next to `delivery_module`), and outbound HTTPS to
+  `testnet.lez.logos.co`. Without the modules the RLN tests skip.
 
 If any of these is missing, all e2e tests **skip** with a clear reason.
 
@@ -127,6 +140,10 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
 uploaded as the `e2e-test-logs` artifact in CI on failure. Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
+
+The docker network uses `172.31.0.0/16`. If another network on the host already uses
+that range, `docker network create` fails with "Pool overlaps"; set
+`E2E_NETWORK_SUBNET` to a free range.
 
 ## CI
 
