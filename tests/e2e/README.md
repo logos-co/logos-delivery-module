@@ -115,13 +115,16 @@ cd /tmp/logoscore-py && git checkout "$LOGOSCORE_PY_REV"
 bash tests/logosctl/docker_smoke/build_smoke_image.sh
 export LOGOSCTL_IMAGE=logosctl:smoke-portable
 cd -
+docker rm -f logosctl-cli 2>/dev/null
 docker create --name logosctl-cli logosctl:smoke-portable
 docker cp logosctl-cli:/opt/logosctl - | tar -x -C /tmp
 docker rm logosctl-cli
 export PATH="/tmp/logosctl/bin:$PATH"
 
-# 2. Build the module and install it, with its released dependencies, into a
-#    logosctl session of its own (the same commands as CI).
+# 2. Build the module and install it into its own logosctl session, next to the
+#    released RLN modules. CI runs the same commands. Bump these versions by hand
+#    when flake.lock moves the RLN modules. No test uses kad service discovery, so
+#    libp2p_module is not installed.
 nix build .#lgx-portable
 export LOGOSCTL_CONFIG_DIR=/tmp/logosctl-modules
 logosctl daemon start --detach
@@ -188,7 +191,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
 uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-logs` for the RLN
 job), the sequencer's among them. Set
-`LOGOSCTL_PY_FORWARD_OUTPUT=1` to also mirror the daemon output into pytest logs.
+`LOGOSCTL_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
 `gw<n>` the n-th, a run without xdist the first). If another network on the host
