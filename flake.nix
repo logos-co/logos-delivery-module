@@ -11,11 +11,13 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=master";
+    # Local while the POC branch is unpublished: the C++ binding, typed events
+    # and the reverse-call discovery host live only on it.
+    logos-delivery.url = "git+file:///Users/schwarzy/dev/status/logos-delivery?ref=poc/discovery-plugin-through-reverseffi";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
-      url = "github:logos-messaging/nim-ffi/4c1218626bbbf89e19836845b690937cd255c3f0";
+      url = "github:logos-messaging/nim-ffi/c3d5e7a0ab89cbb296531c3c241b175685f09683";
       flake = false;
     };
     # The name is load-bearing: the builder resolves the metadata.json
