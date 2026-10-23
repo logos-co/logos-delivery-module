@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import base64
+import time
 import uuid
 
 import pytest
 
-from libs.constants import FLEET_ENTRY_NODES, FLEET_PUBSUB_TOPIC
+from libs.constants import FLEET_ENTRY_NODES, FLEET_PUBSUB_TOPIC, RLN_VALID_MESSAGES
 from libs.helpers import (
     event_content_topic,
     event_payload,
@@ -26,12 +27,14 @@ VALID_ROOTS_TIMEOUT_S = 180.0
 PROPAGATED_TIMEOUT_S = 120.0
 RECEIVED_TIMEOUT_S = 60.0
 STORED_TIMEOUT_S = 60.0
-
-RLN_VALID_MESSAGES = "logos_delivery_rln_valid_messages_total_total"
+# An Edge node's `subscribe` returns before a fleet node holds the filter subscription: it
+# waits 1 s, then subscribes at the fleet.
+FILTER_SUBSCRIBE_GRACE_S = 3.0
 
 PAYLOAD = "Fleet round trip"
 
-# Each sender starts from the keystore the previous one left, so one xdist worker runs them all.
+# Each sender starts from the keystore the previous one left, so one xdist worker runs them
+# all, which takes --dist=loadgroup (`fleet_membership` fails otherwise).
 pytestmark = [
     pytest.mark.rln,
     pytest.mark.rln_membership,
@@ -55,6 +58,7 @@ def _filter_client(fleet_node_factory, content_topic: str):
     node = fleet_node_factory("filter-client", make_fleet_config(mode="Edge"))
     wait_for_connected(node, timeout=CONNECTED_TIMEOUT_S)
     node.subscribe(content_topic)
+    time.sleep(FILTER_SUBSCRIBE_GRACE_S)
     return node
 
 

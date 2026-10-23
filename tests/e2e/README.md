@@ -90,7 +90,8 @@ a copy of it.
 `test_fleet.py`, marked `fleet`, sends through the live `logos.test` fleet. Each test
 runs two nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core`
 or `Edge`, the preset's network and RLN, no NAT port mapping), started in parallel, and
-checks that one gets what the other sent.
+checks that one gets what the other sent. An Edge receiver's `subscribe` returns before a
+fleet node holds its filter subscription, so the receiver waits 3 s before the send.
 Each node is in its own docker network, so the message has to cross the fleet. The
 sender holds the membership. The Core receiver of
 `test_lightpushed_message_reaches_relay_node` validates proofs: its presets file has a
@@ -99,19 +100,23 @@ sender holds the membership. The Core receiver of
 Two proofs with the same `message_id` in one epoch disclose the membership's secret to
 anyone who sees both, and every copy of the membership starts from the same counters.
 So the fleet tests run one at a time, each sender starting from the keystore the
-previous one left (`fleet_membership`). Across runs, `E2E_FLEET_EPOCH_FILE` names a file
+previous one left (`fleet_membership`); under xdist that takes `--dist=loadgroup`, and
+`fleet_membership` fails without it. Across runs, `E2E_FLEET_EPOCH_FILE` names a file
 holding the last epoch a run sent in: a run sends only in a later epoch, waiting if it
 has to and printing how long, and writes the epoch when it ends. Without the file it
-waits for the next epoch. CI keeps the file in the Actions cache; locally, point it at a
-file of your own. Local and CI runs don't share it, so don't run the fleet tests while
-another run from the same membership sends.
+waits for the next epoch. CI keeps the file in the Actions cache and runs the fleet tests
+only on master, since a branch's cache entries are invisible to master's runs; locally,
+point it at a file of your own. Local and CI runs don't share it, so don't run the fleet
+tests while another run from the same membership sends.
 
 A node's LEZ wallet syncs the testnet from the block after its last synced one, and RLN
-waits for it: from block 0 that takes over a minute. So every fleet node starts from the
-wallet in `E2E_FLEET_WALLET_DIR` (`fleet_wallet`), and each node whose wallet is ready
-copies its `storage.json` and `payer.json` back there when its test ends. The wallet's
-config, which names the sequencer, is written anew by each node. Without the variable,
-the wallet lasts one run. `storage.json` holds the wallet's keys in plain text: CI keeps
+waits for it: from block 0 that takes over a minute. So the fleet nodes start from a
+saved wallet (`fleet_wallet`). A run empties `E2E_FLEET_WALLET_DIR` first, and each node
+whose wallet is ready copies its `storage.json` and `payer.json` back there when its test
+ends; a node starts from that copy, else from the wallet the folder held when the run
+began. So a wallet that no node gets ready is not kept, and the next run syncs from block
+0. The wallet's config, which names the sequencer, is written anew by each node. Without
+the variable, the wallet lasts one run. `storage.json` holds the wallet's keys in plain text: CI keeps
 the folder in the Actions cache encrypted with the secret `E2E_FLEET_WALLET_KEY`
 (`.github/actions/save-restore-fleet-wallet`), and
 the wallet's payer account must never be funded, since every fleet node holds its keys.
@@ -236,7 +241,7 @@ on one.
 The `e2e-rln-membership` job in `ci.yml` runs the `rln_membership` tests, except the
 `fleet` ones, on PRs from branches of this repo and pushes to master. It is not a
 required check. The workflow `e2e-fleet.yml` runs the `fleet` tests nightly and on
-demand, never on PRs, and its runs queue (see "Fleet"). Both restore the membership
+demand, on master only, never on PRs, and its runs queue (see "Fleet"). Both restore the membership
 through `.github/actions/restore-rln-membership` from the repository secret
 `RLN_KEYSTORE`, which is replaced after every renewal from the logosctl config dir
 that holds the membership:

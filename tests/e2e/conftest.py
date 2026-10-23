@@ -176,12 +176,18 @@ def fleet_membership(
     rln_membership: Path,
     tmp_path_factory: pytest.TempPathFactory,
     request: pytest.FixtureRequest,
+    worker_id: str,
 ) -> Iterator[Path]:
     """A copy of the RLN membership for the nodes that send through the fleet. Each
     sender's keystore is copied back here when its test ends, so the next sender goes
     on from its `message_id`s. Across runs, which restore the same counters, the file
     named by E2E_FLEET_EPOCH_FILE holds the last epoch a run sent in, and this run
     sends only in a later one; without the file it waits for the next epoch."""
+    if worker_id != "master" and not request.config.getoption("loadgroup"):
+        pytest.fail(
+            "the fleet tests go on from each other's message_ids, so they need one xdist "
+            "worker: run them with --dist=loadgroup, or without -n"
+        )
     membership = tmp_path_factory.mktemp("fleet-membership")
     shutil.copytree(rln_membership, membership, dirs_exist_ok=True)
     epoch_file = os.environ.get("E2E_FLEET_EPOCH_FILE")
@@ -205,15 +211,20 @@ def fleet_membership(
 
 
 @pytest.fixture(scope="session")
-def fleet_wallet(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The LEZ wallet every fleet node starts from: the folder E2E_FLEET_WALLET_DIR
-    names, kept across runs, or else a temporary one. A wallet syncs the chain from
-    the block after its last synced one, so a fresh one syncs it all."""
+def fleet_wallet(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """The LEZ wallets of the fleet nodes: the one the run starts with, and the folder
+    E2E_FLEET_WALLET_DIR names, kept across runs. The folder is emptied first and takes
+    only wallets a node of this run got ready, so a wallet no node gets ready is not
+    kept. A node starts from the folder's wallet, else from the one the run started
+    with. Without the variable both are temporary. A wallet syncs the chain from the
+    block after its last synced one, so a fresh one syncs it all."""
     wallet_dir = os.environ.get("E2E_FLEET_WALLET_DIR")
-    if not wallet_dir:
-        return tmp_path_factory.mktemp("fleet-wallet")
-    Path(wallet_dir).mkdir(parents=True, exist_ok=True)
-    return Path(wallet_dir)
+    wallet = Path(wallet_dir) if wallet_dir else tmp_path_factory.mktemp("fleet-wallet")
+    wallet.mkdir(parents=True, exist_ok=True)
+    restored = tmp_path_factory.mktemp("restored-fleet-wallet")
+    shutil.copytree(wallet, restored, dirs_exist_ok=True)
+    shutil.rmtree(wallet / LEZ_RLN_MODULE, ignore_errors=True)
+    return restored, wallet
 
 
 def _worker_subnet(worker_id: str) -> str:
@@ -352,16 +363,17 @@ def rln_node_factory(
 def fleet_node_factory(
     _e2e_env_or_skip: tuple[str, Path],
     _rln_modules_or_skip: None,
-    fleet_wallet: Path,
+    fleet_wallet: tuple[Path, Path],
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Callable[..., DeliveryNode]]:
     """Factory for nodes on the logos.test fleet, each in its own docker network so
     that a test's nodes reach each other only through the fleet. Every node starts
-    with a copy of `fleet_wallet` and, once its wallet is ready, copies it back when
-    the test ends. A node given `enable_validation` gets a presets file whose
+    with a copy of the newest `fleet_wallet` and, once its wallet is ready, copies it
+    back when the test ends. A node given `enable_validation` gets a presets file whose
     `logos.test` entry turns proof validation on. A node given `membership` starts with
     a copy of it and copies its keystore back when the test ends."""
     image, modules_dir = _e2e_env_or_skip
+    restored_wallet, wallet = fleet_wallet
 
     with ExitStack() as stack:
         def _create(
@@ -375,7 +387,8 @@ def fleet_node_factory(
             _create_network(network)
             stack.callback(_remove_network, network)
             persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
-            shutil.copytree(fleet_wallet, persistence_dir, dirs_exist_ok=True)
+            newest_wallet = wallet if (wallet / LEZ_RLN_MODULE).exists() else restored_wallet
+            shutil.copytree(newest_wallet, persistence_dir, dirs_exist_ok=True)
             if membership:
                 shutil.copytree(membership, persistence_dir, dirs_exist_ok=True)
             env = None
@@ -394,7 +407,7 @@ def fleet_node_factory(
                 stack.callback(_copy_keystore_back, container_name, membership)
             stack.callback(_save_logs, container_name)
             node = setup_rln_node(daemon, config_json, label)
-            stack.callback(_copy_wallet_back, node, container_name, fleet_wallet)
+            stack.callback(_copy_wallet_back, node, container_name, wallet)
             return node
 
         yield _create
