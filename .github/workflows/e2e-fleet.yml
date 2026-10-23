@@ -8,8 +8,8 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
 
-# Runs queue: each sends with the CI RLN membership through the fleet, and two runs
-# must not send in the same epoch.
+# Runs queue: each sends with the CI RLN membership through the fleet, and reads the
+# last epoch the previous one sent in.
 concurrency:
   group: e2e-fleet
   cancel-in-progress: false
@@ -39,6 +39,15 @@ jobs:
         with:
           rln-keystore: ${{ secrets.RLN_KEYSTORE }}
 
+      # The last RLN epoch a fleet run sent in. Entries can't be overwritten, so each run
+      # saves its own and the newest one is restored.
+      - name: Restore the last fleet epoch
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/fleet-epoch
+          key: e2e-fleet-epoch-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: e2e-fleet-epoch-
+
       - name: Run the fleet tests
         run: |
           mkdir -p ${{ runner.temp }}/e2e-logs
@@ -46,7 +55,22 @@ jobs:
           pytest -v -m fleet
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
+          E2E_FLEET_EPOCH_FILE: ${{ runner.temp }}/fleet-epoch/epoch
           LOGOSCTL_PY_FORWARD_OUTPUT: "1"
+
+      # Also after a failure or a cancel, when pytest may not have written it. 600 s is the RLN epoch.
+      - name: Record the last fleet epoch
+        if: always()
+        run: |
+          mkdir -p ${{ runner.temp }}/fleet-epoch
+          echo $(( $(date +%s) / 600 )) > ${{ runner.temp }}/fleet-epoch/epoch
+
+      - name: Save the last fleet epoch
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/fleet-epoch
+          key: e2e-fleet-epoch-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload daemon logs on failure
         if: failure()

@@ -98,12 +98,16 @@ sender holds the membership. The Core receiver of
 Two proofs with the same `message_id` in one epoch disclose the membership's secret to
 anyone who sees both, and every copy of the membership starts from the same counters.
 So the fleet tests run one at a time, each sender starting from the keystore the
-previous one left (`fleet_membership`), and a run waits for the next epoch before its
-first node starts, so that it never sends in the epoch of an earlier run. Don't run
-them while another run from the same membership sends, locally or in CI.
+previous one left (`fleet_membership`). Across runs, `E2E_FLEET_EPOCH_FILE` names a file
+holding the last epoch a run sent in: a run sends only in a later epoch, waiting if it
+has to and printing how long, and writes the epoch when it ends. Without the file it
+waits for the next epoch. CI keeps the file in the Actions cache; locally, point it at a
+file of your own. Local and CI runs don't share it, so don't run the fleet tests while
+another run from the same membership sends.
 
 ```bash
-E2E_RLN_MEMBERSHIP_DIR=<membership dir> pytest -v -m fleet
+E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/fleet-epoch \
+  pytest -v -m fleet
 ```
 
 `storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes

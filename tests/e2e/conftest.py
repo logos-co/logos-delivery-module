@@ -39,12 +39,13 @@ from libs.helpers import (
     RLN_PRESETS_ENV,
     RLN_PRESETS_FILE,
     DeliveryNode,
+    current_epoch,
     make_delivery_config,
     make_rln_presets,
     node_multiaddr,
+    seconds_until_epoch,
     setup_delivery_node,
     setup_rln_node,
-    wait_for_next_epoch,
 )
 
 MESH_STABILIZATION_S = 12.0
@@ -62,6 +63,16 @@ def _save_logs(container_name: str) -> None:
         (log_dir / f"{container_name}.log").write_text(_docker_logs(container_name))
     except OSError as e:
         sys.stderr.write(f"warning: failed to save log for {container_name}: {e}\n")
+
+
+def _announce(config: pytest.Config, text: str) -> None:
+    """Write `text` to the terminal past pytest's output capture."""
+    reporter = config.pluginmanager.getplugin("terminalreporter")
+    if reporter is None:
+        return
+    with config.pluginmanager.getplugin("capturemanager").global_and_fixture_disabled():
+        reporter.write_line(text)
+        reporter.flush()
 
 
 def _create_network(name: str, *options: str) -> None:
@@ -141,15 +152,36 @@ def rln_membership(_rln_modules_or_skip: None) -> Path:
 
 
 @pytest.fixture(scope="session")
-def fleet_membership(rln_membership: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+def fleet_membership(
+    rln_membership: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    request: pytest.FixtureRequest,
+) -> Iterator[Path]:
     """A copy of the RLN membership for the nodes that send through the fleet. Each
-    hands its keystore on to the next, so their `message_id`s never repeat in an
-    epoch; the wait keeps them out of the epochs of an earlier run from the same
-    membership."""
+    sender's keystore is copied back here when its test ends, so the next sender goes
+    on from its `message_id`s. Across runs, which restore the same counters, the file
+    named by E2E_FLEET_EPOCH_FILE holds the last epoch a run sent in, and this run
+    sends only in a later one; without the file it waits for the next epoch."""
     membership = tmp_path_factory.mktemp("fleet-membership")
     shutil.copytree(rln_membership, membership, dirs_exist_ok=True)
-    wait_for_next_epoch()
-    return membership
+    epoch_file = os.environ.get("E2E_FLEET_EPOCH_FILE")
+    last_epoch = (
+        int(Path(epoch_file).read_text())
+        if epoch_file and Path(epoch_file).is_file()
+        else current_epoch()
+    )
+    wait_s = seconds_until_epoch(last_epoch + 1)
+    if wait_s:
+        starts = time.strftime("%H:%M:%S", time.localtime(time.time() + wait_s))
+        _announce(
+            request.config,
+            f"Waiting {wait_s:.0f} s, until {starts}, for an RLN epoch no earlier fleet run sent in",
+        )
+        time.sleep(wait_s)
+    yield membership
+    if epoch_file:
+        Path(epoch_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(epoch_file).write_text(f"{current_epoch()}\n")
 
 
 def _worker_subnet(worker_id: str) -> str:

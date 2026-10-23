@@ -282,9 +282,13 @@ def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: f
     return answer["verdict"]
 
 
-def wait_for_next_epoch() -> None:
-    """Sleep until the next RLN epoch starts."""
-    time.sleep(RLN_EPOCH_SIZE_SEC - time.time() % RLN_EPOCH_SIZE_SEC)
+def current_epoch() -> int:
+    return int(time.time() // RLN_EPOCH_SIZE_SEC)
+
+
+def seconds_until_epoch(epoch: int) -> float:
+    """Seconds until RLN epoch `epoch` starts; 0 once it has."""
+    return max(0.0, epoch * RLN_EPOCH_SIZE_SEC - time.time())
 
 
 def wait_for_connected(node: DeliveryNode, *, timeout: float) -> None:
