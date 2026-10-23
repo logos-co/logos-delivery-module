@@ -113,7 +113,7 @@ copies its `storage.json` and `payer.json` back there when its test ends. The wa
 config, which names the sequencer, is written anew by each node. Without the variable,
 the wallet lasts one run. `storage.json` holds the wallet's keys in plain text: CI keeps
 the folder in the Actions cache encrypted with the secret `E2E_FLEET_WALLET_KEY`
-(`.github/actions/fleet-wallet-encryption`), and
+(`.github/actions/save-restore-fleet-wallet`), and
 the wallet's payer account must never be funded, since every fleet node holds its keys.
 
 ```bash

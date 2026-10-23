@@ -49,27 +49,12 @@ jobs:
           restore-keys: e2e-fleet-epoch-
 
       # The LEZ wallet the fleet nodes start from, so that they sync only the blocks since the
-      # last run. The key names the module version, so a new wallet format starts empty.
-      - name: Read the LEZ RLN module version
-        id: lez-rln
-        run: |
-          version=$(jq -er .version "$LOGOS_MODULES_DIR/liblogos_lez_rln_module/manifest.json")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
+      # last run.
       - name: Restore the fleet wallet
-        uses: actions/cache/restore@v4
+        uses: ./.github/actions/save-restore-fleet-wallet
         with:
-          path: ${{ runner.temp }}/fleet-wallet-cache
-          key: e2e-fleet-wallet-${{ steps.lez-rln.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: e2e-fleet-wallet-${{ steps.lez-rln.outputs.version }}-
-
-      - name: Decrypt the fleet wallet
-        uses: ./.github/actions/fleet-wallet-encryption
-        with:
-          operation: decrypt
+          operation: restore
           key: ${{ secrets.E2E_FLEET_WALLET_KEY }}
-          wallet-dir: ${{ runner.temp }}/fleet-wallet
-          encrypted-file: ${{ runner.temp }}/fleet-wallet-cache/wallet.tar.gz.gpg
 
       - name: Run the fleet tests
         run: |
@@ -79,7 +64,6 @@ jobs:
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           E2E_FLEET_EPOCH_FILE: ${{ runner.temp }}/fleet-epoch/epoch
-          E2E_FLEET_WALLET_DIR: ${{ runner.temp }}/fleet-wallet
           LOGOSCTL_PY_FORWARD_OUTPUT: "1"
 
       # Also after a failure or a cancel, when pytest may not have written it. 600 s is the RLN epoch.
@@ -96,22 +80,13 @@ jobs:
           path: ${{ runner.temp }}/fleet-epoch
           key: e2e-fleet-epoch-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Encrypt the fleet wallet
-        id: encrypt-wallet
-        if: always()
-        uses: ./.github/actions/fleet-wallet-encryption
-        with:
-          operation: encrypt
-          key: ${{ secrets.E2E_FLEET_WALLET_KEY }}
-          wallet-dir: ${{ runner.temp }}/fleet-wallet
-          encrypted-file: ${{ runner.temp }}/fleet-wallet-cache/wallet.tar.gz.gpg
-
+      # Not after a cancel: it can stop a node's copy of its wallet midway.
       - name: Save the fleet wallet
-        if: always() && steps.encrypt-wallet.outputs.encrypted == 'true'
-        uses: actions/cache/save@v4
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-restore-fleet-wallet
         with:
-          path: ${{ runner.temp }}/fleet-wallet-cache
-          key: e2e-fleet-wallet-${{ steps.lez-rln.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          operation: save
+          key: ${{ secrets.E2E_FLEET_WALLET_KEY }}
 
       - name: Upload daemon logs on failure
         if: failure()
