@@ -10,6 +10,7 @@ from libs.helpers import (
     event_content_topic,
     event_payload,
     event_request_id,
+    in_parallel,
     make_fleet_config,
     stored_messages,
     wait_for_connected,
@@ -57,10 +58,19 @@ def _filter_client(fleet_node_factory, content_topic: str):
     return node
 
 
+def _validating_relay_node(fleet_node_factory, content_topic: str):
+    node = fleet_node_factory("relay-node", make_fleet_config(mode="Core"), enable_validation=True)
+    wait_for_connected(node, timeout=CONNECTED_TIMEOUT_S)
+    node.subscribe(content_topic)
+    return node
+
+
 def test_lightpushed_message_reaches_filter_client(fleet_node_factory, fleet_membership):
     content_topic = _content_topic()
-    receiver = _filter_client(fleet_node_factory, content_topic)
-    sender = _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge")
+    receiver, sender = in_parallel(
+        lambda: _filter_client(fleet_node_factory, content_topic),
+        lambda: _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge"),
+    )
 
     with receiver.watch() as events:
         sender.send(content_topic, PAYLOAD)
@@ -71,8 +81,10 @@ def test_lightpushed_message_reaches_filter_client(fleet_node_factory, fleet_mem
 
 def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
     content_topic = _content_topic()
-    querier = fleet_node_factory("store-client", make_fleet_config(mode="Edge"))
-    sender = _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge")
+    querier, sender = in_parallel(
+        lambda: fleet_node_factory("store-client", make_fleet_config(mode="Edge")),
+        lambda: _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge"),
+    )
 
     with sender.watch() as events:
         request_id = sender.send(content_topic, PAYLOAD)
@@ -92,8 +104,10 @@ def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
 
 def test_relayed_message_reaches_filter_client(fleet_node_factory, fleet_membership):
     content_topic = _content_topic()
-    receiver = _filter_client(fleet_node_factory, content_topic)
-    sender = _sender(fleet_node_factory, fleet_membership, "relay-node", mode="Core")
+    receiver, sender = in_parallel(
+        lambda: _filter_client(fleet_node_factory, content_topic),
+        lambda: _sender(fleet_node_factory, fleet_membership, "relay-node", mode="Core"),
+    )
     sender.subscribe(content_topic)
 
     with receiver.watch() as events:
@@ -105,10 +119,10 @@ def test_relayed_message_reaches_filter_client(fleet_node_factory, fleet_members
 
 def test_lightpushed_message_reaches_relay_node(fleet_node_factory, fleet_membership):
     content_topic = _content_topic()
-    receiver = fleet_node_factory("relay-node", make_fleet_config(mode="Core"), enable_validation=True)
-    wait_for_connected(receiver, timeout=CONNECTED_TIMEOUT_S)
-    receiver.subscribe(content_topic)
-    sender = _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge")
+    receiver, sender = in_parallel(
+        lambda: _validating_relay_node(fleet_node_factory, content_topic),
+        lambda: _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge"),
+    )
     assert wait_for_valid_roots(receiver, sender, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
 
     with receiver.watch() as events:

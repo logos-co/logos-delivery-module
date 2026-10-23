@@ -14,6 +14,8 @@ import logging
 import re
 import subprocess
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from logos_integration_test_framework import subscribe as _watch_events
@@ -86,11 +88,11 @@ def make_delivery_config(
 
 def make_fleet_config(*, mode: str) -> str:
     """JSON config for `createNode` on the logos.test fleet: the preset's network and
-    RLN, as a user runs it. `mode` is "Core" or "Edge"."""
+    RLN, as a user runs it, without NAT port mapping. `mode` is "Core" or "Edge"."""
     return json.dumps({
         "mode": mode,
         "preset": FLEET_PRESET,
-        "messagingOverrides": {"logLevel": "DEBUG"},
+        "messagingOverrides": {"logLevel": "DEBUG", "nat": "none"},
     })
 
 
@@ -217,6 +219,14 @@ def setup_rln_node(daemon, config_json: str, label: str) -> DeliveryNode:
     return node
 
 
+def in_parallel(*calls: Callable[[], Any]) -> list:
+    """Run `calls` in threads and return their results in order. Raises the first
+    call's exception once all have ended."""
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = [pool.submit(call) for call in calls]
+        return [future.result() for future in futures]
+
+
 def wait_until(condition, *, timeout: float, interval: float = 0.5, message: str = "") -> Any:
     """Call `condition` until it returns a truthy value, and return that value.
     Raises AssertionError with `message` after `timeout` seconds."""
@@ -242,12 +252,16 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
         raise AssertionError(f"{node.label}: rlnState {state!r}")
 
 
+def lez_wallet_status(node: DeliveryNode) -> dict:
+    return _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+
+
 def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> None:
     """Poll the node's LEZ wallet until its first sync is over; until then every
     chain read of the RLN modules blocks or answers empty. Raises unless the
     wallet is `ready`."""
     def settled():
-        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+        status = lez_wallet_status(node)
         return status if status.get("state") != "pending" else None
 
     status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")

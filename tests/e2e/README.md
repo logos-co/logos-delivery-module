@@ -89,7 +89,8 @@ a copy of it.
 
 `test_fleet.py`, marked `fleet`, sends through the live `logos.test` fleet. Each test
 runs two nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core`
-or `Edge`, the preset's network and RLN) and checks that one gets what the other sent.
+or `Edge`, the preset's network and RLN, no NAT port mapping), started in parallel, and
+checks that one gets what the other sent.
 Each node is in its own docker network, so the message has to cross the fleet. The
 sender holds the membership. The Core receiver of
 `test_lightpushed_message_reaches_relay_node` validates proofs: its presets file has a
@@ -105,9 +106,19 @@ waits for the next epoch. CI keeps the file in the Actions cache; locally, point
 file of your own. Local and CI runs don't share it, so don't run the fleet tests while
 another run from the same membership sends.
 
+A node's LEZ wallet syncs the testnet from the block after its last synced one, and RLN
+waits for it: from block 0 that takes over a minute. So every fleet node starts from the
+wallet in `E2E_FLEET_WALLET_DIR` (`fleet_wallet`), and each node whose wallet is ready
+copies its `storage.json` and `payer.json` back there when its test ends. The wallet's
+config, which names the sequencer, is written anew by each node. Without the variable,
+the wallet lasts one run. `storage.json` holds the wallet's keys in plain text: CI keeps
+the folder in the Actions cache encrypted with the secret `E2E_FLEET_WALLET_KEY`
+(`.github/actions/fleet-wallet-encryption`), and
+the wallet's payer account must never be funded, since every fleet node holds its keys.
+
 ```bash
 E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/fleet-epoch \
-  pytest -v -m fleet
+  E2E_FLEET_WALLET_DIR=~/.logos-e2e-local/fleet-wallet pytest -v -m fleet
 ```
 
 `storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes
@@ -237,4 +248,11 @@ tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four file
 base64 < rln-keystore.tar.gz > rln-keystore.b64
 gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
 rm rln-keystore.tar.gz rln-keystore.b64
+```
+
+`e2e-fleet.yml` also needs the secret `E2E_FLEET_WALLET_KEY`, the passphrase of the
+cached fleet wallet. A new one costs one run a full wallet sync:
+
+```bash
+openssl rand -base64 32 | gh secret set E2E_FLEET_WALLET_KEY --repo logos-co/logos-delivery-module
 ```

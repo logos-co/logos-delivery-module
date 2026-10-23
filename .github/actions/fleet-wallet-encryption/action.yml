@@ -1,0 +1,65 @@
+name: Fleet wallet encryption
+description: >
+  Encrypts the fleet tests' LEZ wallet folder into one file for the Actions cache, or
+  decrypts that file back into the folder (tests/e2e/README.md, "Fleet"). The wallet's
+  storage.json holds its keys in plain text.
+
+inputs:
+  operation:
+    description: encrypt or decrypt.
+    required: true
+  key:
+    description: E2E_FLEET_WALLET_KEY, the passphrase.
+    required: true
+  wallet-dir:
+    description: The wallet folder the tests read as E2E_FLEET_WALLET_DIR.
+    required: true
+  encrypted-file:
+    description: The encrypted wallet, inside the cached folder.
+    required: true
+
+outputs:
+  encrypted:
+    description: "'true' when encrypt wrote encrypted-file."
+    value: ${{ steps.run.outputs.encrypted }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        OPERATION: ${{ inputs.operation }}
+        WALLET_KEY: ${{ inputs.key }}
+        WALLET_DIR: ${{ inputs.wallet-dir }}
+        ENCRYPTED: ${{ inputs.encrypted-file }}
+      run: |
+        case "$OPERATION" in
+          decrypt)
+            if [ -z "$WALLET_KEY" ]; then
+              echo "::error::secret E2E_FLEET_WALLET_KEY is not set"
+              exit 1
+            fi
+            mkdir -p "$WALLET_DIR"
+            if [ ! -f "$ENCRYPTED" ]; then
+              echo "::notice::No fleet wallet in the cache: the first node syncs the chain from block 0"
+            elif ! gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --decrypt "$ENCRYPTED" 3<<<"$WALLET_KEY" | tar xz -C "$WALLET_DIR"; then
+              rm -rf "$WALLET_DIR"
+              mkdir -p "$WALLET_DIR"
+              echo "::notice::The cached fleet wallet does not decrypt: the first node syncs the chain from block 0"
+            fi
+            ;;
+          encrypt)
+            if [ -z "$WALLET_KEY" ] || [ ! -d "$WALLET_DIR/liblogos_lez_rln_module" ]; then
+              echo "::notice::No fleet wallet to encrypt"
+              exit 0
+            fi
+            mkdir -p "$(dirname "$ENCRYPTED")"
+            tar cz -C "$WALLET_DIR" . | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 -o "$ENCRYPTED" 3<<<"$WALLET_KEY"
+            echo "encrypted=true" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "::error::operation is encrypt or decrypt, not '$OPERATION'"
+            exit 1
+            ;;
+        esac
