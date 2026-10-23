@@ -43,6 +43,10 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_restored_membership_is_active` | 1 | the membership in `E2E_RLN_MEMBERSHIP_DIR` is `active` on the registry (see "RLN") |
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
+| `test_lightpushed_message_reaches_filter_client` | 2 | an Edge sender's message reaches an Edge receiver through the `logos.test` fleet (see "Fleet") |
+| `test_lightpushed_message_is_stored` | 2 | an Edge sender's message is in a fleet store node |
+| `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
+| `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -73,13 +77,57 @@ freshly published message should pin `arg3` to `"live"`.
 
 `test_rln.py` runs nodes with RLN on the LEZ testnet registry used by `logos.test`.
 RLN is turned on through a presets file named by `LOGOS_DELIVERY_RLN_PRESETS` instead
-of the `logos.test` preset, because that preset always turns proof validation off (see
+of the `logos.test` preset, whose built-in entry turns proof validation off (see
 `docs/pages/rln.md`).
 
 The tests marked `rln_membership` send with a proof, so they need an active
 membership: `E2E_RLN_MEMBERSHIP_DIR` names a directory holding `liblogos_rln_module`'s
 keystore folder (`liblogos_rln_module/<instance>/`), and each sending node starts with
 a copy of it.
+
+## Fleet
+
+`test_fleet.py`, marked `fleet`, sends through the live `logos.test` fleet. Each test
+runs two nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core`
+or `Edge`, the preset's network and RLN, no NAT port mapping), started in parallel, and
+checks that one gets what the other sent. An Edge receiver's `subscribe` returns before a
+fleet node holds its filter subscription, so the receiver waits 3 s before the send.
+Each node is in its own docker network, so the message has to cross the fleet. The
+sender holds the membership. The Core receiver of
+`test_lightpushed_message_reaches_relay_node` validates proofs: its presets file has a
+`logos.test` entry with `enable-validation` on.
+
+Two proofs with the same `message_id` in one epoch disclose the membership's secret to
+anyone who sees both, and every copy of the membership starts from the same counters.
+So the fleet tests run one at a time, each sender starting from the keystore the
+previous one left (`fleet_membership`); under xdist that takes `--dist=loadgroup`, and
+`fleet_membership` fails without it. Across runs, `E2E_FLEET_EPOCH_FILE` names a file
+holding the last epoch a run sent in: a run sends only in a later epoch, waiting if it
+has to and printing how long, and writes the epoch when it ends. Without the file it
+waits for the next epoch. CI keeps the file in the Actions cache and runs the fleet tests
+only on master, since a branch's cache entries are invisible to master's runs; locally,
+point it at a file of your own. Local and CI runs don't share it, so don't run the fleet
+tests while another run from the same membership sends.
+
+A node's LEZ wallet syncs the testnet from the block after its last synced one, and RLN
+waits for it: from block 0 that takes over a minute. So the fleet nodes start from a
+saved wallet (`fleet_wallet`). A run empties `E2E_FLEET_WALLET_DIR` first, and each node
+whose wallet is ready copies its `storage.json` and `payer.json` back there when its test
+ends; a node starts from that copy, else from the wallet the folder held when the run
+began. So a wallet that no node gets ready is not kept, and the next run syncs from block
+0. The wallet's config, which names the sequencer, is written anew by each node. Without
+the variable, the wallet lasts one run. `storage.json` holds the wallet's keys in plain text: CI keeps
+the folder in the Actions cache encrypted with the secret `E2E_FLEET_WALLET_KEY`
+(`.github/actions/save-restore-fleet-wallet`), and
+the wallet's payer account must never be funded, since every fleet node holds its keys.
+
+```bash
+E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/fleet-epoch \
+  E2E_FLEET_WALLET_DIR=~/.logos-e2e-local/fleet-wallet pytest -v -m fleet
+```
+
+`storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes
+(`FLEET_ENTRY_NODES`) in turn.
 
 ## Prerequisites
 
@@ -95,6 +143,8 @@ a copy of it.
   `testnet.lez.logos.co`. Without the modules the RLN tests skip.
 - For the `rln_membership` tests: `E2E_RLN_MEMBERSHIP_DIR` (see "RLN"). Without it
   they skip.
+- For the `fleet` tests: the membership, and outbound TCP to the `logos.test` fleet
+  (port 30303).
 
 If any of these is missing, all e2e tests **skip** with a clear reason.
 
@@ -169,14 +219,14 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 
 Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
 uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-membership-logs`
-for the membership job). Set
+for the membership job, `e2e-fleet-logs` for the fleet one). Set
 `LOGOSCTL_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
 `gw<n>` the n-th, a run without xdist the first). If another network on the host
 already uses that range, `docker network create` fails with "Pool overlaps"; set
 `E2E_NETWORK_SUBNET` to a free range with a /24 for each worker, such as a /22 for
-`-n 4`.
+`-n 4`. The fleet tests' networks take a range docker picks.
 
 ## CI
 
@@ -188,9 +238,11 @@ set up through the composite action `.github/actions/setup-e2e`, and run the tes
 four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
 on one.
 
-The `e2e-rln-membership` job in `ci.yml` runs the `rln_membership` tests on PRs from
-branches of this repo and pushes to master. It is not a required check. It restores the
-membership from the repository secret
+The `e2e-rln-membership` job in `ci.yml` runs the `rln_membership` tests, except the
+`fleet` ones, on PRs from branches of this repo and pushes to master. It is not a
+required check. The workflow `e2e-fleet.yml` runs the `fleet` tests nightly and on
+demand, on master only, never on PRs, and its runs queue (see "Fleet"). Both restore the membership
+through `.github/actions/restore-rln-membership` from the repository secret
 `RLN_KEYSTORE`, which is replaced after every renewal from the logosctl config dir
 that holds the membership:
 
@@ -201,4 +253,11 @@ tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four file
 base64 < rln-keystore.tar.gz > rln-keystore.b64
 gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
 rm rln-keystore.tar.gz rln-keystore.b64
+```
+
+`e2e-fleet.yml` also needs the secret `E2E_FLEET_WALLET_KEY`, the passphrase of the
+cached fleet wallet. A new one costs one run a full wallet sync:
+
+```bash
+openssl rand -base64 32 | gh secret set E2E_FLEET_WALLET_KEY --repo logos-co/logos-delivery-module
 ```

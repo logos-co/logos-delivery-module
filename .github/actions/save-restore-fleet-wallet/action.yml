@@ -1,0 +1,92 @@
+name: Save or restore the fleet wallet
+description: >
+  restore: restores the fleet tests' LEZ wallet from the Actions cache, decrypts it, and
+  sets E2E_FLEET_WALLET_DIR to it. save: encrypts that folder and saves it to the cache
+  (tests/e2e/README.md, "Fleet"). The wallet's storage.json holds its keys in plain text.
+
+inputs:
+  operation:
+    description: restore, before the tests, or save, after them.
+    required: true
+  key:
+    description: E2E_FLEET_WALLET_KEY, the passphrase.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check the operation
+      if: inputs.operation != 'restore' && inputs.operation != 'save'
+      shell: bash
+      env:
+        OPERATION: ${{ inputs.operation }}
+      run: |
+        echo "::error::operation is restore or save, not '$OPERATION'"
+        exit 1
+
+    # The version is part of the cache key, so after a module upgrade the nodes start with
+    # no wallet rather than one the new version may not read.
+    - name: Read the LEZ RLN module version
+      id: lez-rln
+      shell: bash
+      run: |
+        version=$(jq -er .version "$LOGOS_MODULES_DIR/liblogos_lez_rln_module/manifest.json")
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the encrypted wallet
+      if: inputs.operation == 'restore'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/fleet-wallet-cache
+        key: e2e-fleet-wallet-${{ steps.lez-rln.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: e2e-fleet-wallet-${{ steps.lez-rln.outputs.version }}-
+
+    - name: Decrypt the wallet
+      if: inputs.operation == 'restore'
+      shell: bash
+      env:
+        WALLET_KEY: ${{ inputs.key }}
+        WALLET_DIR: ${{ runner.temp }}/fleet-wallet
+        ENCRYPTED: ${{ runner.temp }}/fleet-wallet-cache/wallet.tar.gz.gpg
+      run: |
+        if [ -z "$WALLET_KEY" ]; then
+          echo "::error::secret E2E_FLEET_WALLET_KEY is not set"
+          exit 1
+        fi
+        mkdir -p "$WALLET_DIR"
+        if [ ! -f "$ENCRYPTED" ]; then
+          echo "::notice::No fleet wallet in the cache: the first node syncs the chain from block 0"
+        elif ! gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --decrypt "$ENCRYPTED" 3<<<"$WALLET_KEY" | tar xz -C "$WALLET_DIR"; then
+          rm -rf "$WALLET_DIR"
+          mkdir -p "$WALLET_DIR"
+          echo "::notice::The cached fleet wallet does not decrypt: the first node syncs the chain from block 0"
+        fi
+        echo "E2E_FLEET_WALLET_DIR=$WALLET_DIR" >> "$GITHUB_ENV"
+
+    - name: Encrypt the wallet
+      id: encrypt
+      if: inputs.operation == 'save'
+      shell: bash
+      env:
+        WALLET_KEY: ${{ inputs.key }}
+        WALLET_DIR: ${{ runner.temp }}/fleet-wallet
+        ENCRYPTED: ${{ runner.temp }}/fleet-wallet-cache/wallet.tar.gz.gpg
+      run: |
+        if [ -z "$WALLET_KEY" ] || [ ! -d "$WALLET_DIR" ]; then
+          echo "::notice::No fleet wallet to save"
+          exit 0
+        fi
+        # Save empty too, so that a wallet no node got ready is not restored again.
+        if [ ! -d "$WALLET_DIR/liblogos_lez_rln_module" ]; then
+          echo "::notice::No fleet node got its wallet ready: saving an empty one, so the next run syncs the chain from block 0"
+        fi
+        mkdir -p "$(dirname "$ENCRYPTED")"
+        tar cz -C "$WALLET_DIR" . | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 --symmetric --cipher-algo AES256 -o "$ENCRYPTED" 3<<<"$WALLET_KEY"
+        echo "encrypted=true" >> "$GITHUB_OUTPUT"
+
+    - name: Save the encrypted wallet
+      if: steps.encrypt.outputs.encrypted == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/fleet-wallet-cache
+        key: e2e-fleet-wallet-${{ steps.lez-rln.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}

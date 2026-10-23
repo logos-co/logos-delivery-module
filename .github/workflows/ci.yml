@@ -91,38 +91,16 @@ jobs:
           attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
           logoscore-py-rev: ${{ env.LOGOSCORE_PY_REV }}
 
-      # RLN_KEYSTORE is liblogos_rln_module's keystore folder, tar.gz and base64
-      # (tests/e2e/README.md, "CI").
       - name: Restore the RLN membership
-        shell: bash
-        env:
-          RLN_KEYSTORE: ${{ secrets.RLN_KEYSTORE }}
-          MEMBERSHIP_DIR: ${{ runner.temp }}/rln-membership
-        run: |
-          if [ -z "$RLN_KEYSTORE" ]; then
-            echo "::error::secret RLN_KEYSTORE is not set"
-            exit 1
-          fi
-          mkdir -p "$MEMBERSHIP_DIR"
-          if ! echo "$RLN_KEYSTORE" | base64 -d | tar xz -C "$MEMBERSHIP_DIR"; then
-            echo "::error::RLN_KEYSTORE is not a base64 tar.gz"
-            exit 1
-          fi
-          keystores=("$MEMBERSHIP_DIR"/liblogos_rln_module/*/)
-          if [ ${#keystores[@]} -ne 1 ] || [ ! -f "${keystores[0]}rln_sealed.json" ] || [ ! -f "${keystores[0]}rln_autounlock.secret" ]; then
-            echo "::error::RLN_KEYSTORE holds no single liblogos_rln_module keystore folder with rln_sealed.json and rln_autounlock.secret"
-            find "$MEMBERSHIP_DIR" -type f
-            exit 1
-          fi
-          ls -l "${keystores[0]}"
-          echo "::notice::Restored the RLN membership: ${keystores[0]#"$MEMBERSHIP_DIR"/}"
-          echo "E2E_RLN_MEMBERSHIP_DIR=$MEMBERSHIP_DIR" >> "$GITHUB_ENV"
+        uses: ./.github/actions/restore-rln-membership
+        with:
+          rln-keystore: ${{ secrets.RLN_KEYSTORE }}
 
       - name: Run e2e tests
         run: |
           mkdir -p ${{ runner.temp }}/e2e-logs
           cd tests/e2e
-          pytest -v -m rln_membership -n 4 --dist=loadgroup
+          pytest -v -m "rln_membership and not fleet" -n 4 --dist=loadgroup
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           LOGOSCTL_PY_FORWARD_OUTPUT: "1"
