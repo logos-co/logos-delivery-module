@@ -2,6 +2,8 @@ name: E2E fleet
 
 # Joins the live logos.test fleet. Kept off PRs so that they do not depend on it.
 on:
+  push:
+    branches: [test-4]  # temporary, remove before merge
   schedule:
     - cron: '17 5 * * *'
   workflow_dispatch:
