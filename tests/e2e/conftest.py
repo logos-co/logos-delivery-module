@@ -1,6 +1,6 @@
 """Fixtures for the delivery_module e2e suite.
 
-Three daemon flavours:
+Four daemon flavours:
   * `solo_daemon` (function scope) — one fresh logosctl container per test, used
     by the single-node lifecycle/query tests. Fresh because createNode is
     once-per-context: a started node can't be re-created, so tests can't share one.
@@ -9,6 +9,8 @@ Three daemon flavours:
     by the two-node delivery tests.
   * `rln_node_factory` (module scope) — daemons with RLN turned on through a
     presets file in each one's persistence dir, used by the RLN tests.
+  * `fleet_node_factory` (function scope) — daemons on the logos.test fleet, each
+    in its own docker network, used by the fleet tests.
 
 Every prerequisite (docker, the logosctl image, the built module layout) is
 gated by `_e2e_env_or_skip`, and the RLN modules by `_rln_modules_or_skip`, so the
@@ -30,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from libs.constants import NETWORK_SUBNET
+from libs.constants import FLEET_PRESET, NETWORK_SUBNET
 from libs.helpers import (
     LEZ_RLN_MODULE,
     RLN_MODULE,
@@ -42,6 +44,7 @@ from libs.helpers import (
     node_multiaddr,
     setup_delivery_node,
     setup_rln_node,
+    wait_for_next_epoch,
 )
 
 MESH_STABILIZATION_S = 12.0
@@ -59,6 +62,32 @@ def _save_logs(container_name: str) -> None:
         (log_dir / f"{container_name}.log").write_text(_docker_logs(container_name))
     except OSError as e:
         sys.stderr.write(f"warning: failed to save log for {container_name}: {e}\n")
+
+
+def _create_network(name: str, *options: str) -> None:
+    r = subprocess.run(
+        ["docker", "network", "create", *options, name],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        pytest.fail(f"failed to create docker network {name!r}: {r.stderr.strip()}")
+
+
+def _remove_network(name: str) -> None:
+    subprocess.run(["docker", "network", "rm", name], capture_output=True)
+
+
+def _copy_keystore_back(container_name: str, membership: Path) -> None:
+    """Replace the RLN keystore in `membership` with the node's, without its lock."""
+    keystore = membership / RLN_MODULE
+    # Removed first: if the copy fails, no later node starts from counters this one has used.
+    shutil.rmtree(keystore)
+    subprocess.run(
+        ["docker", "cp", f"{container_name}:/persistence/{RLN_MODULE}", str(keystore)],
+        check=True, capture_output=True,
+    )
+    for lock in keystore.glob("*/rln_keystore.lock"):
+        lock.unlink()
 
 
 @pytest.fixture(scope="session")
@@ -111,6 +140,18 @@ def rln_membership(_rln_modules_or_skip: None) -> Path:
     return Path(membership_dir)
 
 
+@pytest.fixture(scope="session")
+def fleet_membership(rln_membership: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A copy of the RLN membership for the nodes that send through the fleet. Each
+    hands its keystore on to the next, so their `message_id`s never repeat in an
+    epoch; the wait keeps them out of the epochs of an earlier run from the same
+    membership."""
+    membership = tmp_path_factory.mktemp("fleet-membership")
+    shutil.copytree(rln_membership, membership, dirs_exist_ok=True)
+    wait_for_next_epoch()
+    return membership
+
+
 def _worker_subnet(worker_id: str) -> str:
     """The xdist worker's /24 of NETWORK_SUBNET: worker gw<n> takes the n-th, a run
     without xdist the first."""
@@ -121,16 +162,11 @@ def _worker_subnet(worker_id: str) -> str:
 @pytest.fixture(scope="session")
 def shared_docker_network(_e2e_env_or_skip: tuple[str, Path], worker_id: str) -> Iterator[str]:
     name = f"logosdelivery-e2e-{uuid.uuid4().hex[:8]}"
-    r = subprocess.run(
-        ["docker", "network", "create", "--subnet", _worker_subnet(worker_id), name],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        pytest.fail(f"failed to create docker network {name!r}: {r.stderr.strip()}")
+    _create_network(name, "--subnet", _worker_subnet(worker_id))
     try:
         yield name
     finally:
-        subprocess.run(["docker", "network", "rm", name], capture_output=True)
+        _remove_network(name)
 
 
 def _new_daemon(
@@ -242,6 +278,53 @@ def rln_node_factory(
                 env={RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}"},
             )
             stack.enter_context(daemon)
+            stack.callback(_save_logs, container_name)
+            return setup_rln_node(daemon, config_json, label)
+
+        yield _create
+
+
+@pytest.fixture
+def fleet_node_factory(
+    _e2e_env_or_skip: tuple[str, Path],
+    _rln_modules_or_skip: None,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[Callable[..., DeliveryNode]]:
+    """Factory for nodes on the logos.test fleet, each in its own docker network so
+    that a test's nodes reach each other only through the fleet. A node given
+    `enable_validation` gets a presets file whose `logos.test` entry turns proof
+    validation on. A node given `membership` starts with a copy of it and copies its
+    keystore back when the test ends."""
+    image, modules_dir = _e2e_env_or_skip
+
+    with ExitStack() as stack:
+        def _create(
+            label: str,
+            config_json: str,
+            *,
+            enable_validation: bool = False,
+            membership: Path | None = None,
+        ) -> DeliveryNode:
+            network = f"logosdelivery-fleet-{uuid.uuid4().hex[:8]}"
+            _create_network(network)
+            stack.callback(_remove_network, network)
+            persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
+            if membership:
+                shutil.copytree(membership, persistence_dir, dirs_exist_ok=True)
+            env = None
+            if enable_validation:
+                (persistence_dir / RLN_PRESETS_FILE).write_text(
+                    make_rln_presets(enable_validation=True, preset=FLEET_PRESET)
+                )
+                env = {RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}"}
+            daemon, container_name = _new_daemon(
+                image, modules_dir, network, label,
+                persistence_dir=persistence_dir,
+                env=env,
+            )
+            stack.enter_context(daemon)
+            if membership:
+                stack.callback(_copy_keystore_back, container_name, membership)
             stack.callback(_save_logs, container_name)
             return setup_rln_node(daemon, config_json, label)
 
