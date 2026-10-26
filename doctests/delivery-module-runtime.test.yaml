@@ -83,8 +83,9 @@ sections:
     step: true
     text: |
       Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
-      output, along with the optional `libp2p_module` and RLN modules. The next
-      section installs them into a `logosctl` session. Every module built with
+      output, along with the optional `libp2p_module` and RLN modules. Each
+      build drops its package into `./packages/`, which the next section
+      installs into a `logosctl` session in one go. Every module built with
       [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
       exposes a ready-to-install `#lgx`.
 
@@ -95,16 +96,19 @@ sections:
     steps:
       - title: "Build the module's .lgx"
         text: |
-          Build the `#lgx` output and link it as `./delivery-lgx`. (This compiles
-          the module and its SDK dependencies through Nix, so the first build is
-          slow.)
-        run: "nix build 'github:logos-co/logos-delivery-module{release}#lgx' -o delivery-lgx"
+          Build the `#lgx` output, link it as `./delivery-lgx`, and copy the
+          package into `./packages/`. (This compiles the module and its SDK
+          dependencies through Nix, so the first build is slow.)
+        run: |
+          nix build 'github:logos-co/logos-delivery-module{release}#lgx' -o delivery-lgx
+          mkdir -p packages && cp -f delivery-lgx/*.lgx packages/
         code_block: |
           # From inside the clone this is simply: nix build '.#lgx'
           nix build 'github:logos-co/logos-delivery-module{release}#lgx' -o delivery-lgx
-        post_text: "The `.lgx` package is now under `./delivery-lgx/`:"
+          mkdir -p packages && cp -f delivery-lgx/*.lgx packages/
+        post_text: "The `.lgx` package is now in `./packages/`:"
         extra_run:
-          run: "ls delivery-lgx/*.lgx"
+          run: "ls packages/"
 
       - title: "Build the libp2p dependency"
         text: |
@@ -125,9 +129,10 @@ sections:
         run: |
           nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lgx' -o libp2p-lgx
           nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lib' --no-link
+          cp -f libp2p-lgx/*.lgx packages/
         post_text: "One more `.lgx` package:"
         extra_run:
-          run: "ls libp2p-lgx/*.lgx"
+          run: "ls packages/"
 
       - title: "Build the RLN dependency chain"
         text: |
@@ -146,9 +151,10 @@ sections:
         run: |
           nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-rln-module#lgx' -o rln-lgx
           nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+          cp -f rln-lgx/*.lgx lez-rln-lgx/*.lgx packages/
         post_text: "Two more `.lgx` packages, one per module in the chain:"
         extra_run:
-          run: "ls rln-lgx/*.lgx lez-rln-lgx/*.lgx"
+          run: "ls packages/"
 
   - title: "Run the daemon, install and call the module"
     platform: [linux, macos]
@@ -219,18 +225,14 @@ sections:
 
       - title: "Install the .lgx packages"
         text: |
-          Install the freshly-built packages into the session. A path ending in
-          `.lgx` installs from disk, with no catalog involved. These are all
-          `core` modules, so they land in the session's `modules/` directory.
-          The packages are unsigned (local dev builds), which the default
-          signature policy accepts with a warning; `-y` confirms, since there is
-          no terminal to ask on.
-        run: |
-          ./logos/bin/logosctl --config-dir ./session install \
-            libp2p-lgx/*.lgx lez-rln-lgx/*.lgx rln-lgx/*.lgx delivery-lgx/*.lgx -y
-        code_block: |
-          logosctl install \
-            libp2p-lgx/*.lgx lez-rln-lgx/*.lgx rln-lgx/*.lgx delivery-lgx/*.lgx -y
+          Install every package in `./packages/` into the session. `--dir`
+          takes each `.lgx` in the directory from disk, with no catalog
+          involved. These are all `core` modules, so they land in the session's
+          `modules/` directory. The packages are unsigned (local dev builds),
+          which the default signature policy accepts with a warning; `-y`
+          confirms, since there is no terminal to ask on.
+        run: "./logos/bin/logosctl --config-dir ./session install --dir packages -y"
+        code_block: "logosctl install --dir packages -y"
         expect_contains:
           - '"installed":['
           - '"status":"ok"'

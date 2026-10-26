@@ -81,8 +81,9 @@ modules). The daemon scans that directory on its own.
 ## Step 2: Build this delivery module
 
 Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
-output, along with the optional `libp2p_module` and RLN modules. The next
-section installs them into a `logosctl` session. Every module built with
+output, along with the optional `libp2p_module` and RLN modules. Each
+build drops its package into `./packages/`, which the next section
+installs into a `logosctl` session in one go. Every module built with
 [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
 exposes a ready-to-install `#lgx`.
 
@@ -93,19 +94,20 @@ exposes a ready-to-install `#lgx`.
 
 ### 2.1 Build the module's .lgx
 
-Build the `#lgx` output and link it as `./delivery-lgx`. (This compiles
-the module and its SDK dependencies through Nix, so the first build is
-slow.)
+Build the `#lgx` output, link it as `./delivery-lgx`, and copy the
+package into `./packages/`. (This compiles the module and its SDK
+dependencies through Nix, so the first build is slow.)
 
 ```bash
 # From inside the clone this is simply: nix build '.#lgx'
 nix build 'github:logos-co/logos-delivery-module#lgx' -o delivery-lgx
+mkdir -p packages && cp -f delivery-lgx/*.lgx packages/
 ```
 
-The `.lgx` package is now under `./delivery-lgx/`:
+The `.lgx` package is now in `./packages/`:
 
 ```bash
-ls delivery-lgx/*.lgx
+ls packages/
 ```
 
 ### 2.2 Build the libp2p dependency
@@ -128,13 +130,14 @@ them into the store.
 ```bash
 nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lgx' -o libp2p-lgx
 nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lib' --no-link
+cp -f libp2p-lgx/*.lgx packages/
 
 ```
 
 One more `.lgx` package:
 
 ```bash
-ls libp2p-lgx/*.lgx
+ls packages/
 ```
 
 ### 2.3 Build the RLN dependency chain
@@ -155,13 +158,14 @@ straight out of the lock.
 ```bash
 nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-rln-module#lgx' -o rln-lgx
 nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+cp -f rln-lgx/*.lgx lez-rln-lgx/*.lgx packages/
 
 ```
 
 Two more `.lgx` packages, one per module in the chain:
 
 ```bash
-ls rln-lgx/*.lgx lez-rln-lgx/*.lgx
+ls packages/
 ```
 
 ---
@@ -234,16 +238,15 @@ cat session/logs/daemon.log
 
 ### 3.4 Install the .lgx packages
 
-Install the freshly-built packages into the session. A path ending in
-`.lgx` installs from disk, with no catalog involved. These are all
-`core` modules, so they land in the session's `modules/` directory.
-The packages are unsigned (local dev builds), which the default
-signature policy accepts with a warning; `-y` confirms, since there is
-no terminal to ask on.
+Install every package in `./packages/` into the session. `--dir`
+takes each `.lgx` in the directory from disk, with no catalog
+involved. These are all `core` modules, so they land in the session's
+`modules/` directory. The packages are unsigned (local dev builds),
+which the default signature policy accepts with a warning; `-y`
+confirms, since there is no terminal to ask on.
 
 ```bash
-logosctl install \
-  libp2p-lgx/*.lgx lez-rln-lgx/*.lgx rln-lgx/*.lgx delivery-lgx/*.lgx -y
+logosctl install --dir packages -y
 ```
 
 ### 3.5 Confirm the install
