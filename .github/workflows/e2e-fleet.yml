@@ -3,7 +3,7 @@ name: E2E fleet
 # Joins the live logos.test fleet. Kept off PRs so that they do not depend on it.
 on:
   push:
-    branches: [test-4]  # temporary, remove before merge
+    branches: [test-5]  # temporary, remove before merge
   schedule:
     - cron: '17 5 * * *'
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
   e2e-fleet:
     # Only on master: a branch's cache entries are invisible to master's runs, so a run
     # elsewhere would send without the epoch record master's runs go by.
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/test-4'  # test-4: temporary, remove before merge
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/test-5'  # test-5: temporary, remove before merge
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
