@@ -9,9 +9,9 @@ Logos Delivery Module
 
    **This site is the API reference** and the internal docs.
 
-   To watch this run end-to-end against a real ``logoscore`` daemon, see the
+   To watch this run end-to-end against a real ``logosctl`` daemon, see the
    `Tutorial
-   <https://logos-co.github.io/logos-doctest-hub/#logos-delivery-module/ubuntu-latest/running-this-delivery-module-against-logoscore>`_.
+   <https://logos-co.github.io/logos-doctest-hub/#logos-delivery-module/ubuntu-latest/running-this-delivery-module-against-logosctl>`_.
 
 
 The Logos Delivery Module lets your application send and receive messages over

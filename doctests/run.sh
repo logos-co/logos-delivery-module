@@ -4,7 +4,7 @@
 #
 # There is one spec:
 #   delivery-module-runtime.test.yaml — packages this module as an .lgx, installs
-#       it with lgpm, and drives it through a headless logoscore daemon.
+#       it into a logosctl session, and drives it through a headless logosctl daemon.
 #
 # The runner is the shared `doctest` CLI
 # (https://github.com/logos-co/logos-doctest), invoked directly via its flake.
@@ -23,9 +23,8 @@ cd "$(dirname "$0")"
 read -r -a DOCTEST <<< "${DOCTEST:-nix run github:logos-co/logos-doctest --}"
 OUTPUT_DIR="./outputs"
 
-# The runtime spec downloads delivery_module from the Logos catalog (via lgpd),
-# not by compiling this checkout. Use the logos-co binary cache for the lighter
-# logoscore/lgpm/lgpd builds. Skip with SKIP_CACHIX=1.
+# The runtime spec builds logosctl and the module .lgx packages through Nix. Use
+# the logos-co binary cache to avoid compiling most of that. Skip with SKIP_CACHIX=1.
 if [ "${SKIP_CACHIX:-0}" != "1" ]; then
   echo "==> Enabling logos-co binary cache (set SKIP_CACHIX=1 to skip)"
   if command -v cachix >/dev/null 2>&1; then

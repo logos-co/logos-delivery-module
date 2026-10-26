@@ -1,44 +1,46 @@
-# Running This Delivery Module Against logoscore
+# Running This Delivery Module Against logosctl
 
 `logos-delivery-module` is a Logos `core` module that wraps
 [liblogosdelivery](https://github.com/logos-messaging/logos-delivery) to provide
 high-level message-delivery capabilities. This doc-test exercises **this**
-delivery-module commit end-to-end through the headless `logoscore` runtime:
+delivery-module commit end-to-end through the headless `logosctl` runtime:
 
-1. Build the `logoscore` CLI and the `lgpm` local package manager from their
-   published flakes. `logoscore` is the headless frontend for `logos-liblogos`,
-   so building it brings in the whole module-runtime stack (`logos_host`,
+1. Build the `logosctl` CLI from its published flake. `logosctl` is the
+   headless frontend for `logos-liblogos` and installs packages itself, so
+   building it brings in the whole module-runtime stack (`logos_host`,
    `liblogos_core`, the IPC layer).
 2. Build **this** delivery module as an installable `.lgx` package straight from
    its own flake's `#lgx` output, **pinned to the commit under test** — so the
    module you run is built from exactly what is checked out here, not the latest
    published release.
-3. Install the `.lgx` into a `./modules` directory with `lgpm`, together with
-   the optional `libp2p_module` and RLN modules `delivery_module` can use.
-4. Start `logoscore` in daemon mode (`-D`), load `delivery_module`, introspect
-   it with `module-info`, call `createNode` with a Waku node config, then call
-   `start` — verifying the module actually runs and boots a delivery node.
+3. Start the `logosctl` daemon and install the `.lgx` into its session,
+   together with the optional `libp2p_module` and RLN modules
+   `delivery_module` can use.
+4. Load `delivery_module`, introspect it with `module show`, call
+   `createNode` with a Waku node config, then call `start` — verifying the
+   module actually runs and boots a delivery node.
 
 Because the module is built from the commit under test and then loaded and called
-through a real `logoscore` daemon, a green run is real evidence that this change
+through a real `logosctl` daemon, a green run is real evidence that this change
 keeps the delivery module loadable and callable.
 
-On Windows, CI cross-builds the module and uses a staged native `logoscore`
+On Windows, CI cross-builds the module and uses a staged native `logosctl`
 host to create a node without RLN (Rate Limiting Nullifier), the optional
 rate-limiting feature, and without `libp2p_module`, which has no Windows
 build. That leg uses an offline config, verifies RLN stays disabled, and
 stops before `start`, which requires network access.
 
-**What you'll build:** This `delivery_module`, packaged as `.lgx` and installed with `lgpm` on Linux/macOS, then loaded by a native `logoscore` daemon on Windows.
+**What you'll build:** This `delivery_module`, packaged as `.lgx` and installed into a `logosctl` session on Linux/macOS, then loaded by a native `logosctl` daemon on Windows.
 
 **What you'll learn:**
 
-- How to build the `logoscore` runtime and the `lgpm` package manager from their flakes
+- How to build the `logosctl` runtime from its flake
 - How a module's flake exposes a ready-to-install `.lgx` via its `#lgx` output
-- How to install an `.lgx` into a modules directory with `lgpm`
+- How to install an `.lgx` into a `logosctl` session
 - How a module's declared dependencies have to be installed alongside it
-- How to start the `logoscore` daemon, load a module, introspect it, and call its methods
+- How to start the `logosctl` daemon, load a module, introspect it, and call its methods
 - How to create and start a delivery node with `createNode` and `start`
+- How to tell a created node from a running one, and read its connection status
 - How to shut the daemon down and confirm it has exited
 - How to load the module and create a node on Windows without its optional RLN rate-limiting dependency
 
@@ -57,46 +59,31 @@ Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
 
 ---
 
-## Step 1: Build logoscore
+## Step 1: Build logosctl
 
-Build the `logoscore` CLI from its published flake. The result is symlinked to
-`./logos/`. `logoscore` is the headless frontend for `logos-liblogos`, so this
+Build the `logosctl` CLI from its published flake. The result is symlinked to
+`./logos/`. `logosctl` is the headless frontend for `logos-liblogos`, so this
 one build brings in the whole module-runtime stack the daemon needs.
 
 ### 1.1 Build the CLI
 
 ```bash
-nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
+nix build 'github:logos-co/logos-logoscore-cli#ctl' --out-link ./logos
 ```
 
-The build produces `logos/bin/logoscore` plus bundled runtime libraries
+The build produces `logos/bin/logosctl` plus bundled runtime libraries
 and a `logos/modules/` directory containing the built-in
 `capability_module` (required for the auth handshake when loading
-modules).
+modules). The daemon scans that directory on its own.
 
 ---
 
-## Step 2: Build the lgpm package manager
-
-`lgpm` installs `.lgx` packages into a modules directory and scans what is
-installed. Build it from the `logos-package-manager` flake and link it as
-`./lgpm`.
-
-### 2.1 Build lgpm
-
-```bash
-nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
-```
-
-The executable is at `./lgpm/bin/lgpm`.
-
----
-
-## Step 3: Build and install this delivery module
+## Step 2: Build this delivery module
 
 Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
-output and install it into a local `./modules` directory with `lgpm`, along
-with the optional `libp2p_module` and RLN modules. Every module built with
+output, along with the optional `libp2p_module` and RLN modules. Each
+build drops its package into `./packages/`, which the next section
+installs into a `logosctl` session in one go. Every module built with
 [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
 exposes a ready-to-install `#lgx`.
 
@@ -105,24 +92,25 @@ exposes a ready-to-install `#lgx`.
 > checkout's `HEAD` (see `run.sh`); in CI it is the commit being tested. With
 > no pin it falls back to the latest `master`.
 
-### 3.1 Build the module's .lgx
+### 2.1 Build the module's .lgx
 
-Build the `#lgx` output and link it as `./delivery-lgx`. (This compiles
-the module and its SDK dependencies through Nix, so the first build is
-slow.)
+Build the `#lgx` output, link it as `./delivery-lgx`, and copy the
+package into `./packages/`. (This compiles the module and its SDK
+dependencies through Nix, so the first build is slow.)
 
 ```bash
 # From inside the clone this is simply: nix build '.#lgx'
 nix build 'github:logos-co/logos-delivery-module#lgx' -o delivery-lgx
+mkdir -p packages && cp -f delivery-lgx/*.lgx packages/
 ```
 
-The `.lgx` package is now under `./delivery-lgx/`:
+The `.lgx` package is now in `./packages/`:
 
 ```bash
-ls delivery-lgx/*.lgx
+ls packages/
 ```
 
-### 3.2 Build the libp2p dependency
+### 2.2 Build the libp2p dependency
 
 `libp2p_module` is an optional dependency of `delivery_module`: it
 hosts external service discovery. A node configured for that
@@ -142,16 +130,17 @@ them into the store.
 ```bash
 nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lgx' -o libp2p-lgx
 nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lib' --no-link
+cp -f libp2p-lgx/*.lgx packages/
 
 ```
 
 One more `.lgx` package:
 
 ```bash
-ls libp2p-lgx/*.lgx
+ls packages/
 ```
 
-### 3.3 Build the RLN dependency chain
+### 2.3 Build the RLN dependency chain
 
 `liblogos_rln_module` is an optional dependency of `delivery_module`:
 a node whose preset has RLN off loads without it. A node on an
@@ -167,60 +156,28 @@ packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
 straight out of the lock.
 
 ```bash
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=25357cfd877ba18d6e0880564b8fd7ba0abf2d70&dir=logos-rln-module#lgx' -o rln-lgx
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=11b2f00b5e53f5cda111f5eb0f800e94c9811266&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-rln-module#lgx' -o rln-lgx
+nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+cp -f rln-lgx/*.lgx lez-rln-lgx/*.lgx packages/
 
 ```
 
 Two more `.lgx` packages, one per module in the chain:
 
 ```bash
-ls rln-lgx/*.lgx lez-rln-lgx/*.lgx
-```
-
-### 3.4 Seed the modules directory with the bundled capability module
-
-`delivery_module` is loaded through the host's capability layer, so the
-modules directory also needs the `capability_module` that ships with
-`logoscore`. Copy it across first.
-
-```bash
-mkdir -p modules
-cp -RL ./logos/modules/. ./modules/
-
-```
-
-### 3.5 Install the .lgx packages with lgpm
-
-Install the freshly-built packages into `./modules`. These are all
-`core` modules, so they go to `--modules-dir`. The packages are
-unsigned (local dev builds), so we pass `--allow-unsigned`.
-
-```bash
-./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file libp2p-lgx/*.lgx
-./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file lez-rln-lgx/*.lgx
-./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file rln-lgx/*.lgx
-./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file delivery-lgx/*.lgx
-
-```
-
-### 3.6 Confirm the install
-
-Scan the directory and confirm all five modules landed:
-
-```bash
-./lgpm/bin/lgpm --modules-dir ./modules list
+ls packages/
 ```
 
 ---
 
-## Step 4: Run the daemon and call the module
+## Step 3: Run the daemon, install and call the module
 
-Start `logoscore` in daemon mode pointed at `./modules`, then use the client
-subcommands to load `delivery_module`, introspect it, create a node from a
-Waku config, and start it. Daemon output is captured in `logs.txt`.
+Start a `logosctl` daemon and install the packages into its session, then
+use the client subcommands to load `delivery_module`, introspect it, create
+a node from a Waku config, and start it. Daemon output goes to the
+session's `logs/daemon.log`.
 
-### 4.1 Write the node config
+### 3.1 Write the node config
 
 Create `waku-config.json` — a `logos.dev` network configuration for the
 delivery node: cluster 2 with 8 auto-shards, relay/filter/lightpush
@@ -258,205 +215,249 @@ enabled, mix routing, and discv5 discovery.
 }
 ```
 
-### 4.2 Start the daemon
+### 3.2 Start the daemon
 
-Start logoscore in daemon mode in the background, capturing output to
-`logs.txt`:
-
-```bash
-logoscore -D -m ./modules > logs.txt &
-```
-
-The `-D` flag starts the daemon. The client subcommands below connect to
-this running process via the config written under `~/.logoscore/`.
+Start the logosctl daemon. It keeps its config, installed modules and
+module data in one session directory (`~/.logosctl` by default; this
+doc-test passes `--config-dir ./session`):
 
 ```bash
-sleep 3
+logosctl daemon start --detach
 ```
 
-### 4.3 Inspect the startup log
+`--detach` returns once the daemon accepts commands. The client
+subcommands below connect to it through the session directory.
+
+### 3.3 Inspect the startup log
 
 Review the daemon's startup output:
 
 ```bash
-cat logs.txt
+cat session/logs/daemon.log
 ```
 
-### 4.4 Check daemon status
+### 3.4 Install the .lgx packages
+
+Install every package in `./packages/` into the session. `--dir`
+takes each `.lgx` in the directory from disk, with no catalog
+involved. These are all `core` modules, so they land in the session's
+`modules/` directory. The packages are unsigned (local dev builds),
+which the default signature policy accepts with a warning; `-y`
+confirms, since there is no terminal to ask on.
+
+```bash
+logosctl install --dir packages -y
+```
+
+### 3.5 Confirm the install
+
+List the session's packages and confirm all four landed:
+
+```bash
+logosctl package ls
+```
+
+### 3.6 Check daemon status
 
 Verify the daemon is running:
 
 ```bash
-logoscore status
+logosctl daemon status
 ```
 
-### 4.5 List discovered modules
+### 3.7 List discovered modules
 
-`delivery_module` should be visible in the scan directory:
+`delivery_module` should be visible in the session's modules directory:
 
 ```bash
-logoscore list-modules
+logosctl module ls
 ```
 
-### 4.6 Load the module
+### 3.8 Load the module
 
 Load `delivery_module` into the running daemon. Its dependencies are
 all optional, so the host loads this module plus whichever of them are
 installed:
 
 ```bash
-logoscore load-module delivery_module
+logosctl module load delivery_module
 ```
 
-### 4.7 Confirm the module is loaded
+### 3.9 Confirm the module is loaded
 
-Re-run `status`; the module that was `not_loaded` before now reports
-`loaded`:
+Re-run `daemon status`; the module that was `not_loaded` before now
+reports `loaded`:
 
 ```bash
-logoscore status
+logosctl daemon status
 ```
 
-### 4.8 Introspect the module with module-info
+### 3.10 Introspect the module with module show
 
-`module-info` lists the `Q_INVOKABLE` methods the module exposes — the
+`module show` lists the `Q_INVOKABLE` methods the module exposes — the
 same methods you can `call`:
 
 ```bash
-logoscore module-info delivery_module
+logosctl module show delivery_module
 ```
 
-### 4.9 Create the delivery node
+### 3.11 Create the delivery node
 
 `createNode` takes a Waku node configuration JSON document and creates a
-liblogosdelivery node context. The `@` prefix tells `logoscore` to load
+liblogosdelivery node context. The `@` prefix tells `logosctl` to load
 the file contents as the argument:
 
 ```bash
-logoscore call delivery_module createNode @waku-config.json
+logosctl call delivery_module createNode @waku-config.json
 ```
 
 ```bash
 sleep 5
 ```
 
-### 4.10 Start the delivery node
+### 3.12 Check the node is not running yet
+
+`createNode` only creates the node. The `IsRunning` node info item tells
+a created node from a started one:
+
+```bash
+logosctl call delivery_module getNodeInfo IsRunning
+```
+
+### 3.13 Read the connection status before start
+
+`getConnectionStatus` reads the status `connectionStateChanged` reports
+on transitions. A node that is not started is `Disconnected`:
+
+```bash
+logosctl call delivery_module getConnectionStatus
+```
+
+### 3.14 Start the delivery node
 
 `start` boots the node created by `createNode`. This is a synchronous call
 that returns when the node has started:
 
 ```bash
-logoscore call delivery_module start
+logosctl call delivery_module start
 ```
 
-### 4.11 Review daemon logs after node start
+### 3.15 Check the node is running
+
+```bash
+logosctl call delivery_module getNodeInfo IsRunning
+```
+
+### 3.16 Read the connection status after start
+
+Once started, the status follows the node's peers: `Disconnected`,
+`PartiallyConnected` or `Connected`, depending on how far it has
+joined the network.
+
+```bash
+logosctl call delivery_module getConnectionStatus
+```
+
+### 3.17 Review daemon logs after node start
 
 Check the daemon output for node startup activity:
 
 ```bash
-cat logs.txt
+cat session/logs/daemon.log
 ```
 
-### 4.12 Stop the daemon
+### 3.18 Stop the daemon
 
 Shut the daemon down cleanly:
 
 ```bash
-logoscore stop
+logosctl daemon stop
 ```
 
-The daemon removes its state file and exits.
+`daemon stop` returns once the daemon has exited.
 
-```bash
-sleep 5
-```
-
-### 4.13 Confirm the daemon has stopped
+### 3.19 Confirm the daemon has stopped
 
 With no daemon running, the client reports `not_running` and exits
 non-zero, so we add `|| true` to let the doc-test assert on the output:
 
 ```bash
-logoscore status
+logosctl daemon status
 ```
 
 ---
 
-## Step 5: Create a Windows node without the optional RLN module
+## Step 4: Create a Windows node without the optional RLN module
 
-CI stages the Windows module, its DLLs, and a native `logoscore` host.
-Copy the module into the host's scan directory, then use a private daemon
-configuration directory and an offline kernel-only node config. The shared
-runner provides `run` to launch each staged executable.
+CI stages the Windows module, its DLLs, and a native `logosctl` host.
+Copy the module into a private session's `modules/` directory, then start
+a daemon on that session and use an offline node config. The shared
+Windows runner provides `run` to launch each staged executable.
 
-### 5.1 Stage the delivery module
+### 4.1 Stage the delivery module
 
 ```bash
-test ! -e windows-logoscore/modules/delivery_module &&
-  cp -R install-portable/modules/delivery_module windows-logoscore/modules/delivery_module
+mkdir -p windows-smoke-config/modules
+cp -R install-portable/modules/delivery_module windows-smoke-config/modules/
 
 ```
 
-### 5.2 Write an offline node config
+### 4.2 Write an offline node config
 
 ```json
-{"entryLayer":"kernel","kernelConf":{"logLevel":"INFO"}}
+{"logLevel":"INFO"}
 ```
 
-### 5.3 Start the Windows daemon
+### 4.3 Start the Windows daemon
 
 ```bash
-./windows-logoscore/bin/logoscore.exe -D -m ./windows-logoscore/modules --config-dir ./windows-smoke-config > windows-smoke-daemon.log 2>&1 &
-
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon start --detach
 ```
 
-### 5.4 Wait for the daemon
+### 4.4 Discover the module
 
 ```bash
-ready=0
-for attempt in $(seq 1 20); do
-  if run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config status | grep -qF '"status":"running"'; then
-    ready=1
-    break
-  fi
-  sleep 1
-done
-if [ "$ready" -eq 1 ]; then echo 'daemon ready'; else cat windows-smoke-daemon.log; false; fi
-
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module ls
 ```
 
-### 5.5 Discover the module
+### 4.5 Load the module without its optional RLN dependency
 
 ```bash
-run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config list-modules
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module load delivery_module
 ```
 
-### 5.6 Load the module without its optional RLN dependency
+### 4.6 Inspect the module methods
 
 ```bash
-run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config load-module delivery_module
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module show delivery_module
 ```
 
-### 5.7 Inspect the module methods
+### 4.7 Create an offline delivery node
 
 ```bash
-run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config module-info delivery_module
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json
 ```
 
-### 5.8 Create an offline delivery node
+### 4.8 Confirm RLN remains disabled
 
 ```bash
-run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module rlnState
 ```
 
-### 5.9 Confirm RLN remains disabled
+### 4.9 Confirm the node is created but not running
 
 ```bash
-run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config call delivery_module rlnState
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module getNodeInfo IsRunning
 ```
 
-### 5.10 Stop the Windows daemon
+### 4.10 Read the connection status of the stopped node
 
 ```bash
-run windows-logoscore/bin/logoscore.exe --config-dir ./windows-smoke-config stop
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module getConnectionStatus
+```
+
+### 4.11 Stop the Windows daemon
+
+```bash
+run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon stop
 ```
