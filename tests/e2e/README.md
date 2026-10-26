@@ -44,7 +44,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 | `test_lightpushed_message_reaches_filter_client` | 2 | an Edge sender's message reaches an Edge receiver through the `logos.test` fleet (see "Fleet") |
-| `test_lightpushed_message_is_stored` | 2 | an Edge sender's message is in a fleet store node |
+| `test_lightpushed_message_is_stored` | 1 | an Edge sender's message is in a fleet store node |
 | `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
 | `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
 
@@ -64,10 +64,8 @@ result events. Only message delivery is async, via the typed events
 position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTopic`
 = `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
 
-`messageReceived` fires and its `contentTopic` (`arg1`) is asserted. The
-`vector<uint8_t>` `payload` arg's serialization is **not yet asserted** — if you
-extend the receive checks to the payload, read `messageReceived payload: …` from
-the logs and confirm the decoding in `libs/helpers.py` first.
+`messageReceived` carries the `contentTopic` (`arg1`) and the `vector<uint8_t>`
+`payload` (`arg2`), which arrives as `bytes`; the fleet tests assert both.
 
 `source` (`arg3`) is `"live"` or `"history"`. A node that has been down and
 comes back can replay what it missed as `"history"`, so a test asserting on a
@@ -101,14 +99,14 @@ holding `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>
 ## Fleet
 
 `test_fleet.py`, marked `fleet`, sends through the live `logos.test` fleet. Each test
-runs two nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core`
-or `Edge`, the preset's network and RLN, no NAT port mapping), started in parallel, and
-checks that one gets what the other sent. An Edge receiver's `subscribe` returns before a
-fleet node holds its filter subscription, so the receiver waits 3 s before the send.
-Each node is in its own docker network, so the message has to cross the fleet. The
-sender holds the membership. Every node validates proofs: its presets file has a
-`logos.test` entry with `enable-validation` on, which the module's built-in entry leaves
-off.
+runs nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core` or
+`Edge`, the preset's network and RLN, no NAT port mapping) and checks that what one
+sends reaches a second node, started in parallel with it, or a fleet store node. 
+An Edge receiver's `subscribe` returns before a fleet node holds its filter subscription,
+so the receiver waits 3 s before the send. Each node is in its own docker network,
+so the message has to cross the fleet. The sender holds the membership.
+Every node validates proofs: its presets file has a `logos.test` entry
+with `enable-validation` on, which the module's built-in entry leaves off.
 
 Two proofs with the same `message_id` in one epoch disclose the membership's secret to
 anyone who sees both, and every copy of the membership starts from the same counters.
@@ -154,8 +152,8 @@ If any of these is missing, all e2e tests **skip** with a clear reason.
 ## Running locally — Linux
 
 The smoke image and the Python client come from the logos-logoscore-py commit that CI
-pins as `LOGOSCORE_PY_REV` in `.github/workflows/ci.yml`. Set the same variable before
-these steps.
+pins as `LOGOSCORE_PY_REV` in `.github/actions/setup-e2e`. Set the same variable
+before these steps.
 
 ```bash
 # 1. Build the logosctl smoke image (one-time) and copy its CLI out of it.
@@ -204,7 +202,7 @@ cd tests/e2e
 pip install -r requirements.txt
 pip install --no-deps --force-reinstall \
   "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@$LOGOSCORE_PY_REV"
-pytest -v -n 4 --dist=loadgroup
+pytest -v -m "not fleet" -n 4 --dist=loadgroup
 ```
 
 The sequencer image is amd64 only; on Apple silicon Docker runs it emulated.
@@ -253,10 +251,10 @@ already uses that range, `docker network create` fails with "Pool overlaps"; set
 `.github/workflows/ci.yml` has an `e2e-tests` job (ubuntu-latest) that builds the logosctl
 smoke image and copies the CLI out of it, installs `.#lgx-portable` and its released
 dependencies with `logosctl install`, runs the tests without RLN
-(`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. Both e2e jobs
-set up through the composite action `.github/actions/setup-e2e`, and run the tests on
-four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
-on one.
+(`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. The e2e
+jobs set up through the composite action `.github/actions/setup-e2e`. The two in `ci.yml`
+run the tests on four xdist workers; `--dist=loadgroup` keeps the tests that share
+`node_a` and `node_b` on one.
 
 `e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests,
 except the `fleet` ones; it is not a required check. It builds logos-lez-rln through

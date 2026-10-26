@@ -125,8 +125,11 @@ def _remove_network(name: str) -> None:
 
 
 def _copy_keystore_back(container_name: str, membership: Path) -> None:
-    """Replace the RLN keystore in `membership` with the node's, without its lock."""
+    """Replace the RLN keystore in `membership` with the node's, without its lock.
+    Raises if the node's `rln_allocations.json` is the one it started from."""
     keystore = membership / RLN_MODULE
+    allocations, = keystore.glob("*/rln_allocations.json")
+    started_with = allocations.read_bytes()
     # Removed first: if the copy fails, no later node starts from counters this one has used.
     shutil.rmtree(keystore)
     subprocess.run(
@@ -135,6 +138,8 @@ def _copy_keystore_back(container_name: str, membership: Path) -> None:
     )
     for lock in keystore.glob("*/rln_keystore.lock"):
         lock.unlink()
+    if allocations.read_bytes() == started_with:
+        raise AssertionError(f"{container_name}: {allocations.name} unchanged after its sends")
 
 
 @pytest.fixture(scope="session")

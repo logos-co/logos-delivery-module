@@ -33,8 +33,6 @@ FILTER_SUBSCRIBE_GRACE_S = 3.0
 
 PAYLOAD = "Fleet round trip"
 
-# Each sender starts from the keystore the previous one left, so one xdist worker runs them
-# all, which takes --dist=loadgroup (`fleet_membership` fails otherwise).
 pytestmark = [
     pytest.mark.rln,
     pytest.mark.fleet,
@@ -84,10 +82,7 @@ def test_lightpushed_message_reaches_filter_client(fleet_node_factory, fleet_mem
 
 def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
     content_topic = _content_topic()
-    querier, sender = in_parallel(
-        lambda: fleet_node_factory("store-client", make_fleet_config(mode="Edge")),
-        lambda: _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge"),
-    )
+    sender = _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge")
 
     with sender.watch() as events:
         request_id = sender.send(content_topic, PAYLOAD)
@@ -97,7 +92,7 @@ def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
         )
 
     messages = wait_until(
-        lambda: stored_messages(querier, content_topic, FLEET_ENTRY_NODES),
+        lambda: stored_messages(sender, content_topic, FLEET_ENTRY_NODES),
         timeout=STORED_TIMEOUT_S,
         interval=1,
         message="no fleet store node holds the message",

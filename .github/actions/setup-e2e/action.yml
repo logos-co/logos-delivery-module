@@ -13,13 +13,14 @@ inputs:
   attic-token-public:
     description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
     required: true
-  logoscore-py-rev:
-    description: The logos-logoscore-py commit of the smoke image and the Python client.
-    required: true
 
 runs:
   using: composite
   steps:
+    # The logos-logoscore-py commit of the smoke image and the Python client.
+    - shell: bash
+      run: echo "LOGOSCORE_PY_REV=edfe322c2f9e2d54962da752451d1609dcbe3fbf" >> $GITHUB_ENV
+
     - name: Setup Nix and Logos cache
       uses: logos-co/setup-nix-cache-action@v1
       with:
@@ -32,7 +33,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ runner.temp }}/logosctl-smoke-image.tar
-        key: logosctl-smoke-image-${{ runner.arch }}-${{ inputs.logoscore-py-rev }}
+        key: logosctl-smoke-image-${{ runner.arch }}-${{ env.LOGOSCORE_PY_REV }}
 
     # The gha cache backend needs the docker-container driver;
     # the default docker driver can't export type=gha.
@@ -67,7 +68,6 @@ runs:
       env:
         BUILDX_CACHE_FROM: type=gha
         BUILDX_CACHE_TO: type=gha,mode=max
-        LOGOSCORE_PY_REV: ${{ inputs.logoscore-py-rev }}
       run: |
         git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
         cd /tmp/logoscore-py
@@ -114,8 +114,6 @@ runs:
     # Replaces the logoscore@master that the framework pulls in with a pinned commit.
     - name: Install e2e test dependencies
       shell: bash
-      env:
-        LOGOSCORE_PY_REV: ${{ inputs.logoscore-py-rev }}
       run: |
         cd tests/e2e
         pip install -r requirements.txt
