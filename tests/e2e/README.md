@@ -122,14 +122,9 @@ only on master, since a branch's cache entries are invisible to master's runs; l
 point it at a file of your own. Local and CI runs don't share it, so don't run the fleet
 tests while another run from the same membership sends.
 
-Each fleet node whose LEZ wallet is ready copies its `storage.json` and `payer.json` into
-`fleet_wallet` when its test ends, and later fleet nodes start from that copy. When the
-run ends, the copy replaces the wallet in `E2E_LEZ_WALLET_DIR`, which is emptied if no
-node got its wallet ready, so that a wallet no node can bring up is not kept.
-
 ```bash
 E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/fleet-epoch \
-  E2E_LEZ_WALLET_DIR=~/.logos-e2e-local/lez-wallet pytest -v -m fleet
+  pytest -v -m fleet
 ```
 
 `storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes

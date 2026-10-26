@@ -272,16 +272,12 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
         raise AssertionError(f"{node.label}: rlnState {state!r}")
 
 
-def lez_wallet_status(node: DeliveryNode) -> dict:
-    return _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
-
-
 def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> None:
     """Poll the node's LEZ wallet until its first sync is over; until then every
     chain read of the RLN modules blocks or answers empty. Raises unless the
     wallet is `ready`."""
     def settled():
-        status = lez_wallet_status(node)
+        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
         return status if status.get("state") != "pending" else None
 
     status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")

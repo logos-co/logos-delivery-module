@@ -51,14 +51,6 @@ jobs:
           key: e2e-fleet-epoch-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: e2e-fleet-epoch-
 
-      # The LEZ wallet the nodes start from, so that they sync only the blocks since the last
-      # run. This workflow saves it; ci.yml's e2e-rln job only restores it.
-      - name: Restore the LEZ wallet
-        uses: ./.github/actions/save-restore-lez-wallet
-        with:
-          operation: restore
-          key: ${{ secrets.E2E_LEZ_WALLET_KEY }}
-
       - name: Run the fleet tests
         run: |
           mkdir -p ${{ runner.temp }}/e2e-logs
@@ -67,7 +59,6 @@ jobs:
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           E2E_FLEET_EPOCH_FILE: ${{ runner.temp }}/fleet-epoch/epoch
-          LOGOSCTL_PY_FORWARD_OUTPUT: "1"
 
       # Also after a failure or a cancel, when pytest may not have written it. 600 s is the RLN epoch.
       - name: Record the last fleet epoch
@@ -82,14 +73,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/fleet-epoch
           key: e2e-fleet-epoch-${{ github.run_id }}-${{ github.run_attempt }}
-
-      # Not after a cancel: it can stop a copy of the wallet midway.
-      - name: Save the LEZ wallet
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/save-restore-lez-wallet
-        with:
-          operation: save
-          key: ${{ secrets.E2E_LEZ_WALLET_KEY }}
 
       - name: Upload daemon logs on failure
         if: failure()
