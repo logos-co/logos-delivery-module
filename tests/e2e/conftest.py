@@ -10,6 +10,8 @@ Four daemon flavours:
   * `rln_node_factory` (module scope) — daemons with RLN turned on through a
     presets file in each one's persistence dir, on the RLN registry of a local
     LEZ sequencer (`lez_registry`), used by the RLN tests.
+  * `fleet_node_factory` (function scope) — daemons on the logos.test fleet, each
+    in its own docker network, used by the fleet tests.
   * `lez_wallet` (session scope) — one daemon whose LEZ module creates a new wallet
     without syncing; a node on the LEZ testnet starts from a copy of it.
 
@@ -24,6 +26,7 @@ import ipaddress
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -35,7 +38,7 @@ from typing import NamedTuple
 
 import pytest
 
-from libs.constants import LEZ_SEQUENCER_PORT, NETWORK_SUBNET
+from libs.constants import FLEET_PRESET, FLEET_REGISTRY_ID, LEZ_SEQUENCER_PORT, NETWORK_SUBNET
 from libs.helpers import (
     LEZ_RLN_MODULE,
     LEZ_SEQUENCER_ENV,
@@ -45,13 +48,16 @@ from libs.helpers import (
     RLN_PRESETS_FILE,
     DeliveryNode,
     base58_to_hex,
+    current_epoch,
     lez_clock_ms,
     lez_last_block_id,
     lez_rpc,
+    lez_wallet_status,
     make_delivery_config,
     make_rln_presets,
     node_multiaddr,
     register_membership,
+    seconds_until_epoch,
     setup_delivery_node,
     setup_rln_node,
     wait_for_lez_wallet,
@@ -94,6 +100,59 @@ def _save_logs(container_name: str) -> None:
         (log_dir / f"{container_name}.log").write_text(_docker_logs(container_name))
     except OSError as e:
         sys.stderr.write(f"warning: failed to save log for {container_name}: {e}\n")
+
+
+def _announce(config: pytest.Config, text: str) -> None:
+    """Write `text` to the terminal past pytest's output capture."""
+    reporter = config.pluginmanager.getplugin("terminalreporter")
+    if reporter is None:
+        return
+    with config.pluginmanager.getplugin("capturemanager").global_and_fixture_disabled():
+        reporter.write_line(text)
+        reporter.flush()
+
+
+def _create_network(name: str, *options: str) -> None:
+    r = subprocess.run(
+        ["docker", "network", "create", *options, name],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        pytest.fail(f"failed to create docker network {name!r}: {r.stderr.strip()}")
+
+
+def _remove_network(name: str) -> None:
+    subprocess.run(["docker", "network", "rm", name], capture_output=True)
+
+
+def _copy_keystore_back(container_name: str, membership: Path) -> None:
+    """Replace the RLN keystore in `membership` with the node's, without its lock."""
+    keystore = membership / RLN_MODULE
+    # Removed first: if the copy fails, no later node starts from counters this one has used.
+    shutil.rmtree(keystore)
+    subprocess.run(
+        ["docker", "cp", f"{container_name}:/persistence/{RLN_MODULE}", str(keystore)],
+        check=True, capture_output=True,
+    )
+    for lock in keystore.glob("*/rln_keystore.lock"):
+        lock.unlink()
+
+
+def _copy_wallet_back(node: DeliveryNode, container_name: str, wallet: Path) -> None:
+    """Replace the LEZ wallet in `wallet` with the node's synced one, keeping its
+    accounts and last synced block and dropping the config, which names the sequencer."""
+    # Until it is ready, the wallet rewrites storage.json once per block.
+    if lez_wallet_status(node).get("state") != "ready":
+        return
+    folder = wallet / LEZ_RLN_MODULE
+    shutil.rmtree(folder, ignore_errors=True)
+    subprocess.run(
+        ["docker", "cp", f"{container_name}:/persistence/{LEZ_RLN_MODULE}", str(folder)],
+        check=True, capture_output=True,
+    )
+    for path in folder.glob("*/wallet-home/*"):
+        if path.name not in LEZ_WALLET_FILES:
+            path.unlink()
 
 
 @pytest.fixture(scope="session")
@@ -147,6 +206,45 @@ def rln_membership(_rln_modules_or_skip: None) -> Path:
 
 
 @pytest.fixture(scope="session")
+def fleet_membership(
+    rln_membership: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    request: pytest.FixtureRequest,
+    worker_id: str,
+) -> Iterator[Path]:
+    """A copy of the RLN membership for the nodes that send through the fleet. Each
+    sender's keystore is copied back here when its test ends, so the next sender goes
+    on from its `message_id`s. Across runs, which restore the same counters, the file
+    named by E2E_FLEET_EPOCH_FILE holds the last epoch a run sent in, and this run
+    sends only in a later one; without the file it waits for the next epoch."""
+    if worker_id != "master" and not request.config.getoption("loadgroup"):
+        pytest.fail(
+            "the fleet tests go on from each other's message_ids, so they need one xdist "
+            "worker: run them with --dist=loadgroup, or without -n"
+        )
+    membership = tmp_path_factory.mktemp("fleet-membership")
+    shutil.copytree(rln_membership, membership, dirs_exist_ok=True)
+    epoch_file = os.environ.get("E2E_FLEET_EPOCH_FILE")
+    last_epoch = (
+        int(Path(epoch_file).read_text())
+        if epoch_file and Path(epoch_file).is_file()
+        else current_epoch()
+    )
+    wait_s = seconds_until_epoch(last_epoch + 1)
+    if wait_s:
+        starts = time.strftime("%H:%M:%S", time.localtime(time.time() + wait_s))
+        _announce(
+            request.config,
+            f"Waiting {wait_s:.0f} s, until {starts}, for an RLN epoch no earlier fleet run sent in",
+        )
+        time.sleep(wait_s)
+    yield membership
+    if epoch_file:
+        Path(epoch_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(epoch_file).write_text(f"{current_epoch()}\n")
+
+
+@pytest.fixture(scope="session")
 def lez_wallet(
     _e2e_env_or_skip: tuple[str, Path],
     _rln_modules_or_skip: None,
@@ -186,6 +284,22 @@ def lez_wallet(
     return wallet
 
 
+@pytest.fixture(scope="session")
+def fleet_wallet(fleet_membership: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """The folder that takes the wallets fleet nodes got ready. When the run ends it
+    replaces the wallet in E2E_LEZ_WALLET_DIR, which it empties if no node got its wallet
+    ready, so that a wallet no node can bring up is not kept. Set up after
+    `fleet_membership`, so that a run skipped for want of a membership leaves it alone."""
+    wallet = tmp_path_factory.mktemp("fleet-wallet")
+    yield wallet
+    wallet_dir = os.environ.get("E2E_LEZ_WALLET_DIR")
+    if wallet_dir:
+        saved = Path(wallet_dir) / LEZ_RLN_MODULE
+        shutil.rmtree(saved, ignore_errors=True)
+        if (wallet / LEZ_RLN_MODULE).exists():
+            shutil.copytree(wallet / LEZ_RLN_MODULE, saved)
+
+
 def _worker_subnet(worker_id: str) -> str:
     """The xdist worker's /24 of NETWORK_SUBNET: worker gw<n> takes the n-th, a run
     without xdist the first."""
@@ -196,16 +310,11 @@ def _worker_subnet(worker_id: str) -> str:
 @pytest.fixture(scope="session")
 def shared_docker_network(_e2e_env_or_skip: tuple[str, Path], worker_id: str) -> Iterator[str]:
     name = f"logosdelivery-e2e-{uuid.uuid4().hex[:8]}"
-    r = subprocess.run(
-        ["docker", "network", "create", "--subnet", _worker_subnet(worker_id), name],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        pytest.fail(f"failed to create docker network {name!r}: {r.stderr.strip()}")
+    _create_network(name, "--subnet", _worker_subnet(worker_id))
     try:
         yield name
     finally:
-        subprocess.run(["docker", "network", "rm", name], capture_output=True)
+        _remove_network(name)
 
 
 def _lez_sequencer_config(payer: str) -> dict:
@@ -464,6 +573,57 @@ def rln_node_factory(
             node = setup_rln_node(daemon, config_json, label, lez_registry.registry_id)
             if membership:
                 register_membership(node, lez_registry.fund, timeout=RLN_MEMBERSHIP_TIMEOUT_S)
+            return node
+
+        yield _create
+
+
+@pytest.fixture
+def fleet_node_factory(
+    _e2e_env_or_skip: tuple[str, Path],
+    _rln_modules_or_skip: None,
+    lez_wallet: Path,
+    fleet_wallet: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[Callable[..., DeliveryNode]]:
+    """Factory for nodes on the logos.test fleet, each in its own docker network so
+    that a test's nodes reach each other only through the fleet. Every node starts
+    with a copy of the wallet in `fleet_wallet`, else of `lez_wallet`, and once its
+    wallet is ready copies it into `fleet_wallet` when the test ends. Every node gets a
+    presets file whose `logos.test` entry turns proof validation on, which the module's
+    built-in entry leaves off. A node given `membership` starts with a copy of it and
+    copies its keystore back when the test ends."""
+    image, modules_dir = _e2e_env_or_skip
+
+    with ExitStack() as stack:
+        def _create(
+            label: str,
+            config_json: str,
+            *,
+            membership: Path | None = None,
+        ) -> DeliveryNode:
+            network = f"logosdelivery-fleet-{uuid.uuid4().hex[:8]}"
+            _create_network(network)
+            stack.callback(_remove_network, network)
+            persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
+            newest_wallet = fleet_wallet if (fleet_wallet / LEZ_RLN_MODULE).exists() else lez_wallet
+            shutil.copytree(newest_wallet, persistence_dir, dirs_exist_ok=True)
+            if membership:
+                shutil.copytree(membership, persistence_dir, dirs_exist_ok=True)
+            (persistence_dir / RLN_PRESETS_FILE).write_text(
+                make_rln_presets(enable_validation=True, registry_id=FLEET_REGISTRY_ID, preset=FLEET_PRESET)
+            )
+            daemon, container_name = _new_daemon(
+                image, modules_dir, network, label,
+                persistence_dir=persistence_dir,
+                env={RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}"},
+            )
+            stack.enter_context(daemon)
+            if membership:
+                stack.callback(_copy_keystore_back, container_name, membership)
+            stack.callback(_save_logs, container_name)
+            node = setup_rln_node(daemon, config_json, label, FLEET_REGISTRY_ID)
+            stack.callback(_copy_wallet_back, node, container_name, fleet_wallet)
             return node
 
         yield _create
