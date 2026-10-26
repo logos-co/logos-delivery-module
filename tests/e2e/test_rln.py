@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from libs.constants import CONTENT_TOPIC, PUBSUB_TOPIC
+from libs.constants import CONTENT_TOPIC, PUBSUB_TOPIC, RLN_VALID_MESSAGES
 from libs.helpers import (
     event_request_id,
     is_connected,
@@ -26,7 +26,6 @@ SEND_ERROR_TIMEOUT_S = 75.0
 RLN_MEMBERSHIP_TIMEOUT_S = 45.0
 
 VALIDATION_FAILURES = "libp2p_pubsub_validation_failure_total"
-RLN_VALID_MESSAGES = "logos_delivery_rln_valid_messages_total_total"
 
 
 @pytest.mark.rln
