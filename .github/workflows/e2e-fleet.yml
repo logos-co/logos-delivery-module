@@ -55,7 +55,8 @@ jobs:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           E2E_FLEET_EPOCH_FILE: ${{ runner.temp }}/fleet-epoch/epoch
 
-      # Also after a failure or a cancel, when pytest may not have written it. 600 s is the RLN epoch.
+      # The record the next run reads: written here so that a failed or cancelled run
+      # leaves one too. 600 s is the RLN epoch.
       - name: Record the last fleet epoch
         if: always()
         run: |
