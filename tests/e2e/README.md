@@ -253,8 +253,7 @@ smoke image and copies the CLI out of it, installs `.#lgx-portable` and its rele
 dependencies with `logosctl install`, runs the tests without RLN
 (`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. The e2e
 jobs set up through the composite action `.github/actions/setup-e2e`. The two in `ci.yml`
-run the tests on four xdist workers; `--dist=loadgroup` keeps the tests that share
-`node_a` and `node_b` on one.
+run the tests on four xdist workers.
 
 `e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests,
 except the `fleet` ones; it is not a required check. It builds logos-lez-rln through

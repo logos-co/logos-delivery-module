@@ -16,29 +16,43 @@ import pytest
 from libs.constants import CONTENT_TOPIC
 from libs.helpers import (
     SUBSCRIBE_GRACE_S,
+    DeliveryNode,
     event_content_topic,
     event_payload,
     event_request_id,
     event_source,
+    is_connected,
+    make_delivery_config,
+    node_multiaddr,
     parse_event,
     wait_for_event,
 )
 
 logger = logging.getLogger(__name__)
 
+CONNECTED_TIMEOUT_S = 60.0
 PROPAGATED_TIMEOUT_S = 40.0
 RECEIVED_TIMEOUT_S = 20.0
 
-# The tests share node_a and node_b, so one xdist worker runs them all.
-pytestmark = [pytest.mark.two_node, pytest.mark.xdist_group("message_delivery")]
+pytestmark = pytest.mark.two_node
 
 
-def test_two_nodes_propagation(node_a, node_b):
+def _peered_nodes(delivery_node_factory) -> tuple[DeliveryNode, DeliveryNode]:
+    """Node A, and node B dialing it through `staticnodes`, once A reports the connection."""
+    node_a = delivery_node_factory("A", make_delivery_config())
+    with node_a.watch() as events:
+        node_b = delivery_node_factory("B", make_delivery_config(static_peers=[node_multiaddr(node_a)]))
+        wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
+    return node_a, node_b
+
+
+def test_two_nodes_propagation(delivery_node_factory):
     """Gate: node A publishes; A observes messagePropagated for its requestId.
 
     A is the dialee (B dialed it via staticnodes), mirroring interop S06 where the
     sender is the node the peer connects to.
     """
+    node_a, node_b = _peered_nodes(delivery_node_factory)
     node_b.subscribe(CONTENT_TOPIC)
 
     with node_a.watch("messagePropagated") as w:
@@ -53,8 +67,9 @@ def test_two_nodes_propagation(node_a, node_b):
         assert rid == request_id, f"messagePropagated requestId {rid!r} != sent {request_id!r}"
 
 
-def test_bidirectional_propagation(node_a, node_b):
+def test_bidirectional_propagation(delivery_node_factory):
     """Both directions propagate: A→B and B→A."""
+    node_a, node_b = _peered_nodes(delivery_node_factory)
     node_a.subscribe(CONTENT_TOPIC)
     node_b.subscribe(CONTENT_TOPIC)
 
@@ -69,8 +84,9 @@ def test_bidirectional_propagation(node_a, node_b):
             assert rid == request_id, f"{sender.label}: propagated requestId {rid!r} != sent {request_id!r}"
 
 
-def test_two_nodes_message_received(node_a, node_b):
+def test_two_nodes_message_received(delivery_node_factory):
     """Node A subscribes; B publishes; A observes messageReceived for the topic."""
+    node_a, node_b = _peered_nodes(delivery_node_factory)
     node_a.subscribe(CONTENT_TOPIC)
     node_b.subscribe(CONTENT_TOPIC)
 
