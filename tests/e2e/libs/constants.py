@@ -10,6 +10,10 @@ CLUSTER_ID = "198"
 NUM_SHARDS_IN_NETWORK = 1
 
 NODE_TCP_PORT = 60000
+LIBP2P_TCP_PORT = 60001
+
+# The service every delivery service node advertises on kademlia service discovery.
+LOGOS_DELIVERY_SERVICE_ID = "/logos/delivery"
 
 CONTENT_TOPIC = "/test/1/logos-delivery-e2e/proto"
 # The network's one shard, which every content topic maps to.

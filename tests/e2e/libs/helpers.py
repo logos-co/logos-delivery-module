@@ -9,6 +9,7 @@ messagePropagated / messageSent / messageError / connectionStateChanged.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -27,6 +28,8 @@ from libs.constants import (
     LEZ_CLOCK_50_ACCOUNT,
     LEZ_CLOCK_SHARD,
     LEZ_SEQUENCER_URL,
+    LIBP2P_TCP_PORT,
+    LOGOS_DELIVERY_SERVICE_ID,
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
@@ -38,6 +41,7 @@ logger = logging.getLogger(__name__)
 MODULE = "delivery_module"
 RLN_MODULE = "liblogos_rln_module"
 LEZ_RLN_MODULE = "liblogos_lez_rln_module"
+LIBP2P_MODULE = "libp2p_module"
 
 SUBSCRIBE_GRACE_S = 0.5
 
@@ -66,11 +70,14 @@ def make_delivery_config(
     relay: bool = True,
     lightpush: bool = False,
     lightpush_node: Optional[str] = None,
+    plugin_kad_discovery: bool = False,
+    kad_bootstrap_nodes: Optional[list] = None,
 ) -> str:
     """JSON config for `createNode` — relay-only, single-shard, discovery-off,
     matching the two-node relay setup proven by logos-delivery-interop-tests.
     `lightpush` serves light push; a node without relay sends through
-    `lightpush_node`."""
+    `lightpush_node`. `plugin_kad_discovery` hosts kademlia discovery on
+    libp2p_module, bootstrapped from `kad_bootstrap_nodes`."""
     cfg: dict[str, Any] = {
         "logLevel": "DEBUG",
         "listenAddress": "0.0.0.0",
@@ -90,6 +97,10 @@ def make_delivery_config(
         cfg["staticnodes"] = static_peers
     if lightpush_node:
         cfg["lightpushnode"] = lightpush_node
+    if plugin_kad_discovery:
+        cfg["pluginKadDiscovery"] = True
+    if kad_bootstrap_nodes:
+        cfg["kadBootstrapNodes"] = kad_bootstrap_nodes
     return json.dumps(cfg)
 
 
@@ -116,19 +127,23 @@ def make_rln_presets(*, enable_validation: bool, registry_id: str, preset: str =
     })
 
 
-def call_result(client, method: str, *args: Any, timeout: Optional[float] = None) -> dict:
-    """Call a delivery method and return its StdLogosResult dict. No assertion."""
-    result = client.call(MODULE, method, *args, timeout=timeout)
+def call_result(
+    client, method: str, *args: Any, timeout: Optional[float] = None, module: str = MODULE
+) -> dict:
+    """Call a method of `module` and return its StdLogosResult dict. No assertion."""
+    result = client.call(module, method, *args, timeout=timeout)
     if not isinstance(result, dict):
-        raise AssertionError(f"{method} returned non-dict result: {result!r}")
+        raise AssertionError(f"{module} {method} returned non-dict result: {result!r}")
     return result
 
 
-def call_ok(client, method: str, *args: Any, timeout: Optional[float] = None) -> Any:
-    """Call a delivery method, assert StdLogosResult.success, return its value."""
-    result = call_result(client, method, *args, timeout=timeout)
+def call_ok(
+    client, method: str, *args: Any, timeout: Optional[float] = None, module: str = MODULE
+) -> Any:
+    """Call a method of `module`, assert StdLogosResult.success, return its value."""
+    result = call_result(client, method, *args, timeout=timeout, module=module)
     if not result.get("success"):
-        raise AssertionError(f"{method}({args!r}) failed: {result.get('error')!r}")
+        raise AssertionError(f"{module} {method}({args!r}) failed: {result.get('error')!r}")
     return result.get("value")
 
 
@@ -220,6 +235,43 @@ def setup_delivery_node(
         wait_for_rln_ready(node, timeout=RLN_READY_TIMEOUT_S)
     start_node(node)
     return node
+
+
+def setup_kad_bootstrap(daemon) -> str:
+    """load_module → createNode → start of a libp2p_module node that serves kademlia
+    service discovery. Returns its multiaddr on the daemon's docker network."""
+    client = daemon.client()
+    client.load_module(LIBP2P_MODULE)
+    config = {"addrs": [f"/ip4/0.0.0.0/tcp/{LIBP2P_TCP_PORT}"], "mountServiceDiscovery": True}
+    call_ok(client, "createNode", json.dumps(config), module=LIBP2P_MODULE)
+    call_ok(client, "start", module=LIBP2P_MODULE)
+    peer_id = call_ok(client, "getNodeInfo", "PeerId", module=LIBP2P_MODULE)
+    return f"/ip4/{container_ip(daemon)}/tcp/{LIBP2P_TCP_PORT}/p2p/{peer_id}"
+
+
+def wait_for_advert(client, service_id: str, peer_id: str, *, timeout: float) -> dict:
+    """Poll libp2p_module's `discoLookup` for `service_id` until it returns
+    `peer_id`'s record, and return the record."""
+    def found():
+        records = call_ok(client, "discoLookup", service_id, "", module=LIBP2P_MODULE)
+        return next((record for record in records if record["peerId"] == peer_id), None)
+
+    return wait_until(found, timeout=timeout, message=f"no {service_id} advert of {peer_id}")
+
+
+def self_advertisement_data(record: dict) -> dict:
+    """The `/logos/delivery` service data of a lookup record, laid out as logos-delivery's
+    `selfAdvertisementData` writes it."""
+    service, = (service for service in record["services"] if service["id"] == LOGOS_DELIVERY_SERVICE_ID)
+    # `data` is base64 of the advertised bytes, which are base64 text themselves.
+    raw = base64.b64decode(base64.b64decode(service["data"]))
+    bitmap = raw[4:]
+    return {
+        "version": raw[0],
+        "clusterId": int.from_bytes(raw[1:3], "big"),
+        "capabilities": raw[3],
+        "shards": [shard for shard in range(len(bitmap) * 8) if bitmap[shard // 8] >> (shard % 8) & 1],
+    }
 
 
 def start_node(node: DeliveryNode) -> None:
@@ -444,7 +496,7 @@ def node_multiaddr(node: DeliveryNode) -> str:
     """
     raw = node.get_node_info("Multiaddrs")
     addr = _first_multiaddr(raw)
-    ip = _container_ip(node.daemon)
+    ip = container_ip(node.daemon)
     routable = re.sub(r"/ip4/[^/]+/", f"/ip4/{ip}/", addr, count=1)
     if "/ip4/" not in routable:
         raise AssertionError(f"multiaddr has no /ip4/ segment to rewrite: {addr!r}")
@@ -460,7 +512,7 @@ def _first_multiaddr(raw: str) -> str:
     raise AssertionError(f"no multiaddr in Multiaddrs: {raw!r}")
 
 
-def _container_ip(daemon) -> str:
+def container_ip(daemon) -> str:
     fmt = '{{(index .NetworkSettings.Networks "' + str(daemon.network) + '").IPAddress}}'
     r = subprocess.run(
         ["docker", "inspect", "-f", fmt, daemon.container_id],

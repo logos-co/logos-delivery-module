@@ -86,12 +86,13 @@ runs:
         docker rm logosctl-cli
         echo "$RUNNER_TEMP/logosctl/bin" >> $GITHUB_PATH
 
-    # This step installs the released RLN modules at pinned versions, then the module
-    # built from this commit. liblogos_rln_module depends on liblogos_lez_rln_module
-    # without naming a version, so the step installs lez first at its own pin and
-    # installs rln without its dependencies. Bump these versions by hand when
-    # flake.lock moves the RLN modules. The step skips libp2p_module because no test
-    # uses kad service discovery.
+    # This step installs the released RLN modules and libp2p_module at pinned versions,
+    # then the module built from this commit. liblogos_rln_module depends on
+    # liblogos_lez_rln_module without naming a version, so the step installs lez first
+    # at its own pin and installs rln without its dependencies. Bump these versions by
+    # hand when flake.lock moves the modules. flake.lock pins libp2p_module at its
+    # v1.0.0 tag, but the catalog's 1.0.0 is an older build without the createNode
+    # that delivery_module calls, so the step installs 1.1.0.
     - name: Install the modules with logosctl
       shell: bash
       env:
@@ -101,6 +102,7 @@ runs:
         logosctl catalog refresh
         logosctl install liblogos_lez_rln_module --version 5.1.0 -y
         logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
+        logosctl install libp2p_module --version 1.1.0 -y
         logosctl install result/*.lgx -y
         logosctl daemon stop
         echo "LOGOS_MODULES_DIR=$LOGOSCTL_CONFIG_DIR/modules" >> $GITHUB_ENV
