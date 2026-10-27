@@ -10,8 +10,8 @@ each test builds its own nodes:
   * `lez_wallet` (session scope) — one daemon whose LEZ module creates a new wallet
     without syncing. A node on the LEZ testnet starts from a copy of that wallet.
 
-`_e2e_env`, `_rln_modules` and `rln_membership` fail the test when a prerequisite is
-missing.
+`_e2e_env`, `_rln_modules`, `_libp2p_module` and `rln_membership` fail the test when
+a prerequisite is missing.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from libs.constants import FLEET_PRESET, FLEET_REGISTRY_ID, LEZ_SEQUENCER_PORT, 
 from libs.helpers import (
     LEZ_RLN_MODULE,
     LEZ_SEQUENCER_ENV,
+    LIBP2P_MODULE,
     RLN_MODULE,
     RLN_PRESETS_ENV,
     RLN_PRESETS_FILE,
@@ -161,6 +162,14 @@ def _rln_modules(_e2e_env: tuple[str, Path]) -> None:
     for module in (RLN_MODULE, LEZ_RLN_MODULE):
         if not (modules_dir / module / "manifest.json").is_file():
             pytest.fail(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
+
+
+@pytest.fixture(scope="session")
+def _libp2p_module(_e2e_env: tuple[str, Path]) -> None:
+    """Fails unless LOGOS_MODULES_DIR also holds libp2p_module."""
+    _, modules_dir = _e2e_env
+    if not (modules_dir / LIBP2P_MODULE / "manifest.json").is_file():
+        pytest.fail(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {LIBP2P_MODULE}/manifest.json")
 
 
 @pytest.fixture(scope="session")
