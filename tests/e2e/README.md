@@ -240,7 +240,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
 | `store` / `filter` | `false` | not exercised here |
 | `lightpush` / `lightpushnode` | `false` / unset | the light push test only: `true` on its server, and on its client (`relay: false`) the server's multiaddr |
-| `pluginKadDiscovery` / `kadBootstrapNodes` | unset | the service discovery tests only: `true` and the bootstrap's multiaddr |
+| `pluginKadDiscovery` / `kadBootstrapNodes` | unset | the service discovery tests only: `true` and the libp2p_module bootstrap's multiaddr |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
 > A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP

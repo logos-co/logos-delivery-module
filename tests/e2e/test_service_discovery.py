@@ -10,7 +10,7 @@ from libs.helpers import (
     container_ip,
     make_delivery_config,
     self_advertisement_data,
-    setup_kad_bootstrap,
+    setup_libp2p_bootstrap,
     wait_for_advert,
 )
 
@@ -25,12 +25,14 @@ pytestmark = pytest.mark.usefixtures("_libp2p_module_or_skip")
 def test_relay_node_advertises_through_libp2p_module(daemon_factory, delivery_node_factory):
     """Another libp2p_module node finds the relay node's own peer id, announced address,
     cluster, capabilities and shard."""
-    bootstrap = daemon_factory("bootstrap")
-    config = make_delivery_config(plugin_kad_discovery=True, kad_bootstrap_nodes=[setup_kad_bootstrap(bootstrap)])
+    libp2p_bootstrap = daemon_factory("libp2p-bootstrap")
+    config = make_delivery_config(
+        plugin_kad_discovery=True, kad_bootstrap_nodes=[setup_libp2p_bootstrap(libp2p_bootstrap)]
+    )
     node = delivery_node_factory("A", config)
 
     record = wait_for_advert(
-        bootstrap.client(), LOGOS_DELIVERY_SERVICE_ID, node.get_node_info("PeerId"), timeout=ADVERT_TIMEOUT_S
+        libp2p_bootstrap.client(), LOGOS_DELIVERY_SERVICE_ID, node.get_node_info("PeerId"), timeout=ADVERT_TIMEOUT_S
     )
 
     address = f"/ip4/{container_ip(node.daemon)}/tcp/{NODE_TCP_PORT}"

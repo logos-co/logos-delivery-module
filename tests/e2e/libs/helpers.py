@@ -237,9 +237,10 @@ def setup_delivery_node(
     return node
 
 
-def setup_kad_bootstrap(daemon) -> str:
-    """load_module → createNode → start of a libp2p_module node that serves kademlia
-    service discovery. Returns its multiaddr on the daemon's docker network."""
+def setup_libp2p_bootstrap(daemon) -> str:
+    """load_module → createNode → start of libp2p_module alone, as the DHT bootstrap
+    serving kademlia service discovery. Returns its multiaddr on the daemon's docker
+    network."""
     client = daemon.client()
     client.load_module(LIBP2P_MODULE)
     config = {"addrs": [f"/ip4/0.0.0.0/tcp/{LIBP2P_TCP_PORT}"], "mountServiceDiscovery": True}
