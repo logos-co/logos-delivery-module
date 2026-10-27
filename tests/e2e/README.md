@@ -202,7 +202,7 @@ cd tests/e2e
 pip install -r requirements.txt
 pip install --no-deps --force-reinstall \
   "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@$LOGOSCORE_PY_REV"
-pytest -v -m "not fleet" -n 4 --dist=loadgroup
+pytest -v -m "not fleet" -n 4
 ```
 
 The sequencer image is amd64 only; on Apple silicon Docker runs it emulated.
@@ -251,7 +251,7 @@ already uses that range, `docker network create` fails with "Pool overlaps"; set
 `.github/workflows/ci.yml` has an `e2e-tests` job (ubuntu-latest) that builds the logosctl
 smoke image and copies the CLI out of it, installs `.#lgx-portable` and its released
 dependencies with `logosctl install`, runs the tests without RLN
-(`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. The e2e
+(`pytest -v -m "not rln" -n 4`), and uploads logs on failure. The e2e
 jobs set up through the composite action `.github/actions/setup-e2e`. The two in `ci.yml`
 run the tests on four xdist workers.
 

@@ -486,8 +486,7 @@ def daemon_factory(
     shared_docker_network: str,
 ) -> Iterator[Callable[..., Any]]:
     """Factory for started logosctl containers with nothing loaded, on the worker's
-    shared docker network, or with `own_network` on a new network of their own. Each
-    is stopped and its log saved when the test ends."""
+    shared docker network, or with `own_network` on a new network of their own."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
