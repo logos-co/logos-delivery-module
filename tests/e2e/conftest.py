@@ -64,6 +64,7 @@ from libs.helpers import (
 )
 
 MESH_STABILIZATION_S = 12.0
+DAEMON_START_ATTEMPTS = 3
 
 LEZ_WALLET_FILES = ("storage.json", "payer.json")
 LEZ_WALLET_TIMEOUT_S = 60.0
@@ -122,6 +123,10 @@ def _create_network(name: str, *options: str) -> None:
 
 def _remove_network(name: str) -> None:
     subprocess.run(["docker", "network", "rm", name], capture_output=True)
+
+
+def _remove_container(name: str) -> None:
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 
 
 def _copy_keystore_back(container_name: str, membership: Path) -> None:
@@ -242,13 +247,12 @@ def lez_wallet(
     the testnet starts from so that its wallet skips the sync from block 0. A daemon
     whose sequencer is unreachable creates it without syncing."""
     image, modules_dir = _e2e_env_or_skip
-    daemon, container_name = _new_daemon(
+    daemon, container_name = _start_daemon(
         image, modules_dir, shared_docker_network, "lez-wallet",
         env={LEZ_SEQUENCER_ENV: UNREACHABLE_SEQUENCER},
     )
     wallet = tmp_path_factory.mktemp("lez-wallet")
     try:
-        daemon.start()
         node = DeliveryNode(daemon.client(), daemon, "lez-wallet")
         node.client.load_module(LEZ_RLN_MODULE)
         wait_for_lez_wallet(node, timeout=LEZ_WALLET_TIMEOUT_S)
@@ -430,7 +434,7 @@ def lez_registry(
         subprocess.run(["docker", "rm", "-f", "-v", container_name], capture_output=True)
 
 
-def _new_daemon(
+def _start_daemon(
     image: str,
     modules_dir: Path,
     network: str,
@@ -439,20 +443,31 @@ def _new_daemon(
     persistence_dir: Path | None = None,
     env: dict[str, str] | None = None,
 ):
-    from logosctl import LogosctlDockerDaemon  # noqa: PLC0415
+    """A started logosctl container. A start that docker refuses with a host port
+    already allocated is retried under a new container name.
+    TODO: logos-logoscore-py#37"""
+    from logosctl import LogosctlDockerDaemon, LogosctlError  # noqa: PLC0415
 
-    container_name = f"logosctl-{label.lower()}-{uuid.uuid4().hex[:8]}"
-    daemon = LogosctlDockerDaemon(
-        image=image,
-        modules_dir=modules_dir,
-        container_name=container_name,
-        network=network,
-        persistence_dir=persistence_dir,
-        env=env,
-        startup_timeout=60.0,
-        extra_args=["--verbose"],
-    )
-    return daemon, container_name
+    for attempt in range(1, DAEMON_START_ATTEMPTS + 1):
+        container_name = f"logosctl-{label.lower()}-{uuid.uuid4().hex[:8]}"
+        daemon = LogosctlDockerDaemon(
+            image=image,
+            modules_dir=modules_dir,
+            container_name=container_name,
+            network=network,
+            persistence_dir=persistence_dir,
+            env=env,
+            startup_timeout=60.0,
+            extra_args=["--verbose"],
+        )
+        try:
+            daemon.start()
+            return daemon, container_name
+        except LogosctlError as e:
+            daemon.stop()
+            _remove_container(container_name)
+            if "port is already allocated" not in str(e) or attempt == DAEMON_START_ATTEMPTS:
+                raise
 
 
 @pytest.fixture
@@ -460,9 +475,8 @@ def solo_daemon(_e2e_env_or_skip: tuple[str, Path], shared_docker_network: str) 
     """A fresh, started logosctl container — module mounted, nothing loaded yet.
     The test drives load_module/createNode/start/stop itself."""
     image, modules_dir = _e2e_env_or_skip
-    daemon, container_name = _new_daemon(image, modules_dir, shared_docker_network, "solo")
+    daemon, container_name = _start_daemon(image, modules_dir, shared_docker_network, "solo")
     try:
-        daemon.start()
         yield daemon
     finally:
         _save_logs(container_name)
@@ -481,8 +495,8 @@ def delivery_node_factory(
 
     with ExitStack() as stack:
         def _create(label: str, config_json: str) -> DeliveryNode:
-            daemon, container_name = _new_daemon(image, modules_dir, shared_docker_network, label)
-            stack.enter_context(daemon)
+            daemon, container_name = _start_daemon(image, modules_dir, shared_docker_network, label)
+            stack.callback(daemon.stop)
             stack.callback(_save_logs, container_name)
             return setup_delivery_node(daemon, config_json, label)
 
@@ -531,7 +545,7 @@ def rln_node_factory(
             (persistence_dir / RLN_PRESETS_FILE).write_text(
                 make_rln_presets(enable_validation=enable_validation, registry_id=lez_registry.registry_id)
             )
-            daemon, container_name = _new_daemon(
+            daemon, container_name = _start_daemon(
                 image, modules_dir, shared_docker_network, label,
                 persistence_dir=persistence_dir,
                 env={
@@ -539,7 +553,7 @@ def rln_node_factory(
                     LEZ_SEQUENCER_ENV: lez_registry.sequencer_url,
                 },
             )
-            stack.enter_context(daemon)
+            stack.callback(daemon.stop)
             stack.callback(_save_logs, container_name)
             node = setup_rln_node(daemon, config_json, label, lez_registry.registry_id)
             if membership:
@@ -581,12 +595,12 @@ def fleet_node_factory(
             (persistence_dir / RLN_PRESETS_FILE).write_text(
                 make_rln_presets(enable_validation=True, registry_id=FLEET_REGISTRY_ID, preset=FLEET_PRESET)
             )
-            daemon, container_name = _new_daemon(
+            daemon, container_name = _start_daemon(
                 image, modules_dir, network, label,
                 persistence_dir=persistence_dir,
                 env={RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}"},
             )
-            stack.enter_context(daemon)
+            stack.callback(daemon.stop)
             if membership:
                 stack.callback(_copy_keystore_back, container_name, membership)
             stack.callback(_save_logs, container_name)
