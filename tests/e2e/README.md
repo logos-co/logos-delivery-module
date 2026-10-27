@@ -190,7 +190,7 @@ cd tests/e2e
 pip install -r requirements.txt
 pip install --no-deps --force-reinstall \
   "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@<logoscore-py-commit>"
-pytest -v -m "not fleet" -n 4 --dist=loadgroup
+pytest -v -m "not fleet" -n 4
 ```
 
 The sequencer image is amd64 only, so Docker on Apple silicon runs it emulated.
