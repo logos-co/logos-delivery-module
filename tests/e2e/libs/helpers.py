@@ -49,6 +49,7 @@ RLN_PRESETS_ENV = "LOGOS_DELIVERY_RLN_PRESETS"
 RLN_PRESETS_FILE = "rln-presets.json"
 RLN_READY_TIMEOUT_S = 25.0
 NODE_STARTED_TIMEOUT_S = 30.0
+NODE_STOPPED_TIMEOUT_S = 30.0
 LEZ_SEQUENCER_ENV = "LEZ_RLN_SEQUENCER"
 LEZ_RPC_TIMEOUT_S = 5.0
 # liblogos_rln_module error classes that clear up by themselves, e.g. while the LEZ
@@ -68,13 +69,17 @@ def make_delivery_config(
     relay: bool = True,
     lightpush: bool = False,
     lightpush_node: Optional[str] = None,
+    enable_kad_discovery: bool = False,
     plugin_kad_discovery: bool = False,
     kad_bootstrap_nodes: Optional[list] = None,
+    kad_service_lookup_interval_sec: Optional[int] = None,
 ) -> str:
     """JSON config for `createNode` — relay-only, single-shard, discovery-off,
     matching the two-node relay setup proven by logos-delivery-interop-tests. A node
-    without relay sends through `lightpush_node`. `plugin_kad_discovery` hosts kademlia
-    discovery on libp2p_module, bootstrapped from `kad_bootstrap_nodes`."""
+    without relay sends through `lightpush_node`. `enable_kad_discovery` runs kademlia
+    discovery in the node, `plugin_kad_discovery` hosts it on libp2p_module; both
+    bootstrap from `kad_bootstrap_nodes` and repeat their lookups every
+    `kad_service_lookup_interval_sec`."""
     cfg: dict[str, Any] = {
         "logLevel": "DEBUG",
         "listenAddress": "0.0.0.0",
@@ -94,10 +99,14 @@ def make_delivery_config(
         cfg["staticnodes"] = static_peers
     if lightpush_node:
         cfg["lightpushnode"] = lightpush_node
+    if enable_kad_discovery:
+        cfg["enableKadDiscovery"] = True
     if plugin_kad_discovery:
         cfg["pluginKadDiscovery"] = True
     if kad_bootstrap_nodes:
         cfg["kadBootstrapNodes"] = kad_bootstrap_nodes
+    if kad_service_lookup_interval_sec:
+        cfg["kadServiceLookupIntervalSec"] = kad_service_lookup_interval_sec
     return json.dumps(cfg)
 
 
@@ -281,6 +290,17 @@ def start_node(node: DeliveryNode) -> None:
         event = wait_for_event(events, "nodeStarted", timeout=NODE_STARTED_TIMEOUT_S)
     if event_arg(event, 0) is not True:
         raise AssertionError(f"{node.label}: start failed: {event_arg(event, 1)!r}")
+
+
+def stop_node(node: DeliveryNode) -> None:
+    """`stop` returns once the request is dispatched; wait for its `nodeStopped`.
+    Raises unless the node stopped."""
+    with node.watch() as events:
+        time.sleep(SUBSCRIBE_GRACE_S)
+        node.stop()
+        event = wait_for_event(events, "nodeStopped", timeout=NODE_STOPPED_TIMEOUT_S)
+    if event_arg(event, 0) is not True:
+        raise AssertionError(f"{node.label}: stop failed: {event_arg(event, 1)!r}")
 
 
 def in_parallel(*calls: Callable[[], Any]) -> list:
