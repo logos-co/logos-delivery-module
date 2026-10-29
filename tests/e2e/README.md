@@ -47,6 +47,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_lightpushed_message_is_stored` | 1 | an Edge sender's message is in a fleet store node |
 | `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
 | `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
+| `test_relay_node_advertises_through_libp2p_module` | 2 | another `libp2p_module` node finds a relay node's advert with its peer id, address, cluster, capabilities and shard (see "Service discovery") |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -128,6 +129,15 @@ E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/
 `storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes
 (`FLEET_ENTRY_NODES`) in turn.
 
+## Service discovery
+
+`test_service_discovery.py` runs nodes whose kademlia service discovery is hosted on
+`libp2p_module` (`pluginKadDiscovery`). Each test starts a daemon running only
+`libp2p_module` as the DHT bootstrap and names it in its nodes' `kadBootstrapNodes`;
+loading `delivery_module` loads the installed `libp2p_module` with it. `delivery_module`
+reports nothing about discovery, so the tests read adverts with `libp2p_module`'s
+`discoLookup`.
+
 ## Prerequisites
 
 - `docker` available on host.
@@ -146,6 +156,8 @@ E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/
 - For the `fleet` tests: the testnet membership in `E2E_RLN_MEMBERSHIP_DIR` (see "RLN";
   without it they skip), outbound HTTPS to `testnet.lez.logos.co`, and outbound TCP to
   the `logos.test` fleet (port 30303).
+- For `test_service_discovery.py`: `libp2p_module` in `LOGOS_MODULES_DIR`. Without it
+  those tests skip.
 
 If any of these is missing, all e2e tests **skip** with a clear reason.
 
@@ -169,15 +181,15 @@ docker rm logosctl-cli
 export PATH="/tmp/logosctl/bin:$PATH"
 
 # 2. Build the module and install it into its own logosctl session, next to the
-#    released RLN modules. CI runs the same commands. Bump these versions by hand
-#    when flake.lock moves the RLN modules. No test uses kad service discovery, so
-#    libp2p_module is not installed.
+#    released RLN modules and libp2p_module. CI runs the same commands. Bump these
+#    versions by hand when flake.lock moves the modules.
 nix build .#lgx-portable
 export LOGOSCTL_CONFIG_DIR=/tmp/logosctl-modules
 logosctl daemon start --detach
 logosctl catalog refresh
 logosctl install liblogos_lez_rln_module --version 5.1.0 -y
 logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
+logosctl install libp2p_module --version 1.1.0 -y
 logosctl install result/*.lgx -y
 logosctl daemon stop
 export LOGOS_MODULES_DIR=$LOGOSCTL_CONFIG_DIR/modules
@@ -228,6 +240,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
 | `store` / `filter` | `false` | not exercised here |
 | `lightpush` / `lightpushnode` | `false` / unset | the light push test only: `true` on its server, and on its client (`relay: false`) the server's multiaddr |
+| `pluginKadDiscovery` / `kadBootstrapNodes` | unset | the service discovery tests only: `true` and the libp2p_module bootstrap's multiaddr |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
 > A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP

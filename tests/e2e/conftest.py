@@ -13,8 +13,9 @@ each test builds its own nodes:
     without syncing; a node on the LEZ testnet starts from a copy of it.
 
 Every prerequisite (docker, the logosctl image, the built module layout) is
-gated by `_e2e_env_or_skip`, the RLN modules by `_rln_modules_or_skip`, and the
-local LEZ chain by `lez_registry`, so the suite skips cleanly when run without setup.
+gated by `_e2e_env_or_skip`, the RLN modules by `_rln_modules_or_skip`, libp2p_module
+by `_libp2p_module_or_skip`, and the local LEZ chain by `lez_registry`, so the suite
+skips cleanly when run without setup.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ from libs.constants import FLEET_PRESET, FLEET_REGISTRY_ID, LEZ_SEQUENCER_PORT, 
 from libs.helpers import (
     LEZ_RLN_MODULE,
     LEZ_SEQUENCER_ENV,
+    LIBP2P_MODULE,
     RLN_MEMBERSHIP_TIMEOUT_S,
     RLN_MODULE,
     RLN_PRESETS_ENV,
@@ -173,6 +175,15 @@ def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
     for module in (RLN_MODULE, LEZ_RLN_MODULE):
         if not (modules_dir / module / "manifest.json").is_file():
             pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
+
+
+@pytest.fixture(scope="session")
+def _libp2p_module_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
+    """Skip unless LOGOS_MODULES_DIR also holds libp2p_module (CI installs it next to
+    delivery_module)."""
+    _, modules_dir = _e2e_env_or_skip
+    if not (modules_dir / LIBP2P_MODULE / "manifest.json").is_file():
+        pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {LIBP2P_MODULE}/manifest.json")
 
 
 @pytest.fixture(scope="session")
