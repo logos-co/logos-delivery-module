@@ -1,6 +1,6 @@
 """Fixtures for the delivery_module e2e suite.
 
-Three daemon flavours:
+Four daemon flavours:
   * `solo_daemon` (function scope) — one fresh logosctl container per test, used
     by the single-node lifecycle/query tests. Fresh because createNode is
     once-per-context: a started node can't be re-created, so tests can't share one.
@@ -10,6 +10,8 @@ Three daemon flavours:
   * `rln_node_factory` (module scope) — daemons with RLN turned on through a
     presets file in each one's persistence dir, on the RLN registry of a local
     LEZ sequencer (`lez_registry`), used by the RLN tests.
+  * `lez_wallet` (session scope) — one daemon whose LEZ module creates a new wallet
+    without syncing; a node on the LEZ testnet starts from a copy of it.
 
 Every prerequisite (docker, the logosctl image, the built module layout) is
 gated by `_e2e_env_or_skip`, the RLN modules by `_rln_modules_or_skip`, and the
@@ -44,6 +46,7 @@ from libs.helpers import (
     DeliveryNode,
     base58_to_hex,
     lez_clock_ms,
+    lez_last_block_id,
     lez_rpc,
     make_delivery_config,
     make_rln_presets,
@@ -51,10 +54,15 @@ from libs.helpers import (
     register_membership,
     setup_delivery_node,
     setup_rln_node,
+    wait_for_lez_wallet,
     wait_until,
 )
 
 MESH_STABILIZATION_S = 12.0
+
+LEZ_WALLET_FILES = ("storage.json", "payer.json")
+LEZ_WALLET_TIMEOUT_S = 60.0
+UNREACHABLE_SEQUENCER = "http://127.0.0.1:1"
 
 LEZ_RLN_TOOLS = ("mint_payer", "run_setup", "fund_account")
 LEZ_START_TIMEOUT_S = 60.0
@@ -121,6 +129,61 @@ def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
     for module in (RLN_MODULE, LEZ_RLN_MODULE):
         if not (modules_dir / module / "manifest.json").is_file():
             pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
+
+
+@pytest.fixture(scope="session")
+def rln_membership(_rln_modules_or_skip: None) -> Path:
+    """The RLN membership on the LEZ testnet in E2E_RLN_MEMBERSHIP_DIR: module folders
+    laid out like a daemon's persistence dir (`<module>/<instance>/`). Skips when the
+    variable is unset, fails when it holds no keystore."""
+    membership_dir = os.environ.get("E2E_RLN_MEMBERSHIP_DIR")
+    if not membership_dir:
+        pytest.skip("E2E_RLN_MEMBERSHIP_DIR not set")
+    if not any(Path(membership_dir).glob(f"{RLN_MODULE}/*/rln_sealed.json")):
+        pytest.fail(
+            f"E2E_RLN_MEMBERSHIP_DIR={membership_dir} holds no {RLN_MODULE}/<instance>/rln_sealed.json"
+        )
+    return Path(membership_dir)
+
+
+@pytest.fixture(scope="session")
+def lez_wallet(
+    _e2e_env_or_skip: tuple[str, Path],
+    _rln_modules_or_skip: None,
+    shared_docker_network: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """A new LEZ wallet with `last_synced_block` at the testnet's tip, which a node on
+    the testnet starts from so that its wallet skips the sync from block 0. A daemon
+    whose sequencer is unreachable creates it without syncing."""
+    image, modules_dir = _e2e_env_or_skip
+    daemon, container_name = _new_daemon(
+        image, modules_dir, shared_docker_network, "lez-wallet",
+        env={LEZ_SEQUENCER_ENV: UNREACHABLE_SEQUENCER},
+    )
+    wallet = tmp_path_factory.mktemp("lez-wallet")
+    try:
+        daemon.start()
+        node = DeliveryNode(daemon.client(), daemon, "lez-wallet")
+        node.client.load_module(LEZ_RLN_MODULE)
+        wait_for_lez_wallet(node, timeout=LEZ_WALLET_TIMEOUT_S)
+        subprocess.run(
+            ["docker", "cp", f"{container_name}:/persistence/{LEZ_RLN_MODULE}", str(wallet / LEZ_RLN_MODULE)],
+            check=True, capture_output=True,
+        )
+    finally:
+        _save_logs(container_name)
+        daemon.stop()
+    wallet_home, = wallet.glob(f"{LEZ_RLN_MODULE}/*/wallet-home")
+    # wallet_config.json names the unreachable sequencer; each node writes its own.
+    for path in wallet_home.iterdir():
+        if path.name not in LEZ_WALLET_FILES:
+            path.unlink()
+    storage_path = wallet_home / "storage.json"
+    storage = json.loads(storage_path.read_text())
+    storage["last_synced_block"] = lez_last_block_id()
+    storage_path.write_text(json.dumps(storage))
+    return wallet
 
 
 def _worker_subnet(worker_id: str) -> str:

@@ -84,6 +84,16 @@ node's LEZ payer with logos-lez-rln's `fund_account`, and the RLN module registe
 itself. Funding waits until the chain's `CLOCK_50` has ticked, since the registry
 refuses a registration before that and the module does not retry it.
 
+A node on the LEZ testnet starts from `lez_wallet` and sends with `rln_membership`. Its
+LEZ wallet syncs the testnet from the block after its last synced one, and RLN waits for
+it: from block 0 that takes several minutes. So `lez_wallet` is one new wallet per
+session: a daemon whose sequencer (`LEZ_RLN_SEQUENCER`) is unreachable creates it without
+syncing, and its `last_synced_block` is then set to the testnet sequencer's
+`getLastBlockId`. The wallet has no private notes to find in the blocks it skips. Its
+config, which names the sequencer, is left out, so each node writes its own.
+`rln_membership` is the testnet membership in `E2E_RLN_MEMBERSHIP_DIR`, a directory
+holding `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`).
+
 ## Prerequisites
 
 - `docker` available on host.
@@ -203,8 +213,8 @@ already uses that range, `docker network create` fails with "Pool overlaps"; set
 
 `.github/workflows/ci.yml` has an `e2e-tests` job (ubuntu-latest) that builds the logosctl
 smoke image and copies the CLI out of it, installs `.#lgx-portable` and its released
-dependencies with `logosctl install`, runs `pytest -v -n 4 --dist=loadgroup`, and uploads
-logs on failure. Both e2e jobs
+dependencies with `logosctl install`, runs the tests without RLN
+(`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. Both e2e jobs
 set up through the composite action `.github/actions/setup-e2e`, and run the tests on
 four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
 on one.
@@ -213,3 +223,16 @@ on one.
 is not a required check. It builds logos-lez-rln through `.github/actions/build-lez-rln`
 (from the Actions cache when its pin is unchanged) and pulls the sequencer image, pinned
 by digest in `ci.yml`.
+
+`.github/actions/restore-rln-membership` unpacks the testnet membership from the
+repository secret `RLN_KEYSTORE` into `E2E_RLN_MEMBERSHIP_DIR`. The secret is replaced
+after every renewal from the logosctl config dir that holds the membership:
+
+```bash
+COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \
+  -C <config-dir>/data liblogos_rln_module
+tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four files, no lock
+base64 < rln-keystore.tar.gz > rln-keystore.b64
+gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
+rm rln-keystore.tar.gz rln-keystore.b64
+```

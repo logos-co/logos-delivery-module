@@ -24,6 +24,7 @@ from libs.constants import (
     CLUSTER_ID,
     LEZ_CLOCK_50_ACCOUNT,
     LEZ_CLOCK_SHARD,
+    LEZ_SEQUENCER_URL,
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
@@ -345,6 +346,11 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
     if "result" not in reply:
         raise AssertionError(f"{method} returned no result: {reply!r}")
     return reply["result"]
+
+
+def lez_last_block_id() -> int:
+    """The LEZ testnet sequencer's `getLastBlockId`: the chain tip."""
+    return lez_rpc(LEZ_SEQUENCER_URL, "getLastBlockId")
 
 
 def lez_clock_ms(sequencer_url: str) -> int:
