@@ -43,6 +43,10 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_node_registers_membership` | 1 | a node's RLN module waits for funding, then registers a membership that becomes `active` (see "RLN") |
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
+| `test_lightpushed_message_reaches_filter_client` | 2 | an Edge sender's message reaches an Edge receiver through the `logos.test` fleet (see "Fleet") |
+| `test_lightpushed_message_is_stored` | 1 | an Edge sender's message is in a fleet store node |
+| `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
+| `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -60,10 +64,8 @@ result events. Only message delivery is async, via the typed events
 position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTopic`
 = `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
 
-`messageReceived` fires and its `contentTopic` (`arg1`) is asserted. The
-`vector<uint8_t>` `payload` arg's serialization is **not yet asserted** — if you
-extend the receive checks to the payload, read `messageReceived payload: …` from
-the logs and confirm the decoding in `libs/helpers.py` first.
+`messageReceived` carries the `contentTopic` (`arg1`) and the `vector<uint8_t>`
+`payload` (`arg2`), which arrives as `bytes`; the fleet tests assert both.
 
 `source` (`arg3`) is `"live"` or `"history"`. A node that has been down and
 comes back can replay what it missed as `"history"`, so a test asserting on a
@@ -94,6 +96,38 @@ config, which names the sequencer, is left out, so each node writes its own.
 `rln_membership` is the testnet membership in `E2E_RLN_MEMBERSHIP_DIR`, a directory
 holding `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`).
 
+## Fleet
+
+`test_fleet.py`, marked `fleet`, sends through the live `logos.test` fleet. Each test
+runs nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core` or
+`Edge`, the preset's network and RLN, no NAT port mapping) and checks that what one
+sends reaches a second node, started in parallel with it, or a fleet store node. 
+An Edge receiver's `subscribe` returns before a fleet node holds its filter subscription,
+so the receiver waits 3 s before the send. Each node is in its own docker network,
+so the message has to cross the fleet. The sender holds the membership.
+Every node validates proofs: its presets file has a `logos.test` entry
+with `enable-validation` on, which the module's built-in entry leaves off.
+
+Two proofs with the same `message_id` in one epoch disclose the membership's secret to
+anyone who sees both, and every copy of the membership starts from the same counters.
+So the fleet tests run one at a time, each sender starting from the keystore the
+previous one left (`fleet_membership`); under xdist that takes `--dist=loadgroup`, and
+`fleet_membership` fails without it. Across runs, `E2E_FLEET_EPOCH_FILE` names a file
+holding the last epoch a run sent in: a run sends only in a later epoch, waiting if it
+has to and printing how long, and writes the epoch when it ends. Without the file it
+waits for the next epoch. CI keeps the file in the Actions cache and runs the fleet tests
+only on master, since a branch's cache entries are invisible to master's runs; locally,
+point it at a file of your own. Local and CI runs don't share it, so don't run the fleet
+tests while another run from the same membership sends.
+
+```bash
+E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/fleet-epoch \
+  pytest -v -m fleet
+```
+
+`storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes
+(`FLEET_ENTRY_NODES`) in turn.
+
 ## Prerequisites
 
 - `docker` available on host.
@@ -109,14 +143,17 @@ holding `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>
   `E2E_LEZ_RLN_DIR`, a logos-lez-rln checkout with its guest programs and its
   `run_setup`, `mint_payer` and `fund_account` built (see "Running locally — Linux").
   Without them the RLN tests skip.
+- For the `fleet` tests: the testnet membership in `E2E_RLN_MEMBERSHIP_DIR` (see "RLN";
+  without it they skip), outbound HTTPS to `testnet.lez.logos.co`, and outbound TCP to
+  the `logos.test` fleet (port 30303).
 
 If any of these is missing, all e2e tests **skip** with a clear reason.
 
 ## Running locally — Linux
 
 The smoke image and the Python client come from the logos-logoscore-py commit that CI
-pins as `LOGOSCORE_PY_REV` in `.github/workflows/ci.yml`. Set the same variable before
-these steps.
+pins as `LOGOSCORE_PY_REV` in `.github/actions/setup-e2e`. Set the same variable
+before these steps.
 
 ```bash
 # 1. Build the logosctl smoke image (one-time) and copy its CLI out of it.
@@ -165,7 +202,7 @@ cd tests/e2e
 pip install -r requirements.txt
 pip install --no-deps --force-reinstall \
   "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@$LOGOSCORE_PY_REV"
-pytest -v -n 4 --dist=loadgroup
+pytest -v -m "not fleet" -n 4 --dist=loadgroup
 ```
 
 The sequencer image is amd64 only; on Apple silicon Docker runs it emulated.
@@ -200,33 +237,35 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 
 Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
 uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-logs` for the RLN
-job), the sequencer's among them. Set
+job, the sequencer's among them; `e2e-fleet-logs` for the fleet one). Set
 `LOGOSCTL_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
 `gw<n>` the n-th, a run without xdist the first). If another network on the host
 already uses that range, `docker network create` fails with "Pool overlaps"; set
 `E2E_NETWORK_SUBNET` to a free range with a /24 for each worker, such as a /22 for
-`-n 4`.
+`-n 4`. The fleet tests' networks take a range docker picks.
 
 ## CI
 
 `.github/workflows/ci.yml` has an `e2e-tests` job (ubuntu-latest) that builds the logosctl
 smoke image and copies the CLI out of it, installs `.#lgx-portable` and its released
 dependencies with `logosctl install`, runs the tests without RLN
-(`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. Both e2e jobs
-set up through the composite action `.github/actions/setup-e2e`, and run the tests on
-four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
-on one.
+(`pytest -v -m "not rln" -n 4 --dist=loadgroup`), and uploads logs on failure. The e2e
+jobs set up through the composite action `.github/actions/setup-e2e`. The two in `ci.yml`
+run the tests on four xdist workers; `--dist=loadgroup` keeps the tests that share
+`node_a` and `node_b` on one.
 
-`e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests; it
-is not a required check. It builds logos-lez-rln through `.github/actions/build-lez-rln`
-(from the Actions cache when its pin is unchanged) and pulls the sequencer image, pinned
-by digest in `ci.yml`.
+`e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests,
+except the `fleet` ones; it is not a required check. It builds logos-lez-rln through
+`.github/actions/build-lez-rln` (from the Actions cache when its pin is unchanged) and
+pulls the sequencer image, pinned by digest in `ci.yml`.
 
-`.github/actions/restore-rln-membership` unpacks the testnet membership from the
-repository secret `RLN_KEYSTORE` into `E2E_RLN_MEMBERSHIP_DIR`. The secret is replaced
-after every renewal from the logosctl config dir that holds the membership:
+The workflow `e2e-fleet.yml` runs the `fleet` tests nightly and on demand, on master
+only, never on PRs, and its runs queue (see "Fleet"). It restores the testnet membership
+through `.github/actions/restore-rln-membership`, which unpacks the repository secret
+`RLN_KEYSTORE` into `E2E_RLN_MEMBERSHIP_DIR`. The secret is replaced after every renewal
+from the logosctl config dir that holds the membership:
 
 ```bash
 COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \

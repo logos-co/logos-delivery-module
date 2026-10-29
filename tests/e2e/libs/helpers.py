@@ -16,12 +16,14 @@ import subprocess
 import time
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from logos_integration_test_framework import subscribe as _watch_events
 
 from libs.constants import (
     CLUSTER_ID,
+    FLEET_PRESET,
     LEZ_CLOCK_50_ACCOUNT,
     LEZ_CLOCK_SHARD,
     LEZ_SEQUENCER_URL,
@@ -51,6 +53,8 @@ BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 # wallet syncs or the valid-root window fills.
 RLN_RETRY_CLASSES = ("not_ready", "transient")
 RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
+
+STORE_QUERY_TIMEOUT_MS = 20000
 
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
@@ -89,11 +93,21 @@ def make_delivery_config(
     return json.dumps(cfg)
 
 
-def make_rln_presets(*, enable_validation: bool, registry_id: str) -> str:
-    """Contents of the RLN presets file for a test node: its `""` entry applies to
-    nodes created without a `preset`."""
+def make_fleet_config(*, mode: str) -> str:
+    """JSON config for `createNode` on the logos.test fleet: the preset's network and
+    RLN, without NAT port mapping. `mode` is "Core" or "Edge"."""
     return json.dumps({
-        "": {
+        "mode": mode,
+        "preset": FLEET_PRESET,
+        "messagingOverrides": {"logLevel": "DEBUG", "nat": "none"},
+    })
+
+
+def make_rln_presets(*, enable_validation: bool, registry_id: str, preset: str = "") -> str:
+    """Contents of the RLN presets file for a test node: its entry applies to nodes
+    created with `preset`, the `""` entry to nodes created without one."""
+    return json.dumps({
+        preset: {
             "enabled": True,
             "registry-id": registry_id,
             "epoch-size-sec": RLN_EPOCH_SIZE_SEC,
@@ -160,6 +174,12 @@ class LogosDelivery:
     def rln_state(self, *, timeout: Optional[float] = None) -> dict:
         return call_ok(self.client, "rlnState", timeout=timeout)
 
+    def connection_status(self, *, timeout: Optional[float] = None) -> str:
+        return call_ok(self.client, "getConnectionStatus", timeout=timeout)
+
+    def store_query(self, query_json: str, peer_addr: str) -> dict:
+        return call_result(self.client, "storeQuery", query_json, peer_addr, STORE_QUERY_TIMEOUT_MS)
+
     def metric(self, name: str, **labels: str) -> float:
         """Value of the metric `name` with `labels` in the node's Prometheus text, 0 if absent."""
         label_text = ",".join(f'{key}="{value}"' for key, value in labels.items())
@@ -217,6 +237,14 @@ def start_node(node: DeliveryNode) -> None:
         event = wait_for_event(events, "nodeStarted", timeout=NODE_STARTED_TIMEOUT_S)
     if event_arg(event, 0) is not True:
         raise AssertionError(f"{node.label}: start failed: {event_arg(event, 1)!r}")
+
+
+def in_parallel(*calls: Callable[[], Any]) -> list:
+    """Run `calls` in threads and return their results in order. Raises the first
+    call's exception once all have ended."""
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = [pool.submit(call) for call in calls]
+        return [future.result() for future in futures]
 
 
 def wait_until(condition, *, timeout: float, interval: float = 0.5, message: str = "") -> Any:
@@ -282,6 +310,46 @@ def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: f
         message=f"{node.label}: valid-root window still cold, or answers invalid",
     )
     return answer["verdict"]
+
+
+def current_epoch() -> int:
+    return int(time.time() // RLN_EPOCH_SIZE_SEC)
+
+
+def seconds_until_epoch(epoch: int) -> float:
+    """Seconds until RLN epoch `epoch` starts; 0 once it has."""
+    return max(0.0, epoch * RLN_EPOCH_SIZE_SEC - time.time())
+
+
+def wait_for_connected(node: DeliveryNode, *, timeout: float) -> None:
+    """Poll `getConnectionStatus` until the node reports one of CONNECTED_STATUSES. A
+    node that connects during `start` does so before a test can watch for
+    `connectionStateChanged`."""
+    wait_until(
+        lambda: node.connection_status() in CONNECTED_STATUSES,
+        timeout=timeout,
+        message=f"{node.label}: not connected",
+    )
+
+
+def stored_messages(node: DeliveryNode, content_topic: str, peers) -> list:
+    """The messages on `content_topic` from the first store peer of `peers` that
+    holds any; empty if none does."""
+    query = json.dumps({
+        "requestId": "e2e",
+        "includeData": True,
+        "paginationForward": True,
+        "contentTopics": [content_topic],
+    })
+    for peer in peers:
+        result = node.store_query(query, peer)
+        if not result.get("success"):
+            logger.info("%s: storeQuery to %s failed: %s", node.label, peer, result.get("error"))
+            continue
+        messages = _from_json_text(result["value"]).get("messages")
+        if messages:
+            return messages
+    return []
 
 
 def rln_membership_state(node: DeliveryNode) -> dict:
