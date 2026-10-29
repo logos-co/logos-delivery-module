@@ -21,6 +21,8 @@ PUBSUB_TOPIC = f"/waku/2/rs/{CLUSTER_ID}/0"
 LEZ_SEQUENCER_PORT = 3040
 LEZ_CLOCK_50_ACCOUNT = "4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWkX"
 LEZ_CLOCK_SHARD = "2hwaRW8sMnyKLLRbDRw8k68tiv9bnfq98oxcdtcp157Z"
+# The LEZ testnet's sequencer.
+LEZ_SEQUENCER_URL = "https://testnet.lez.logos.co/"
 
 RLN_EPOCH_SIZE_SEC = 600
 # delivery_module's RLN identifier, sha256("rln/logos-delivery/v0.0.1") (docs/pages/rln.md).
