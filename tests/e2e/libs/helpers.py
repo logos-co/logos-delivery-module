@@ -36,10 +36,8 @@ SUBSCRIBE_GRACE_S = 0.5
 
 RLN_PRESETS_ENV = "LOGOS_DELIVERY_RLN_PRESETS"
 RLN_PRESETS_FILE = "rln-presets.json"
-RLN_READY_TIMEOUT_S = 120.0
+RLN_READY_TIMEOUT_S = 30.0
 
-# getConnectionStatus / connectionStateChanged values for a node with at least
-# one relay peer.
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
 
@@ -206,7 +204,7 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
 
 
 def is_connected(event: dict) -> bool:
-    """A connectionStateChanged event reporting at least one relay peer."""
+    """A connectionStateChanged event reporting at least one mesh peer on every subscribed shard."""
     return event_arg(event, 0) in CONNECTED_STATUSES
 
 
