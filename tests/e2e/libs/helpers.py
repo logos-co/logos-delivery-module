@@ -24,6 +24,7 @@ from libs.constants import (
     CLUSTER_ID,
     LEZ_CLOCK_50_ACCOUNT,
     LEZ_CLOCK_SHARD,
+    LEZ_SEQUENCER_URL,
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
@@ -240,6 +241,20 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
         raise AssertionError(f"{node.label}: rlnState {state!r}")
 
 
+def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> dict:
+    """Poll the node's LEZ wallet until its first sync is over, and return its
+    `wallet_status`; until then every chain read of the RLN modules blocks or answers
+    empty. Raises unless the wallet is `ready`."""
+    def settled():
+        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+        return status if status.get("state") != "pending" else None
+
+    status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
+    if status.get("state") != "ready":
+        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
+    return status
+
+
 def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
     """Poll `node`'s `validate_proof` with a proof from `prover` until the verdict is not
     `invalid`, and return it. Nothing else reports when `node`'s valid-root window holds
@@ -274,14 +289,7 @@ def rln_membership_state(node: DeliveryNode) -> dict:
 def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, timeout: float) -> None:
     """Fund the node's LEZ payer and wait for its RLN module to register an `active`
     membership."""
-    def wallet_settled():
-        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
-        return status if status.get("state") != "pending" else None
-
-    status = wait_until(wallet_settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
-    if status.get("state") != "ready":
-        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
-    fund(status["payer"])
+    fund(wait_for_lez_wallet(node, timeout=timeout)["payer"])
 
     def settled():
         state = rln_membership_state(node)
@@ -332,6 +340,11 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
     if "result" not in reply:
         raise AssertionError(f"{method} returned no result: {reply!r}")
     return reply["result"]
+
+
+def lez_last_block_id() -> int:
+    """The LEZ testnet sequencer's `getLastBlockId`: the chain tip."""
+    return lez_rpc(LEZ_SEQUENCER_URL, "getLastBlockId")
 
 
 def lez_clock_ms(sequencer_url: str) -> int:
