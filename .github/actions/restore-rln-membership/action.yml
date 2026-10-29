@@ -1,0 +1,37 @@
+name: Restore the RLN membership
+description: >
+  Unpacks the repository secret RLN_KEYSTORE, liblogos_rln_module's keystore folder as
+  tar.gz and base64 (tests/e2e/README.md, "CI"), and sets E2E_RLN_MEMBERSHIP_DIR to it.
+
+inputs:
+  rln-keystore:
+    description: RLN_KEYSTORE.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the RLN membership
+      shell: bash
+      env:
+        RLN_KEYSTORE: ${{ inputs.rln-keystore }}
+        MEMBERSHIP_DIR: ${{ runner.temp }}/rln-membership
+      run: |
+        if [ -z "$RLN_KEYSTORE" ]; then
+          echo "::error::secret RLN_KEYSTORE is not set"
+          exit 1
+        fi
+        mkdir -p "$MEMBERSHIP_DIR"
+        if ! echo "$RLN_KEYSTORE" | base64 -d | tar xz -C "$MEMBERSHIP_DIR"; then
+          echo "::error::RLN_KEYSTORE is not a base64 tar.gz"
+          exit 1
+        fi
+        keystores=("$MEMBERSHIP_DIR"/liblogos_rln_module/*/)
+        if [ ${#keystores[@]} -ne 1 ] || [ ! -f "${keystores[0]}rln_sealed.json" ] || [ ! -f "${keystores[0]}rln_autounlock.secret" ]; then
+          echo "::error::RLN_KEYSTORE holds no single liblogos_rln_module keystore folder with rln_sealed.json and rln_autounlock.secret"
+          find "$MEMBERSHIP_DIR" -type f
+          exit 1
+        fi
+        ls -l "${keystores[0]}"
+        echo "::notice::Restored the RLN membership: ${keystores[0]#"$MEMBERSHIP_DIR"/}"
+        echo "E2E_RLN_MEMBERSHIP_DIR=$MEMBERSHIP_DIR" >> "$GITHUB_ENV"

@@ -79,6 +79,16 @@ registry on it with logos-lez-rln's `run_setup`. Nodes read the sequencer's URL 
 node's RLN module registers a membership by itself. Funding waits for the chain's `CLOCK_50`,
 because the registry refuses registrations before it.
 
+A node on the LEZ testnet starts from `lez_wallet` and sends with `rln_membership`. Its
+LEZ wallet syncs the testnet from the block after its last synced one, and RLN waits for
+it: from block 0 that takes several minutes. So `lez_wallet` is one new wallet per
+session: a daemon whose sequencer (`LEZ_RLN_SEQUENCER`) is unreachable creates it without
+syncing, and its `last_synced_block` is then set to the testnet sequencer's
+`getLastBlockId`. The wallet has no private notes to find in the blocks it skips. Its
+config, which names the sequencer, is left out, so each node writes its own.
+`rln_membership` is the testnet membership in `E2E_RLN_MEMBERSHIP_DIR`, a directory
+holding `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`).
+
 ## Prerequisites
 
 - `docker` available on host.
@@ -195,3 +205,16 @@ for `-n 4`.
 by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`, with
 `--dist=loadgroup` to keep the tests that share `node_a` and `node_b` on one worker.
 `e2e-tests-rln` runs the `rln` tests and is not a required check.
+
+`.github/actions/restore-rln-membership` unpacks the testnet membership from the
+repository secret `RLN_KEYSTORE` into `E2E_RLN_MEMBERSHIP_DIR`. The secret is replaced
+after every renewal from the logosctl config dir that holds the membership:
+
+```bash
+COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \
+  -C <config-dir>/data liblogos_rln_module
+tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four files, no lock
+base64 < rln-keystore.tar.gz > rln-keystore.b64
+gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
+rm rln-keystore.tar.gz rln-keystore.b64
+```
