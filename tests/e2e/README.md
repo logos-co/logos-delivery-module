@@ -48,6 +48,12 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
 | `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
 | `test_relay_node_advertises_through_libp2p_module` | 2 | another `libp2p_module` node finds a relay node's advert with its peer id, address, cluster, capabilities and shard (see "Service discovery") |
+| `test_two_plugin_nodes_connect_without_static_peers` | 3 | two plugin-hosted nodes: the second finds the first through the bootstrap, connects to it and receives its message |
+| `test_plugin_node_finds_in_process_node` | 3 | a node hosting discovery on `libp2p_module` finds one running it in-process; messages pass both ways |
+| `test_in_process_node_finds_plugin_node` | 3 | the same, the in-process node finding the other |
+| `test_plugin_node_without_libp2p_module_fails_to_start` | 1 | without `libp2p_module` installed, `nodeStarted` reports it is not available, and the module stops the node |
+| `test_edge_node_finds_lightpush_node_but_send_fails` | 4 | an Edge node's lookup adds a light push node, which relays to a receiver, to its peer store, but only the relay connectivity loop dials found peers, so its send ends in `messageError` |
+| `test_restarted_node_reconnects_while_old_advert_is_served` | 3 | A restarts; B reconnects to it and receives its message, and the bootstrap still returns the advert A signed before the restart |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -131,12 +137,13 @@ E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/
 
 ## Service discovery
 
-`test_service_discovery.py` runs nodes whose kademlia service discovery is hosted on
-`libp2p_module` (`pluginKadDiscovery`). Each test starts a daemon running only
-`libp2p_module` as the DHT bootstrap and names it in its nodes' `kadBootstrapNodes`;
-loading `delivery_module` loads the installed `libp2p_module` with it. `delivery_module`
-reports nothing about discovery, so the tests read adverts with `libp2p_module`'s
-`discoLookup`.
+`test_service_discovery.py` runs nodes whose kademlia service discovery is plugin-hosted on
+`libp2p_module` (`pluginKadDiscovery`) or in-process on the node's own switch
+(`enableKadDiscovery`). Each test starts a daemon running only `libp2p_module` as the DHT
+bootstrap and names it in its nodes' `kadBootstrapNodes`; loading `delivery_module` loads
+the installed `libp2p_module` with it. The second node of a test finds the first through
+the bootstrap, without `staticnodes`. `delivery_module` reports nothing about discovery, so
+the tests read adverts with `libp2p_module`'s `discoLookup`.
 
 ## Prerequisites
 
@@ -240,7 +247,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
 | `store` / `filter` | `false` | not exercised here |
 | `lightpush` / `lightpushnode` | `false` / unset | the light push test only: `true` on its server, and on its client (`relay: false`) the server's multiaddr |
-| `pluginKadDiscovery` / `kadBootstrapNodes` | unset | the service discovery tests only: `true` and the libp2p_module bootstrap's multiaddr |
+| `enableKadDiscovery` / `pluginKadDiscovery` / `kadBootstrapNodes` | unset | the service discovery tests only: one of the first two `true`, and the libp2p_module bootstrap's multiaddr |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
 > A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP

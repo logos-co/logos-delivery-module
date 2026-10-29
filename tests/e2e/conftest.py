@@ -29,7 +29,7 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -122,6 +122,15 @@ def _remove_network(name: str) -> None:
 
 def _remove_container(name: str) -> None:
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+
+def _copy_modules(modules_dir: Path, destination: Path, without: Sequence[str]) -> Path:
+    """A copy of `modules_dir` in `destination` without the modules named in `without`."""
+    shutil.copytree(
+        modules_dir, destination, dirs_exist_ok=True,
+        ignore=lambda directory, _: without if directory == str(modules_dir) else (),
+    )
+    return destination
 
 
 def _copy_keystore_back(container_name: str, membership: Path) -> None:
@@ -495,9 +504,11 @@ def _running_daemon(
 def daemon_factory(
     _e2e_env_or_skip: tuple[str, Path],
     shared_docker_network: str,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Callable[..., Any]]:
     """Factory for started logosctl containers with nothing loaded, on the worker's
-    shared docker network, or with `own_network` on a new network of their own."""
+    shared docker network, or with `own_network` on a new network of their own. A
+    daemon given `without_modules` gets a copy of LOGOS_MODULES_DIR without them."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
@@ -507,15 +518,21 @@ def daemon_factory(
             persistence_dir: Path | None = None,
             env: dict[str, str] | None = None,
             own_network: bool = False,
+            without_modules: Sequence[str] = (),
         ):
             network = shared_docker_network
             if own_network:
                 network = f"logosdelivery-own-{uuid.uuid4().hex[:8]}"
                 _create_network(network)
                 stack.callback(_remove_network, network)
+            daemon_modules_dir = modules_dir
+            if without_modules:
+                daemon_modules_dir = _copy_modules(
+                    modules_dir, tmp_path_factory.mktemp(f"modules-{label.lower()}"), without_modules
+                )
             return stack.enter_context(
                 _running_daemon(
-                    image, modules_dir, network, label, persistence_dir=persistence_dir, env=env
+                    image, daemon_modules_dir, network, label, persistence_dir=persistence_dir, env=env
                 )
             )
 
