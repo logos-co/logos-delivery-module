@@ -40,7 +40,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
 | `test_send_with_rln_off_propagates` | 2 | a sender with RLN off sees `messagePropagated` |
 | `test_send_without_membership_reports_error` | 2 | a sender with RLN on and no membership sees `messageError` |
-| `test_restored_membership_is_active` | 1 | the membership in `E2E_RLN_MEMBERSHIP_DIR` is `active` on the registry (see "RLN") |
+| `test_node_registers_membership` | 1 | a node's RLN module waits for funding, then registers a membership that becomes `active` (see "RLN") |
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 
@@ -71,15 +71,18 @@ freshly published message should pin `arg3` to `"live"`.
 
 ## RLN
 
-`test_rln.py` runs nodes with RLN on the LEZ testnet registry used by `logos.test`.
-RLN is turned on through a presets file named by `LOGOS_DELIVERY_RLN_PRESETS` instead
-of the `logos.test` preset, because that preset always turns proof validation off (see
-`docs/pages/rln.md`).
+`test_rln.py` runs nodes with RLN on a local LEZ chain. Each xdist worker starts the
+standalone LEZ sequencer in a container on its docker network and deploys an RLN
+registry on it with logos-lez-rln's `run_setup` (`lez_registry` in `conftest.py`). Nodes
+reach the sequencer through `LEZ_RLN_SEQUENCER`. RLN is turned on through a presets file
+named by `LOGOS_DELIVERY_RLN_PRESETS`, whose `""` entry names the local registry, instead
+of the `logos.test` preset, which names the testnet registry and always turns proof
+validation off (see `docs/pages/rln.md`).
 
-The tests marked `rln_membership` send with a proof, so they need an active
-membership: `E2E_RLN_MEMBERSHIP_DIR` names a directory holding `liblogos_rln_module`'s
-keystore folder (`liblogos_rln_module/<instance>/`), and each sending node starts with
-a copy of it.
+A node that sends with a proof registers a membership of its own: the fixture funds the
+node's LEZ payer with logos-lez-rln's `fund_account`, and the RLN module registers by
+itself. Funding waits until the chain's `CLOCK_50` has ticked, since the registry
+refuses a registration before that and the module does not retry it.
 
 ## Prerequisites
 
@@ -91,10 +94,11 @@ a copy of it.
 - A host-side `logoscore` CLI on `PATH` (the client shells out to it). Build it from
   `logos-co/logos-logoscore-cli` pinned to the same commit as the smoke image.
 - For `test_rln.py`: `liblogos_rln_module` and `liblogos_lez_rln_module` in
-  `LOGOS_MODULES_DIR` (CI stages them next to `delivery_module`), and outbound HTTPS to
-  `testnet.lez.logos.co`. Without the modules the RLN tests skip.
-- For the `rln_membership` tests: `E2E_RLN_MEMBERSHIP_DIR` (see "RLN"). Without it
-  they skip.
+  `LOGOS_MODULES_DIR` (CI stages them next to `delivery_module`);
+  `E2E_LEZ_SEQUENCER_IMAGE`, the standalone LEZ sequencer image, pulled; and
+  `E2E_LEZ_RLN_DIR`, a logos-lez-rln checkout with its guest programs and its
+  `run_setup`, `mint_payer` and `fund_account` built (see "Running locally — Linux").
+  Without them the RLN tests skip.
 
 If any of these is missing, all e2e tests **skip** with a clear reason.
 
@@ -115,11 +119,26 @@ nix build --out-link /tmp/logoscore-cli \
   "github:logos-co/logos-logoscore-cli/5a1cf746e841e8e8a8fd48333cff55bd12c45c52#cli"
 export PATH="/tmp/logoscore-cli/bin:$PATH"
 
-# 3. Install deps + run.
+# 3. For test_rln.py: the LEZ sequencer image, and logos-lez-rln's guest programs
+#    (cargo-risczero, which builds them in docker) and tools, at the pins of ci.yml and
+#    .github/actions/build-lez-rln.
+docker pull harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
+export E2E_LEZ_SEQUENCER_IMAGE=harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
+curl -L https://risczero.com/install | bash && ~/.risc0/bin/rzup install cargo-risczero 3.0.5
+git clone https://github.com/logos-co/logos-lez-rln.git /tmp/logos-lez-rln
+cd /tmp/logos-lez-rln && git checkout 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
+cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
+export E2E_LEZ_RLN_DIR=/tmp/logos-lez-rln
+cd -
+
+# 4. Install deps + run.
 cd tests/e2e
 pip install -r requirements.txt
 pytest -v -n 4 --dist=loadgroup
 ```
+
+The sequencer image is amd64 only; on Apple silicon Docker runs it emulated.
 
 ## Running locally — macOS
 
@@ -149,8 +168,8 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 ## Troubleshooting
 
 Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
-uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-membership-logs`
-for the membership job). Set
+uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-logs` for the RLN
+job), the sequencer's among them. Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
@@ -169,17 +188,7 @@ set up through the composite action `.github/actions/setup-e2e`, and run the tes
 four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
 on one.
 
-The `e2e-rln-membership` job in `ci.yml` runs the `rln_membership` tests on PRs from
-branches of this repo and pushes to master. It is not a required check. It restores the
-membership from the repository secret
-`RLN_KEYSTORE`, which is replaced after every renewal from the logosctl config dir
-that holds the membership:
-
-```bash
-COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \
-  -C <config-dir>/data liblogos_rln_module
-tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four files, no lock
-base64 < rln-keystore.tar.gz > rln-keystore.b64
-gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
-rm rln-keystore.tar.gz rln-keystore.b64
-```
+`e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests; it
+is not a required check. It builds logos-lez-rln through `.github/actions/build-lez-rln`
+(from the Actions cache when its pin is unchanged) and pulls the sequencer image, pinned
+by digest in `ci.yml`.

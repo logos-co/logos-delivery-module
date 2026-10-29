@@ -4,13 +4,14 @@ import pytest
 
 from libs.constants import CONTENT_TOPIC, PUBSUB_TOPIC
 from libs.helpers import (
+    RLN_MEMBERSHIP_TIMEOUT_S,
     event_request_id,
     is_connected,
     make_delivery_config,
     node_multiaddr,
+    register_membership,
     rln_membership_state,
     wait_for_event,
-    wait_for_lez_wallet,
     wait_for_valid_roots,
     wait_until,
 )
@@ -53,19 +54,20 @@ def test_validating_node_drops_message_without_proof(rln_node_factory, delivery_
 
 
 @pytest.mark.rln
-@pytest.mark.rln_membership
-def test_restored_membership_is_active(rln_node_factory, rln_membership):
-    node = rln_node_factory(
-        "membership", make_delivery_config(), enable_validation=False, membership=rln_membership
+def test_node_registers_membership(rln_node_factory, lez_registry):
+    """The RLN module waits for its payer to be funded, then registers a membership by itself."""
+    node = rln_node_factory("membership", make_delivery_config(), enable_validation=False)
+    wait_until(
+        lambda: rln_membership_state(node).get("provisioning", {}).get("step") == "awaiting_funding",
+        timeout=WALLET_TIMEOUT_S,
+        message="membership never awaited funding",
     )
-    wait_for_lez_wallet(node, timeout=WALLET_TIMEOUT_S)
-    state = rln_membership_state(node)
-    assert state.get("state") == "active", state
+    register_membership(node, lez_registry.fund, timeout=RLN_MEMBERSHIP_TIMEOUT_S)
+    assert rln_membership_state(node).get("state") == "active"
 
 
 @pytest.mark.rln
-@pytest.mark.rln_membership
-def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membership):
+def test_validating_node_receives_message_with_proof(rln_node_factory):
     validating = rln_node_factory("validating", make_delivery_config(), enable_validation=True)
     validating.subscribe(CONTENT_TOPIC)
 
@@ -74,7 +76,7 @@ def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membe
             "sender-with-membership",
             make_delivery_config(static_peers=[node_multiaddr(validating)]),
             enable_validation=False,
-            membership=rln_membership,
+            membership=True,
         )
         # The sender dials its static peers only after its startup membership check, which waits for its wallet.
         assert wait_for_valid_roots(validating, sender, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
@@ -86,10 +88,7 @@ def test_validating_node_receives_message_with_proof(rln_node_factory, rln_membe
 
 
 @pytest.mark.rln
-@pytest.mark.rln_membership
-def test_validating_service_relays_lightpush_with_proof(
-    rln_node_factory, delivery_node_factory, rln_membership
-):
+def test_validating_service_relays_lightpush_with_proof(rln_node_factory, delivery_node_factory):
     receiver = delivery_node_factory("receiver", make_delivery_config())
     receiver.subscribe(CONTENT_TOPIC)
 
@@ -104,7 +103,7 @@ def test_validating_service_relays_lightpush_with_proof(
             "lightpush-client",
             make_delivery_config(relay=False, lightpush_node=node_multiaddr(service)),
             enable_validation=False,
-            membership=rln_membership,
+            membership=True,
         )
         assert wait_for_valid_roots(service, client, timeout=VALID_ROOTS_TIMEOUT_S) == "valid"
         client.send(CONTENT_TOPIC, "lightpush-with-proof")

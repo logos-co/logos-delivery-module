@@ -1,0 +1,46 @@
+name: Build logos-lez-rln
+description: >
+  Builds what the RLN e2e tests deploy a local registry with: logos-lez-rln's guest
+  programs and its mint_payer, run_setup and fund_account, in E2E_LEZ_RLN_DIR. They
+  come from the Actions cache when their pins are unchanged.
+
+runs:
+  using: composite
+  steps:
+    # logos-lez-rln's tools link libpcsclite (keycard_wallet).
+    - name: Install libpcsclite
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpcsclite-dev
+
+    # Keyed on the logos-lez-rln commit and the cargo-risczero that builds its guest programs.
+    - name: Restore the cached logos-lez-rln build
+      id: lez-rln
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/mint_payer
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/run_setup
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
+        key: lez-rln-${{ runner.arch }}-235ddaeee84eec385a2d4b68d69f702a29c14cf3-cargo-risczero-3.0.5
+
+    # The guest programs build in risc0's guest builder image; rustup installs the
+    # toolchain logos-lez-rln's rust-toolchain.toml names for the tools.
+    - name: Build logos-lez-rln
+      if: steps.lez-rln.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -L https://risczero.com/install | bash
+        "$HOME/.risc0/bin/rzup" install cargo-risczero 3.0.5
+        export PATH="$HOME/.risc0/bin:$PATH"
+        git clone https://github.com/logos-co/logos-lez-rln.git "$RUNNER_TEMP/logos-lez-rln"
+        cd "$RUNNER_TEMP/logos-lez-rln"
+        git checkout 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+        cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
+        cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
+
+    - name: Export E2E_LEZ_RLN_DIR
+      shell: bash
+      run: echo "E2E_LEZ_RLN_DIR=$RUNNER_TEMP/logos-lez-rln" >> "$GITHUB_ENV"
