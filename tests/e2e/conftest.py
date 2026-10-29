@@ -240,11 +240,12 @@ def lez_registry(
             capture_output=True, text=True, check=True,
         ).stdout.split()[0].rsplit(":", 1)[1]
         host_url = f"http://127.0.0.1:{port}/"
-        # Without it the tools' wallet writes one that names the public testnet.
+        # Without it the tools' wallet writes one that names the public testnet. The
+        # wallet sleeps `seq_poll_timeout` between checks for a transaction's inclusion.
         (home / "wallet_config.json").write_text(json.dumps({
             "sequencer": {"sequencer_addr": host_url},
-            "seq_poll_timeout": "30s",
-            "seq_tx_poll_max_blocks": 15,
+            "seq_poll_timeout": "1s",
+            "seq_tx_poll_max_blocks": 60,
             "seq_poll_max_retries": 10,
             "seq_block_poll_max_amount": 100,
         }))
