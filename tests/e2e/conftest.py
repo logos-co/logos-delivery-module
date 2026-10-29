@@ -1,17 +1,14 @@
 """Fixtures for the delivery_module e2e suite.
 
-Four daemon flavours:
-  * `solo_daemon` (function scope) — one fresh logosctl container per test, used
-    by the single-node lifecycle/query tests. Fresh because createNode is
-    once-per-context: a started node can't be re-created, so tests can't share one.
-  * `node_a` / `node_b` (module scope) — two daemons in a shared docker network,
-    peered directly via staticnodes (node A's container-routable multiaddr), used
-    by the two-node delivery tests.
-  * `rln_node_factory` (module scope) — daemons with RLN turned on through a
-    presets file in each one's persistence dir, on the RLN registry of a local
-    LEZ sequencer (`lez_registry`), used by the RLN tests.
-  * `fleet_node_factory` (function scope) — daemons on the logos.test fleet, each
-    in its own docker network, used by the fleet tests.
+Every daemon of a test comes from `daemon_factory`: a started logosctl container,
+stopped and its log saved when the test ends. The node factories build on it, and
+each test builds its own nodes:
+  * `delivery_node_factory` — load, createNode, start.
+  * `rln_node_factory` — the same with RLN on through a presets file in the
+    daemon's persistence dir, on the RLN registry of a local LEZ sequencer
+    (`lez_registry`).
+  * `fleet_node_factory` — RLN nodes on the logos.test fleet, each in its own
+    docker network, starting from a copy of `lez_wallet`.
   * `lez_wallet` (session scope) — one daemon whose LEZ module creates a new wallet
     without syncing; a node on the LEZ testnet starts from a copy of it.
 
@@ -32,9 +29,9 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -52,18 +49,14 @@ from libs.helpers import (
     lez_clock_ms,
     lez_last_block_id,
     lez_rpc,
-    make_delivery_config,
     make_rln_presets,
-    node_multiaddr,
     register_membership,
     seconds_until_epoch,
     setup_delivery_node,
-    setup_rln_node,
     wait_for_lez_wallet,
     wait_until,
 )
 
-MESH_STABILIZATION_S = 12.0
 DAEMON_START_ATTEMPTS = 3
 
 LEZ_WALLET_FILES = ("storage.json", "payer.json")
@@ -247,22 +240,18 @@ def lez_wallet(
     the testnet starts from so that its wallet skips the sync from block 0. A daemon
     whose sequencer is unreachable creates it without syncing."""
     image, modules_dir = _e2e_env_or_skip
-    daemon, container_name = _start_daemon(
+    wallet = tmp_path_factory.mktemp("lez-wallet")
+    with _running_daemon(
         image, modules_dir, shared_docker_network, "lez-wallet",
         env={LEZ_SEQUENCER_ENV: UNREACHABLE_SEQUENCER},
-    )
-    wallet = tmp_path_factory.mktemp("lez-wallet")
-    try:
+    ) as daemon:
         node = DeliveryNode(daemon.client(), daemon, "lez-wallet")
         node.client.load_module(LEZ_RLN_MODULE)
         wait_for_lez_wallet(node, timeout=LEZ_WALLET_TIMEOUT_S)
         subprocess.run(
-            ["docker", "cp", f"{container_name}:/persistence/{LEZ_RLN_MODULE}", str(wallet / LEZ_RLN_MODULE)],
+            ["docker", "cp", f"{daemon.container_name}:/persistence/{LEZ_RLN_MODULE}", str(wallet / LEZ_RLN_MODULE)],
             check=True, capture_output=True,
         )
-    finally:
-        _save_logs(container_name)
-        daemon.stop()
     wallet_home, = wallet.glob(f"{LEZ_RLN_MODULE}/*/wallet-home")
     # wallet_config.json names the unreachable sequencer; each node writes its own.
     for path in wallet_home.iterdir():
@@ -462,7 +451,7 @@ def _start_daemon(
         )
         try:
             daemon.start()
-            return daemon, container_name
+            return daemon
         except LogosctlError as e:
             daemon.stop()
             _remove_container(container_name)
@@ -470,114 +459,119 @@ def _start_daemon(
                 raise
 
 
-@pytest.fixture
-def solo_daemon(_e2e_env_or_skip: tuple[str, Path], shared_docker_network: str) -> Iterator:
-    """A fresh, started logosctl container — module mounted, nothing loaded yet.
-    The test drives load_module/createNode/start/stop itself."""
-    image, modules_dir = _e2e_env_or_skip
-    daemon, container_name = _start_daemon(image, modules_dir, shared_docker_network, "solo")
+@contextmanager
+def _running_daemon(
+    image: str,
+    modules_dir: Path,
+    network: str,
+    label: str,
+    *,
+    persistence_dir: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> Iterator:
+    """A started logosctl container, whose log is saved and which is stopped on exit."""
+    daemon = _start_daemon(
+        image, modules_dir, network, label, persistence_dir=persistence_dir, env=env
+    )
     try:
         yield daemon
     finally:
-        _save_logs(container_name)
+        _save_logs(daemon.container_name)
         daemon.stop()
 
 
-@pytest.fixture(scope="module")
-def delivery_node_factory(
+@pytest.fixture
+def daemon_factory(
     _e2e_env_or_skip: tuple[str, Path],
     shared_docker_network: str,
-) -> Iterator[Callable[[str, str], DeliveryNode]]:
-    """Factory spawning a fully set-up (load+createNode+start) DeliveryNode per
-    call. All teardown + log capture is registered on one ExitStack closed when
-    the module's tests finish."""
-    image, modules_dir = _e2e_env_or_skip
-
-    with ExitStack() as stack:
-        def _create(label: str, config_json: str) -> DeliveryNode:
-            daemon, container_name = _start_daemon(image, modules_dir, shared_docker_network, label)
-            stack.callback(daemon.stop)
-            stack.callback(_save_logs, container_name)
-            return setup_delivery_node(daemon, config_json, label)
-
-        yield _create
-
-
-@pytest.fixture(scope="module")
-def node_a(delivery_node_factory: Callable[[str, str], DeliveryNode]) -> DeliveryNode:
-    return delivery_node_factory("A", make_delivery_config())
-
-
-@pytest.fixture(scope="module")
-def node_b(
-    delivery_node_factory: Callable[[str, str], DeliveryNode],
-    node_a: DeliveryNode,
-) -> DeliveryNode:
-    peer = node_multiaddr(node_a)
-    node = delivery_node_factory("B", make_delivery_config(static_peers=[peer]))
-    time.sleep(MESH_STABILIZATION_S)
-    return node
-
-
-@pytest.fixture(scope="module")
-def rln_node_factory(
-    _e2e_env_or_skip: tuple[str, Path],
-    _rln_modules_or_skip: None,
-    shared_docker_network: str,
-    lez_registry: LezRegistry,
-    tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[Callable[..., DeliveryNode]]:
-    """`delivery_node_factory` for nodes with RLN on the local registry: each daemon
-    gets a presets file in its persistence dir, named by LOGOS_DELIVERY_RLN_PRESETS,
-    and the local sequencer in LEZ_RLN_SEQUENCER. A node given `membership` has its
-    payer funded and registers a membership of its own."""
+) -> Iterator[Callable[..., Any]]:
+    """Factory for started logosctl containers with nothing loaded, on the worker's
+    shared docker network, or with `own_network` on a new network of their own."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
         def _create(
             label: str,
-            config_json: str,
             *,
-            enable_validation: bool,
-            membership: bool = False,
-        ) -> DeliveryNode:
-            persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
-            (persistence_dir / RLN_PRESETS_FILE).write_text(
-                make_rln_presets(enable_validation=enable_validation, registry_id=lez_registry.registry_id)
+            persistence_dir: Path | None = None,
+            env: dict[str, str] | None = None,
+            own_network: bool = False,
+        ):
+            network = shared_docker_network
+            if own_network:
+                network = f"logosdelivery-own-{uuid.uuid4().hex[:8]}"
+                _create_network(network)
+                stack.callback(_remove_network, network)
+            return stack.enter_context(
+                _running_daemon(
+                    image, modules_dir, network, label, persistence_dir=persistence_dir, env=env
+                )
             )
-            daemon, container_name = _start_daemon(
-                image, modules_dir, shared_docker_network, label,
-                persistence_dir=persistence_dir,
-                env={
-                    RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}",
-                    LEZ_SEQUENCER_ENV: lez_registry.sequencer_url,
-                },
-            )
-            stack.callback(daemon.stop)
-            stack.callback(_save_logs, container_name)
-            node = setup_rln_node(daemon, config_json, label, lez_registry.registry_id)
-            if membership:
-                register_membership(node, lez_registry.fund, timeout=RLN_MEMBERSHIP_TIMEOUT_S)
-            return node
 
         yield _create
 
 
 @pytest.fixture
+def delivery_node_factory(daemon_factory: Callable[..., Any]) -> Callable[[str, str], DeliveryNode]:
+    """Factory for started delivery nodes: a daemon from `daemon_factory`, then load,
+    createNode and start."""
+    def _create(label: str, config_json: str) -> DeliveryNode:
+        return setup_delivery_node(daemon_factory(label), config_json, label)
+
+    return _create
+
+
+@pytest.fixture
+def rln_node_factory(
+    daemon_factory: Callable[..., Any],
+    _rln_modules_or_skip: None,
+    lez_registry: LezRegistry,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Callable[..., DeliveryNode]:
+    """`delivery_node_factory` for nodes with RLN on the local registry: each daemon
+    gets a presets file in its persistence dir, named by LOGOS_DELIVERY_RLN_PRESETS,
+    and the local sequencer in LEZ_RLN_SEQUENCER. A node given `membership` has its
+    payer funded and registers a membership of its own."""
+    def _create(
+        label: str,
+        config_json: str,
+        *,
+        enable_validation: bool,
+        membership: bool = False,
+    ) -> DeliveryNode:
+        persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
+        (persistence_dir / RLN_PRESETS_FILE).write_text(
+            make_rln_presets(enable_validation=enable_validation, registry_id=lez_registry.registry_id)
+        )
+        daemon = daemon_factory(
+            label,
+            persistence_dir=persistence_dir,
+            env={
+                RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}",
+                LEZ_SEQUENCER_ENV: lez_registry.sequencer_url,
+            },
+        )
+        node = setup_delivery_node(daemon, config_json, label, registry_id=lez_registry.registry_id)
+        if membership:
+            register_membership(node, lez_registry.fund, timeout=RLN_MEMBERSHIP_TIMEOUT_S)
+        return node
+
+    return _create
+
+
+@pytest.fixture
 def fleet_node_factory(
-    _e2e_env_or_skip: tuple[str, Path],
+    daemon_factory: Callable[..., Any],
     _rln_modules_or_skip: None,
     lez_wallet: Path,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Callable[..., DeliveryNode]]:
-    """Factory for nodes on the logos.test fleet, each in its own docker network so
-    that a test's nodes reach each other only through the fleet. Every node starts
-    with a copy of `lez_wallet`, and gets a presets file whose `logos.test` entry turns
-    proof validation on, which the module's built-in entry leaves off. A node given
-    `membership` starts with a copy of it and copies its keystore back when the test
-    ends."""
-    image, modules_dir = _e2e_env_or_skip
-
+    """Factory for RLN nodes on the logos.test fleet, each in its own docker network so
+    that a test's nodes reach each other only through the fleet. Each starts with a copy
+    of `lez_wallet`, and its presets file's `logos.test` entry turns proof validation
+    on, which the module's built-in entry leaves off. A node given `membership` starts
+    with a copy of it and copies its keystore back when the test ends, before its
+    daemon stops."""
     with ExitStack() as stack:
         def _create(
             label: str,
@@ -585,9 +579,6 @@ def fleet_node_factory(
             *,
             membership: Path | None = None,
         ) -> DeliveryNode:
-            network = f"logosdelivery-fleet-{uuid.uuid4().hex[:8]}"
-            _create_network(network)
-            stack.callback(_remove_network, network)
             persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
             shutil.copytree(lez_wallet, persistence_dir, dirs_exist_ok=True)
             if membership:
@@ -595,15 +586,15 @@ def fleet_node_factory(
             (persistence_dir / RLN_PRESETS_FILE).write_text(
                 make_rln_presets(enable_validation=True, registry_id=FLEET_REGISTRY_ID, preset=FLEET_PRESET)
             )
-            daemon, container_name = _start_daemon(
-                image, modules_dir, network, label,
+            daemon = daemon_factory(
+                label,
                 persistence_dir=persistence_dir,
                 env={RLN_PRESETS_ENV: f"/persistence/{RLN_PRESETS_FILE}"},
+                own_network=True,
             )
-            stack.callback(daemon.stop)
+            node = setup_delivery_node(daemon, config_json, label, registry_id=FLEET_REGISTRY_ID)
             if membership:
-                stack.callback(_copy_keystore_back, container_name, membership)
-            stack.callback(_save_logs, container_name)
-            return setup_rln_node(daemon, config_json, label, FLEET_REGISTRY_ID)
+                stack.callback(_copy_keystore_back, node.daemon.container_name, membership)
+            return node
 
         yield _create
