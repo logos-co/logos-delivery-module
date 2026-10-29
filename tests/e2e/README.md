@@ -158,6 +158,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `clusterId` | `198` | isolated test cluster (interop's `DEFAULT_CLUSTER_ID`) |
 | `numShardsInNetwork` | `1` | single shard → every content topic maps to shard 0 |
 | `discv5Discovery` | `false` | peering is explicit via `staticnodes`, not discovery |
+| `nat` | `none` | a container has no router to map ports on; the mapping opens UDP sockets on kernel-assigned ports, which can take QUIC's port (the TCP port by default) |
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
 | `store` / `filter` | `false` | not exercised here |
 | `lightpush` / `lightpushnode` | `false` / unset | the light push test only: `true` on its server, and on its client (`relay: false`) the server's multiaddr |

@@ -79,6 +79,7 @@ def make_delivery_config(
         "peerExchange": False,
         "discv5Discovery": False,
         "reliabilityEnabled": True,
+        "nat": "none",
     }
     if static_peers:
         cfg["staticnodes"] = static_peers

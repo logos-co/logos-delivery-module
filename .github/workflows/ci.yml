@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [master, main]
   push:
-    branches: [master, main, test-2-local-chain]
+    branches: [master, main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -103,7 +103,7 @@ jobs:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
 
       - name: Upload daemon logs on failure
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-rln-logs
