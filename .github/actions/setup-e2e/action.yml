@@ -1,7 +1,7 @@
 name: Set up e2e environment
 description: >
-  Builds what tests/e2e runs against: the module (install-portable) and its
-  dependency modules in LOGOS_MODULES_DIR, the logoscore smoke image in
+  Builds what tests/e2e runs against: the logos-delivery-module (install-portable)
+  and its dependency modules in LOGOS_MODULES_DIR, the logoscore smoke image in
   LOGOSCORE_IMAGE, the logoscore CLI on PATH, and the Python test dependencies.
   The smoke image and the dependency modules come from the Actions cache when
   their pins are unchanged.
