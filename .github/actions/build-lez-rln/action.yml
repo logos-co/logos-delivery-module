@@ -24,16 +24,18 @@ runs:
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/run_setup
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
           ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
-        key: lez-rln-${{ runner.arch }}-235ddaeee84eec385a2d4b68d69f702a29c14cf3-cargo-risczero-3.0.5
+        key: lez-rln-${{ runner.arch }}-235ddaeee84eec385a2d4b68d69f702a29c14cf3-cargo-risczero-3.0.5-rust-1.88.0
 
-    # The guest programs build in risc0's guest builder image; rustup installs the
-    # toolchain logos-lez-rln's rust-toolchain.toml names for the tools.
+    # The guest programs build in risc0's guest builder image, r0.1.88.0, but
+    # cargo-risczero still wants the matching risc0 Rust toolchain installed; rustup
+    # installs the toolchain logos-lez-rln's rust-toolchain.toml names for the tools.
     - name: Build logos-lez-rln
       if: steps.lez-rln.outputs.cache-hit != 'true'
       shell: bash
       run: |
         curl -L https://risczero.com/install | bash
         "$HOME/.risc0/bin/rzup" install cargo-risczero 3.0.5
+        "$HOME/.risc0/bin/rzup" install rust 1.88.0
         export PATH="$HOME/.risc0/bin:$PATH"
         git clone https://github.com/logos-co/logos-lez-rln.git "$RUNNER_TEMP/logos-lez-rln"
         cd "$RUNNER_TEMP/logos-lez-rln"

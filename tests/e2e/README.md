@@ -124,7 +124,8 @@ export PATH="/tmp/logoscore-cli/bin:$PATH"
 #    .github/actions/build-lez-rln.
 docker pull harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
 export E2E_LEZ_SEQUENCER_IMAGE=harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
-curl -L https://risczero.com/install | bash && ~/.risc0/bin/rzup install cargo-risczero 3.0.5
+curl -L https://risczero.com/install | bash
+~/.risc0/bin/rzup install cargo-risczero 3.0.5 && ~/.risc0/bin/rzup install rust 1.88.0
 git clone https://github.com/logos-co/logos-lez-rln.git /tmp/logos-lez-rln
 cd /tmp/logos-lez-rln && git checkout 235ddaeee84eec385a2d4b68d69f702a29c14cf3
 cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
