@@ -17,7 +17,7 @@ runs:
     # Keyed on the logos-lez-rln commit and the cargo-risczero that builds its guest programs.
     - name: Restore the cached logos-lez-rln build
       id: lez-rln
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: |
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/mint_payer
@@ -42,6 +42,18 @@ runs:
         git checkout 235ddaeee84eec385a2d4b68d69f702a29c14cf3
         cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
         cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
+
+    # Saved right after the build, so that a run whose tests fail keeps it.
+    - name: Save the logos-lez-rln build
+      if: steps.lez-rln.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/mint_payer
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/run_setup
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
+          ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
+        key: ${{ steps.lez-rln.outputs.cache-primary-key }}
 
     - name: Export E2E_LEZ_RLN_DIR
       shell: bash
