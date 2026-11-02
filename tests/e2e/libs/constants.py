@@ -12,16 +12,16 @@ NUM_SHARDS_IN_NETWORK = 1
 NODE_TCP_PORT = 60000
 
 CONTENT_TOPIC = "/test/1/logos-delivery-e2e/proto"
-# The network's one shard, which every content topic maps to.
+# The network's only shard, so every content topic maps to it.
 PUBSUB_TOPIC = f"/waku/2/rs/{CLUSTER_ID}/0"
 
-# The local LEZ sequencer's JSON-RPC port, and LEZ's CLOCK_50 account with the clock
-# program's shard in it (logos-execution-zone lez/programs/clock/core): bytes 8-16 hold
-# the timestamp in ms, 0 until block 50.
+# The local LEZ sequencer's JSON-RPC port.
 LEZ_SEQUENCER_PORT = 3040
+# LEZ's CLOCK_50 account and its clock shard (lez/programs/clock/core), with the
+# timestamp in ms at bytes 8-16, 0 until block 50.
 LEZ_CLOCK_50_ACCOUNT = "4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWkX"
 LEZ_CLOCK_SHARD = "2hwaRW8sMnyKLLRbDRw8k68tiv9bnfq98oxcdtcp157Z"
 
 RLN_EPOCH_SIZE_SEC = 600
-# delivery_module's RLN identifier, sha256("rln/logos-delivery/v0.0.1") (docs/pages/rln.md).
+# delivery_module's RLN identifier, sha256("rln/logos-delivery/v0.0.1").
 RLN_IDENTIFIER = "5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977"

@@ -40,7 +40,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
 | `test_send_with_rln_off_propagates` | 2 | a sender with RLN off sees `messagePropagated` |
 | `test_send_without_membership_reports_error` | 2 | a sender with RLN on and no membership sees `messageError` |
-| `test_node_registers_membership` | 1 | a node's RLN module waits for funding, then registers a membership that becomes `active` (see "RLN") |
+| `test_node_registers_membership` | 1 | a node's RLN module waits for funding, then registers an `active` membership (see "RLN") |
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 
@@ -71,18 +71,13 @@ freshly published message should pin `arg3` to `"live"`.
 
 ## RLN
 
-`test_rln.py` runs nodes with RLN on a local LEZ chain. Each xdist worker starts the
-standalone LEZ sequencer in a container on its docker network and deploys an RLN
-registry on it with logos-lez-rln's `run_setup` (`lez_registry` in `conftest.py`). Nodes
-reach the sequencer through `LEZ_RLN_SEQUENCER`. RLN is turned on through a presets file
-named by `LOGOS_DELIVERY_RLN_PRESETS`, whose `""` entry names the local registry, instead
-of the `logos.test` preset, which names the testnet registry and always turns proof
-validation off (see `docs/pages/rln.md`).
-
-A node that sends with a proof registers a membership of its own: the fixture funds the
-node's LEZ payer with logos-lez-rln's `fund_account`, and the RLN module registers by
-itself. Funding waits until the chain's `CLOCK_50` has ticked, since the registry
-refuses a registration before that and the module does not retry it.
+`test_rln.py` runs nodes with RLN on a local LEZ chain. `lez_registry` in `conftest.py`
+starts the standalone LEZ sequencer on the worker's docker network and deploys an RLN
+registry on it with logos-lez-rln's `run_setup`. Nodes read the sequencer's URL from
+`LEZ_RLN_SEQUENCER` and the registry id from the presets file named by
+`LOGOS_DELIVERY_RLN_PRESETS`. After `lez_registry.fund` funds a node's LEZ payer, the
+node's RLN module registers a membership by itself. Funding waits for the chain's `CLOCK_50`,
+because the registry refuses registrations before it.
 
 ## Prerequisites
 
@@ -93,15 +88,15 @@ refuses a registration before that and the module does not retry it.
   (the output of `nix build .#install-portable` → `result/modules`).
 - A host-side `logoscore` CLI on `PATH` (the client shells out to it). Build it from
   `logos-co/logos-logoscore-cli` pinned to the same commit as the smoke image.
-- For `test_rln.py`: `liblogos_rln_module` and `liblogos_lez_rln_module` in
-  `LOGOS_MODULES_DIR` (CI stages them next to `delivery_module`);
-  `E2E_LEZ_SEQUENCER_IMAGE`, the standalone LEZ sequencer image, pulled; and
-  `E2E_LEZ_RLN_DIR`, a logos-lez-rln checkout with its guest programs and its
-  `run_setup`, `mint_payer` and `fund_account` built (see "Running locally — Linux").
-  Without them the RLN tests fail.
+- For `test_rln.py`:
+  - `liblogos_rln_module` and `liblogos_lez_rln_module` in `LOGOS_MODULES_DIR` (CI
+    stages them next to `delivery_module`).
+  - `E2E_LEZ_SEQUENCER_IMAGE` env: the standalone LEZ sequencer image, pulled.
+  - `E2E_LEZ_RLN_DIR` env: a logos-lez-rln checkout with its guest programs and tools
+    built (see "Running locally — Linux").
 
-If any of these is missing, the e2e tests **fail** with the missing piece named. Leave
-the RLN tests out with `-m "not rln"`.
+If any of these is missing, the e2e tests **fail** and name it. `-m "not rln"` leaves
+the RLN tests out.
 
 ## Running locally — Linux
 
@@ -121,9 +116,8 @@ nix build --out-link /tmp/logoscore-cli \
   "github:logos-co/logos-logoscore-cli/<logoscore-cli-commit>#cli"
 export PATH="/tmp/logoscore-cli/bin:$PATH"
 
-# 3. For test_rln.py: the LEZ sequencer image, and logos-lez-rln's guest programs
-#    (cargo-risczero, which builds them in docker) and tools, at the pins of ci.yml and
-#    .github/actions/build-lez-rln.
+# 3. For test_rln.py: the LEZ sequencer image and logos-lez-rln, at the pins of
+#    .github/actions/setup-lez-rln.
 export E2E_LEZ_SEQUENCER_IMAGE=<sequencer-image>
 docker pull "$E2E_LEZ_SEQUENCER_IMAGE"
 curl -L https://risczero.com/install | bash
@@ -141,7 +135,7 @@ pip install -r requirements.txt
 pytest -v -n 4 --dist=loadgroup
 ```
 
-The sequencer image is amd64 only; on Apple silicon Docker runs it emulated.
+The sequencer image is amd64 only, so Docker on Apple silicon runs it emulated.
 
 ## Running locally — macOS
 
@@ -160,10 +154,10 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `clusterId` | `198` | isolated test cluster (interop's `DEFAULT_CLUSTER_ID`) |
 | `numShardsInNetwork` | `1` | single shard → every content topic maps to shard 0 |
 | `discv5Discovery` | `false` | peering is explicit via `staticnodes`, not discovery |
-| `nat` | `none` | a container has no router to map ports on; the mapping opens UDP sockets on kernel-assigned ports, which can take QUIC's port (the TCP port by default) |
+| `nat` | `none` | a container has no router to map ports on, and the mapping can take QUIC's port |
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
 | `store` / `filter` | `false` | not exercised here |
-| `lightpush` / `lightpushnode` | `false` / unset | the light push test only: `true` on its server, and on its client (`relay: false`) the server's multiaddr |
+| `lightpush` / `lightpushnode` | `false` / unset | set by the light push test only, `lightpush` on its server and `lightpushnode` on its `relay: false` client |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
 > A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP
@@ -171,26 +165,18 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 
 ## Troubleshooting
 
-Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
-uploaded in CI on failure as the `e2e-test-logs` artifact (`e2e-rln-logs` for the RLN
-job), the sequencer's among them. Set
+Teardown saves every container's log to `$E2E_LOG_DIR` (default `/tmp`). CI uploads
+them on failure as the `e2e-test-logs` or `e2e-rln-logs` artifact. Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
-Each xdist worker's docker network takes its own /24 of `172.31.0.0/16` (worker
-`gw<n>` the n-th, a run without xdist the first). If another network on the host
-already uses that range, `docker network create` fails with "Pool overlaps"; set
-`E2E_NETWORK_SUBNET` to a free range with a /24 for each worker, such as a /22 for
-`-n 4`.
+Each xdist worker's docker network takes its own /24 of `172.31.0.0/16`. If another
+network on the host already uses that range, `docker network create` fails with "Pool
+overlaps". Set `E2E_NETWORK_SUBNET` to a free range with a /24 per worker, such as a /22
+for `-n 4`.
 
 ## CI
 
-Both e2e jobs in `.github/workflows/ci.yml` build `.#install-portable`, the smoke image
-and the CLI through the composite action `.github/actions/setup-e2e`, and run the tests
-on four xdist workers. The `e2e-tests` job runs `pytest -v -n 4 --dist=loadgroup`, where
-`--dist=loadgroup` keeps the tests that share `node_a` and `node_b` on one, and uploads
-logs on failure.
-
-`e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests; it
-is not a required check. It builds logos-lez-rln through `.github/actions/build-lez-rln`
-(from the Actions cache when its pin is unchanged) and pulls the sequencer image, pinned
-by digest in `ci.yml`.
+`.github/workflows/ci.yml` runs the tests on four xdist workers in two jobs, both set up
+by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`, with
+`--dist=loadgroup` to keep the tests that share `node_a` and `node_b` on one worker.
+`e2e-rln` runs the `rln` tests and is not a required check.

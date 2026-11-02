@@ -1,10 +1,9 @@
 name: Set up e2e environment
 description: >
-  Builds what tests/e2e runs against: the logos-delivery-module (install-portable)
-  and its dependency modules in LOGOS_MODULES_DIR, the logoscore smoke image in
-  LOGOSCORE_IMAGE, the logoscore CLI on PATH, and the Python test dependencies.
-  The smoke image and the dependency modules come from the Actions cache when
-  their pins are unchanged.
+  Builds the delivery module and its dependency modules (LOGOS_MODULES_DIR), the
+  logoscore smoke image (LOGOSCORE_IMAGE) and the logoscore CLI (PATH), and installs
+  the Python test dependencies. The smoke image and the dependency modules come from
+  the Actions cache when their pins are unchanged.
 
 inputs:
   attic-token-ci:
@@ -26,7 +25,6 @@ runs:
         attic-token-ci: ${{ inputs.attic-token-ci }}
         attic-token-public: ${{ inputs.attic-token-public }}
 
-    # Keyed on the logos-logoscore-py commit the smoke image is built from.
     - name: Restore the cached smoke image
       id: smoke-image
       uses: actions/cache/restore@v4
@@ -34,16 +32,13 @@ runs:
         path: ${{ runner.temp }}/logoscore-smoke-image.tar
         key: logoscore-smoke-image-${{ runner.arch }}-${{ inputs.smoke-image-commit }}
 
-    # The gha cache backend needs the docker-container driver;
-    # the default docker driver can't export type=gha.
+    # The default docker driver can't export to the gha cache backend.
     - name: Set up Docker Buildx
       if: steps.smoke-image.outputs.cache-hit != 'true'
       uses: docker/setup-buildx-action@v3
 
-    # type=gha needs ACTIONS_RUNTIME_TOKEN/ACTIONS_CACHE_URL, which
-    # GitHub only injects into actions — this exposes them to run
-    # steps, so buildx invoked from build_smoke_image.sh can reach
-    # the cache API. Without it the gha cache is silently a no-op.
+    # The buildx in build_smoke_image.sh needs ACTIONS_RUNTIME_TOKEN and
+    # ACTIONS_CACHE_URL for the gha cache, and GitHub only gives them to actions.
     - name: Expose Actions runtime for buildx gha cache
       if: steps.smoke-image.outputs.cache-hit != 'true'
       uses: crazy-max/ghaction-github-runtime@v3
@@ -60,9 +55,8 @@ runs:
         path: dependency-modules
         key: e2e-dependency-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
 
-    # install-portable bundles only the module's own lib; its optional
-    # dependencies (libp2p_module, the RLN chain) are built at the revs
-    # flake.lock pins.
+    # install-portable bundles only the module's own lib, so its optional dependencies
+    # (libp2p_module and the RLN modules) are built here at the commits flake.lock pins.
     - name: Build dependency modules
       if: steps.dependency-modules.outputs.cache-hit != 'true'
       shell: bash
@@ -94,7 +88,6 @@ runs:
         done
         chmod -R u+w dependency-modules
 
-    # Saved right after the build, so that a run whose tests fail keeps it.
     - name: Save the dependency modules
       if: steps.dependency-modules.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
@@ -133,7 +126,6 @@ runs:
         docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-smoke-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
 
-    # Saved right after the build, so that a run whose tests fail keeps it.
     - name: Save the smoke image
       if: steps.smoke-image.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4

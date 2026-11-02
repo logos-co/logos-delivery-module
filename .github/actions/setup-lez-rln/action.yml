@@ -1,10 +1,13 @@
-name: Build logos-lez-rln
+name: Set up logos-lez-rln
 description: >
-  Builds what the RLN e2e tests deploy a local registry with: logos-lez-rln's guest
-  programs and its mint_payer, run_setup and fund_account, in E2E_LEZ_RLN_DIR. They
-  come from the Actions cache when their pins are unchanged.
+  Builds logos-lez-rln's guest programs and its mint_payer, run_setup and fund_account
+  tools in E2E_LEZ_RLN_DIR, from the Actions cache when the pins are unchanged. Pulls
+  the LEZ sequencer image into E2E_LEZ_SEQUENCER_IMAGE.
 
 inputs:
+  sequencer-image:
+    description: The standalone LEZ sequencer v0.3.1, the LEZ release the RLN modules use.
+    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
   lez-rln-commit:
     description: The logos-lez-rln commit to build.
     default: 235ddaeee84eec385a2d4b68d69f702a29c14cf3
@@ -25,7 +28,6 @@ runs:
         sudo apt-get update
         sudo apt-get install -y libpcsclite-dev
 
-    # Keyed on the logos-lez-rln commit and the cargo-risczero that builds its guest programs.
     - name: Restore the cached logos-lez-rln build
       id: lez-rln
       uses: actions/cache/restore@v4
@@ -37,9 +39,8 @@ runs:
           ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
         key: lez-rln-${{ runner.arch }}-${{ inputs.lez-rln-commit }}-cargo-risczero-${{ inputs.cargo-risczero-version }}-rust-${{ inputs.risc0-rust-version }}
 
-    # The guest programs build in risc0's guest builder image, r0.1.88.0, but
-    # cargo-risczero still wants the matching risc0 Rust toolchain installed; rustup
-    # installs the toolchain logos-lez-rln's rust-toolchain.toml names for the tools.
+    # The guest programs build in docker, but cargo-risczero still needs the risc0 Rust
+    # toolchain installed.
     - name: Build logos-lez-rln
       if: steps.lez-rln.outputs.cache-hit != 'true'
       shell: bash
@@ -54,7 +55,6 @@ runs:
         cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
         cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
 
-    # Saved right after the build, so that a run whose tests fail keeps it.
     - name: Save the logos-lez-rln build
       if: steps.lez-rln.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
@@ -69,3 +69,9 @@ runs:
     - name: Export E2E_LEZ_RLN_DIR
       shell: bash
       run: echo "E2E_LEZ_RLN_DIR=$RUNNER_TEMP/logos-lez-rln" >> "$GITHUB_ENV"
+
+    - name: Pull the LEZ sequencer image
+      shell: bash
+      run: |
+        docker pull ${{ inputs.sequencer-image }}
+        echo "E2E_LEZ_SEQUENCER_IMAGE=${{ inputs.sequencer-image }}" >> "$GITHUB_ENV"

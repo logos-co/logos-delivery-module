@@ -7,13 +7,10 @@ Three daemon flavours:
   * `node_a` / `node_b` (module scope) — two daemons in a shared docker network,
     peered directly via staticnodes (node A's container-routable multiaddr), used
     by the two-node delivery tests.
-  * `rln_node_factory` (module scope) — daemons with RLN turned on through a
-    presets file in each one's persistence dir, on the RLN registry of a local
-    LEZ sequencer (`lez_registry`), used by the RLN tests.
+  * `rln_node_factory` (module scope) — daemons on the RLN registry of `lez_registry`,
+    used by the RLN tests.
 
-Every prerequisite (docker, the logoscore image, the built module layout) is
-checked by `_e2e_env`, and the RLN modules by `_rln_modules`; a missing one fails
-the test with its name.
+`_e2e_env` and `_rln_modules` fail the test when a prerequisite is missing.
 """
 
 from __future__ import annotations
@@ -65,7 +62,7 @@ LEZ_PAYER_FUNDING = 10**10
 
 class LezRegistry(NamedTuple):
     """An RLN registry on a local LEZ sequencer. `fund` sends native balance to an
-    account id, from the account that deployed the registry, once CLOCK_50 has ticked."""
+    account id once CLOCK_50 has ticked."""
 
     registry_id: str
     sequencer_url: str
@@ -89,7 +86,7 @@ def _save_logs(container_name: str) -> None:
 @pytest.fixture(scope="session")
 def _e2e_env() -> tuple[str, Path]:
     """The logoscore image (LOGOSCORE_IMAGE) and the built module layout
-    (LOGOS_MODULES_DIR). Fails unless docker, the image and the layout are present."""
+    (LOGOS_MODULES_DIR). Fails if docker, the image or the layout is missing."""
     from logoscore import docker_available, image_present  # noqa: PLC0415
 
     if not docker_available():
@@ -108,8 +105,7 @@ def _e2e_env() -> tuple[str, Path]:
 
 @pytest.fixture(scope="session")
 def _rln_modules(_e2e_env: tuple[str, Path]) -> None:
-    """Fails unless LOGOS_MODULES_DIR also holds the RLN modules (CI stages them
-    next to delivery_module)."""
+    """Fails unless LOGOS_MODULES_DIR also holds the RLN modules."""
     _, modules_dir = _e2e_env
     for module in (RLN_MODULE, LEZ_RLN_MODULE):
         if not (modules_dir / module / "manifest.json").is_file():
@@ -117,8 +113,8 @@ def _rln_modules(_e2e_env: tuple[str, Path]) -> None:
 
 
 def _worker_subnet(worker_id: str) -> str:
-    """The xdist worker's /24 of NETWORK_SUBNET: worker gw<n> takes the n-th, a run
-    without xdist the first."""
+    """The n-th /24 of NETWORK_SUBNET for xdist worker gw<n>, the first for a run
+    without xdist."""
     index = 0 if worker_id == "master" else int(worker_id.removeprefix("gw"))
     return str(list(ipaddress.ip_network(NETWORK_SUBNET).subnets(new_prefix=24))[index])
 
@@ -139,9 +135,9 @@ def shared_docker_network(_e2e_env: tuple[str, Path], worker_id: str) -> Iterato
 
 
 def _lez_sequencer_config(payer: str) -> dict:
-    """LEZ v0.3.1's `lez/sequencer/service/configs/docker/sequencer_config.json` with
-    500 ms blocks, so that CLOCK_50 ticks within half a minute, and `payer` as the
-    only genesis account."""
+    """LEZ v0.3.1's `lez/sequencer/service/configs/docker/sequencer_config.json`, with
+    `payer` as the only genesis account and 500 ms blocks so CLOCK_50 ticks within half
+    a minute."""
     return {
         "home": "/var/lib/sequencer_service",
         "max_num_tx_in_block": 20,
@@ -164,8 +160,8 @@ def _lez_sequencer_config(payer: str) -> dict:
 
 
 def _lez_rln_tool(lez_rln: Path, tool: str, home: Path, *args: str, env: dict[str, str] | None = None) -> str:
-    """Run one of logos-lez-rln's tools with `home` as its HOME and LEZ wallet, and
-    return its stdout. `run_setup` reads its guest programs relative to `lez-rln/`."""
+    """Run one of logos-lez-rln's tools with `home` as HOME and wallet home, and return
+    its stdout. `run_setup` reads its guest programs relative to `lez-rln/`."""
     r = subprocess.run(
         [str(lez_rln / "target" / "release" / tool), *args],
         cwd=lez_rln, capture_output=True, text=True, timeout=LEZ_RLN_TOOL_TIMEOUT_S,
@@ -184,9 +180,9 @@ def _lez_block_produced(sequencer_url: str) -> bool:
 
 
 def _lez_wallet_config(sequencer_url: str) -> dict:
-    """The tools' LEZ wallet config. Without it their wallet writes one that names the
-    public testnet. The wallet sleeps `seq_poll_timeout` between checks for a
-    transaction's inclusion."""
+    """The tools' LEZ wallet config, pointed at the local sequencer instead of the
+    public testnet. The wallet polls for a transaction's inclusion every
+    `seq_poll_timeout`."""
     return {
         "sequencer": {"sequencer_addr": sequencer_url},
         "seq_poll_timeout": "500ms",
@@ -240,9 +236,9 @@ def lez_registry(
     shared_docker_network: str,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[LezRegistry]:
-    """An RLN registry on a local LEZ sequencer (E2E_LEZ_SEQUENCER_IMAGE) in
-    `shared_docker_network`, deployed by the `run_setup` of E2E_LEZ_RLN_DIR; `fund`
-    waits for CLOCK_50, which the registry needs before it accepts a registration."""
+    """An RLN registry deployed with `run_setup` on a local LEZ sequencer in
+    `shared_docker_network`. `fund` waits for CLOCK_50, because the registry refuses
+    registrations before it."""
     image = os.environ["E2E_LEZ_SEQUENCER_IMAGE"]
     lez_rln = Path(os.environ["E2E_LEZ_RLN_DIR"]) / "lez-rln"
     home = tmp_path_factory.mktemp("lez-rln-home")
@@ -365,9 +361,9 @@ def rln_node_factory(
     lez_registry: LezRegistry,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Callable[..., DeliveryNode]]:
-    """`delivery_node_factory` for nodes with RLN on the local registry: each daemon
-    gets a presets file in its persistence dir, named by LOGOS_DELIVERY_RLN_PRESETS,
-    and the local sequencer in LEZ_RLN_SEQUENCER."""
+    """`delivery_node_factory` for nodes with RLN on `lez_registry`, through a presets
+    file named by LOGOS_DELIVERY_RLN_PRESETS and the sequencer's URL in
+    LEZ_RLN_SEQUENCER."""
     image, modules_dir = _e2e_env
 
     with ExitStack() as stack:

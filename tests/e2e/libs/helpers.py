@@ -61,9 +61,8 @@ def make_delivery_config(
     lightpush_node: Optional[str] = None,
 ) -> str:
     """JSON config for `createNode` — relay-only, single-shard, discovery-off,
-    matching the two-node relay setup proven by logos-delivery-interop-tests.
-    `lightpush` serves light push; a node without relay sends through
-    `lightpush_node`."""
+    matching the two-node relay setup proven by logos-delivery-interop-tests. A node
+    without relay sends through `lightpush_node`."""
     cfg: dict[str, Any] = {
         "logLevel": "DEBUG",
         "listenAddress": "0.0.0.0",
@@ -158,7 +157,7 @@ class LogosDelivery:
         return call_ok(self.client, "rlnState", timeout=timeout)
 
     def metric(self, name: str, **labels: str) -> float:
-        """Value of the metric `name` with `labels` in the node's Prometheus text, 0 if absent."""
+        """Value of `name` with `labels` in the node's Prometheus text, 0 if absent."""
         label_text = ",".join(f'{key}="{value}"' for key, value in labels.items())
         series = f"{name}{{{label_text}}}" if labels else name
         for line in (self.get_node_info("Metrics") or "").splitlines():
@@ -182,8 +181,8 @@ class DeliveryNode(LogosDelivery):
 def setup_delivery_node(daemon, config_json: str, label: str) -> DeliveryNode:
     """load_module → createNode → start. Returns a started node.
 
-    createNode waits past the 30 s the module itself gives the FFI callback, so
-    that the module's own error is the one reported.
+    createNode waits longer than the module's own 30 s FFI timeout, so the module
+    reports the error.
     """
     node = DeliveryNode(daemon.client(), daemon, label)
     node.load()
@@ -194,8 +193,8 @@ def setup_delivery_node(daemon, config_json: str, label: str) -> DeliveryNode:
 
 def setup_rln_node(daemon, config_json: str, label: str, registry_id: str) -> DeliveryNode:
     """`setup_delivery_node` for a node whose presets file turns RLN on for
-    `registry_id`: the RLN module is loaded before createNode, and RLN is `Ready`
-    before start."""
+    `registry_id`, with the RLN module loaded before createNode and RLN `Ready` before
+    start."""
     node = DeliveryNode(daemon.client(), daemon, label, registry_id)
     node.client.load_module(RLN_MODULE)
     node.load()
@@ -206,8 +205,8 @@ def setup_rln_node(daemon, config_json: str, label: str, registry_id: str) -> De
 
 
 def start_node(node: DeliveryNode) -> None:
-    """`start` returns once the request is dispatched; wait for its `nodeStarted`.
-    Raises unless the node started."""
+    """Start the node and wait for `nodeStarted`, since `start` returns before the node
+    is up."""
     with node.watch() as events:
         time.sleep(SUBSCRIBE_GRACE_S)
         node.start()
@@ -242,11 +241,9 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
 
 
 def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
-    """Poll `node`'s `validate_proof` with a proof from `prover`'s membership until
-    its valid-root window holds the proof's root, and return the verdict. The window
-    fills in the background and nothing else reports it; a warm window answers
-    `invalid` until it holds the root. The proof spends one of `prover`'s messages in
-    the current epoch."""
+    """Poll `node`'s `validate_proof` with a proof from `prover` until the verdict is not
+    `invalid`, and return it. Nothing else reports when `node`'s valid-root window holds
+    the proof's root. The proof spends one of `prover`'s messages in the current epoch."""
     timestamp = str(int(time.time()))
     proof = wait_until(
         lambda: _rln_answer(prover, "generate_proof", RLN_PROBE_SIGNAL, timestamp),
@@ -262,21 +259,21 @@ def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: f
     answer = wait_until(
         settled,
         timeout=timeout,
-        message=f"{node.label}: valid-root window still cold, or answers invalid",
+        message=f"{node.label}: validate_proof not ready, or answers invalid",
     )
     return answer["verdict"]
 
 
 def rln_membership_state(node: DeliveryNode) -> dict:
-    """`get_membership_state` of the node's membership on its registry, read live
-    from the chain: `{"state": "active" | "pending" | "failed" | "unknown" | …}`;
-    while the module registers, `unknown` carries `{"provisioning": {"step": …}}`."""
+    """The node's `get_membership_state` (`active`, `pending`, `failed`, `unknown`, …),
+    read live from the chain. While the module registers, `unknown` carries
+    `provisioning.step`."""
     return _from_json_text(_rln_call(node, "get_membership_state"))
 
 
 def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, timeout: float) -> None:
-    """Fund the node's LEZ payer so that its RLN module registers a membership by
-    itself. Raises unless the membership becomes `active`."""
+    """Fund the node's LEZ payer and wait for its RLN module to register an `active`
+    membership."""
     def wallet_settled():
         status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
         return status if status.get("state") != "pending" else None
@@ -298,16 +295,15 @@ def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, time
 
 def _rln_call(node: DeliveryNode, method: str, *args: str) -> Any:
     """Call a liblogos_rln_module method on the node's registry and the RLN
-    identifier. Every argument is text, sent with the CLI's `str:` prefix so that a
-    digit-only timestamp stays a string."""
+    identifier, with the CLI's `str:` prefix on every argument so a digit-only
+    timestamp stays a string."""
     texts = [f"str:{arg}" for arg in (node.registry_id, RLN_IDENTIFIER, *args)]
     return node.client.call(RLN_MODULE, method, *texts)
 
 
 def _rln_answer(node: DeliveryNode, method: str, *args: str) -> Optional[dict]:
-    """The value of a liblogos_rln_module result call, or None while the module
-    answers with a retryable error class. The module returns `error` as JSON text,
-    and `value` can arrive as JSON text too."""
+    """The value of a liblogos_rln_module result call, or None on an error class in
+    RLN_RETRY_CLASSES. `error` arrives as JSON text, and `value` can too."""
     result = _rln_call(node, method, *args)
     if result.get("success"):
         return _from_json_text(result["value"])
@@ -339,7 +335,7 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
 
 
 def lez_clock_ms(sequencer_url: str) -> int:
-    """CLOCK_50's timestamp; the RLN registry refuses to register while it is 0."""
+    """CLOCK_50's timestamp, 0 while the RLN registry still refuses registrations."""
     account = lez_rpc(sequencer_url, "getAccount", LEZ_CLOCK_50_ACCOUNT)
     shard = account["data"]["shards"].get(LEZ_CLOCK_SHARD, [])
     return int.from_bytes(bytes(shard[8:16]), "little")
