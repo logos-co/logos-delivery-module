@@ -40,12 +40,10 @@ SUBSCRIBE_GRACE_S = 0.5
 
 RLN_PRESETS_ENV = "LOGOS_DELIVERY_RLN_PRESETS"
 RLN_PRESETS_FILE = "rln-presets.json"
-RLN_READY_TIMEOUT_S = 30.0
-NODE_STARTED_TIMEOUT_S = 90.0
-RLN_MEMBERSHIP_TIMEOUT_S = 180.0
+RLN_READY_TIMEOUT_S = 25.0
+NODE_STARTED_TIMEOUT_S = 30.0
 LEZ_SEQUENCER_ENV = "LEZ_RLN_SEQUENCER"
-LEZ_RPC_TIMEOUT_S = 10.0
-BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+LEZ_RPC_TIMEOUT_S = 5.0
 # liblogos_rln_module error classes that clear up by themselves, e.g. while the LEZ
 # wallet syncs or the valid-root window fills.
 RLN_RETRY_CLASSES = ("not_ready", "transient")
@@ -126,16 +124,16 @@ class LogosDelivery:
     def load(self):
         return self.client.load_module(MODULE)
 
-    def create_node(self, config_json: str, *, timeout: Optional[float] = 90.0):
+    def create_node(self, config_json: str, *, timeout: Optional[float] = 40.0):
         return call_ok(self.client, "createNode", config_json, timeout=timeout)
 
-    def create_node_result(self, config_json: str, *, timeout: Optional[float] = 90.0) -> dict:
+    def create_node_result(self, config_json: str, *, timeout: Optional[float] = 40.0) -> dict:
         return call_result(self.client, "createNode", config_json, timeout=timeout)
 
-    def start(self, *, timeout: Optional[float] = 90.0):
+    def start(self, *, timeout: Optional[float] = 30.0):
         return call_ok(self.client, "start", timeout=timeout)
 
-    def stop(self, *, timeout: Optional[float] = 90.0):
+    def stop(self, *, timeout: Optional[float] = 30.0):
         return call_ok(self.client, "stop", timeout=timeout)
 
     def subscribe(self, content_topic: str, *, timeout: Optional[float] = None):
@@ -184,8 +182,8 @@ class DeliveryNode(LogosDelivery):
 def setup_delivery_node(daemon, config_json: str, label: str) -> DeliveryNode:
     """load_module → createNode → start. Returns a started node.
 
-    createNode/start get a generous timeout: cold-starting liblogosdelivery can
-    take tens of seconds, and the module itself waits up to 30s on the FFI callback.
+    createNode waits past the 30 s the module itself gives the FFI callback, so
+    that the module's own error is the one reported.
     """
     node = DeliveryNode(daemon.client(), daemon, label)
     node.load()
@@ -243,26 +241,12 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
         raise AssertionError(f"{node.label}: rlnState {state!r}")
 
 
-def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> None:
-    """Poll the node's LEZ wallet until its first sync is over; until then every
-    chain read of the RLN modules blocks or answers empty. Raises unless the
-    wallet is `ready`."""
-    def settled():
-        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
-        return status if status.get("state") != "pending" else None
-
-    status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
-    if status.get("state") != "ready":
-        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
-
-
 def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
     """Poll `node`'s `validate_proof` with a proof from `prover`'s membership until
     its valid-root window holds the proof's root, and return the verdict. The window
     fills in the background and nothing else reports it; a warm window answers
     `invalid` until it holds the root. The proof spends one of `prover`'s messages in
     the current epoch."""
-    wait_for_lez_wallet(prover, timeout=timeout)
     timestamp = str(int(time.time()))
     proof = wait_until(
         lambda: _rln_answer(prover, "generate_proof", RLN_PROBE_SIGNAL, timestamp),
@@ -293,14 +277,21 @@ def rln_membership_state(node: DeliveryNode) -> dict:
 def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, timeout: float) -> None:
     """Fund the node's LEZ payer so that its RLN module registers a membership by
     itself. Raises unless the membership becomes `active`."""
-    wait_for_lez_wallet(node, timeout=timeout)
-    fund(_from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))["payer"])
+    def wallet_settled():
+        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+        return status if status.get("state") != "pending" else None
+
+    status = wait_until(wallet_settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
+    if status.get("state") != "ready":
+        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
+    fund(status["payer"])
 
     def settled():
         state = rln_membership_state(node)
-        return state if state.get("state") in ("active", "failed") else None
+        step = state.get("provisioning", {}).get("step")
+        return state if state.get("state") in ("active", "failed") or step == "refused" else None
 
-    state = wait_until(settled, timeout=timeout, interval=2.0, message=f"{node.label}: membership not registered")
+    state = wait_until(settled, timeout=timeout, interval=1.0, message=f"{node.label}: membership not registered")
     if state.get("state") != "active":
         raise AssertionError(f"{node.label}: membership {state!r}")
 
@@ -352,14 +343,6 @@ def lez_clock_ms(sequencer_url: str) -> int:
     account = lez_rpc(sequencer_url, "getAccount", LEZ_CLOCK_50_ACCOUNT)
     shard = account["data"]["shards"].get(LEZ_CLOCK_SHARD, [])
     return int.from_bytes(bytes(shard[8:16]), "little")
-
-
-def base58_to_hex(text: str) -> str:
-    """A base58 LEZ account id as the 64-hex text the RLN modules take."""
-    value = 0
-    for char in text:
-        value = value * 58 + BASE58_ALPHABET.index(char)
-    return value.to_bytes(32, "big").hex()
 
 
 def is_connected(event: dict) -> bool:

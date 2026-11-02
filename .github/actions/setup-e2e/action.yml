@@ -29,7 +29,7 @@ runs:
     # Keyed on the logos-logoscore-py commit the smoke image is built from.
     - name: Restore the cached smoke image
       id: smoke-image
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/logoscore-smoke-image.tar
         key: logoscore-smoke-image-${{ runner.arch }}-${{ inputs.smoke-image-commit }}
@@ -55,7 +55,7 @@ runs:
 
     - name: Restore the cached dependency modules
       id: dependency-modules
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: dependency-modules
         key: e2e-dependency-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock') }}
@@ -94,6 +94,14 @@ runs:
         done
         chmod -R u+w dependency-modules
 
+    # Saved right after the build, so that a run whose tests fail keeps it.
+    - name: Save the dependency modules
+      if: steps.dependency-modules.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: dependency-modules
+        key: ${{ steps.dependency-modules.outputs.cache-primary-key }}
+
     - name: Stage dependency modules
       shell: bash
       run: |
@@ -124,6 +132,14 @@ runs:
         bash tests/docker_smoke/build_smoke_image.sh
         docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-smoke-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
+
+    # Saved right after the build, so that a run whose tests fail keeps it.
+    - name: Save the smoke image
+      if: steps.smoke-image.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/logoscore-smoke-image.tar
+        key: ${{ steps.smoke-image.outputs.cache-primary-key }}
 
     - name: Build logoscore CLI binary (host PATH)
       # Must match the daemon commit baked into the smoke image above.

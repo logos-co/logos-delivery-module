@@ -24,42 +24,41 @@ import os
 import secrets
 import subprocess
 import sys
-import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from pathlib import Path
 from typing import NamedTuple
 
+import base58
 import pytest
 
 from libs.constants import LEZ_SEQUENCER_PORT, NETWORK_SUBNET
 from libs.helpers import (
     LEZ_RLN_MODULE,
     LEZ_SEQUENCER_ENV,
-    RLN_MEMBERSHIP_TIMEOUT_S,
     RLN_MODULE,
     RLN_PRESETS_ENV,
     RLN_PRESETS_FILE,
     DeliveryNode,
-    base58_to_hex,
+    is_connected,
     lez_clock_ms,
     lez_rpc,
     make_delivery_config,
     make_rln_presets,
     node_multiaddr,
-    register_membership,
     setup_delivery_node,
     setup_rln_node,
+    wait_for_event,
     wait_until,
 )
 
-MESH_STABILIZATION_S = 12.0
+CONNECTED_TIMEOUT_S = 10.0
 
 LEZ_RLN_TOOLS = ("mint_payer", "run_setup", "fund_account")
-LEZ_START_TIMEOUT_S = 60.0
-LEZ_CLOCK_TIMEOUT_S = 180.0
-LEZ_RLN_TOOL_TIMEOUT_S = 600.0
+LEZ_START_TIMEOUT_S = 20.0
+LEZ_CLOCK_TIMEOUT_S = 75.0
+LEZ_RLN_TOOL_TIMEOUT_S = 120.0
 LEZ_GENESIS_BALANCE = 10**13
 # A registration needs the price (100 × 10,000) plus a fee reserve of at most 646,400,000.
 LEZ_PAYER_FUNDING = 10**10
@@ -67,7 +66,7 @@ LEZ_PAYER_FUNDING = 10**10
 
 class LezRegistry(NamedTuple):
     """An RLN registry on a local LEZ sequencer. `fund` sends native balance to an
-    account id, from the account that deployed the registry."""
+    account id, from the account that deployed the registry, once CLOCK_50 has ticked."""
 
     registry_id: str
     sequencer_url: str
@@ -147,17 +146,15 @@ def shared_docker_network(_e2e_env_or_skip: tuple[str, Path], worker_id: str) ->
 
 def _lez_sequencer_config(payer: str) -> dict:
     """LEZ v0.3.1's `lez/sequencer/service/configs/docker/sequencer_config.json` with
-    1 s blocks, so that CLOCK_50 ticks within a minute, and `payer` as the only
-    genesis account."""
+    500 ms blocks, so that CLOCK_50 ticks within half a minute, and `payer` as the
+    only genesis account."""
     return {
         "home": "/var/lib/sequencer_service",
         "max_num_tx_in_block": 20,
-        "max_block_size": "1 MiB",
         "mempool_max_size": 10000,
-        "block_create_timeout": "1s",
+        "block_create_timeout": "500ms",
         "retry_pending_blocks_timeout": "7s",
         "bedrock_config": {
-            "backoff": {"start_delay": "100ms", "max_retries": 5},
             "channel_id": "01" * 32,
             "node_url": "http://host.docker.internal:18080",
             "funding_key": "2e03b2eff5a45478e7e79668d2a146cf2c5c7925bce927f2b1c67f2ab4fc0d26",
@@ -199,9 +196,10 @@ def lez_registry(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[LezRegistry]:
     """An RLN registry on a local LEZ sequencer in `shared_docker_network`, deployed
-    by logos-lez-rln's `run_setup` once CLOCK_50 ticks. Skips unless
-    E2E_LEZ_SEQUENCER_IMAGE names a present image and E2E_LEZ_RLN_DIR a
-    logos-lez-rln checkout with its tools built."""
+    by logos-lez-rln's `run_setup`; `fund` waits for CLOCK_50, which the registry
+    needs before it accepts a registration. Skips unless E2E_LEZ_SEQUENCER_IMAGE
+    names a present image and E2E_LEZ_RLN_DIR a logos-lez-rln checkout with its
+    tools built."""
     from logoscore import image_present  # noqa: PLC0415
 
     image = os.environ.get("E2E_LEZ_SEQUENCER_IMAGE")
@@ -244,7 +242,7 @@ def lez_registry(
         # wallet sleeps `seq_poll_timeout` between checks for a transaction's inclusion.
         (home / "wallet_config.json").write_text(json.dumps({
             "sequencer": {"sequencer_addr": host_url},
-            "seq_poll_timeout": "1s",
+            "seq_poll_timeout": "500ms",
             "seq_tx_poll_max_blocks": 60,
             "seq_poll_max_retries": 10,
             "seq_block_poll_max_amount": 100,
@@ -264,21 +262,21 @@ def lez_registry(
         )
         if not config_account:
             pytest.fail(f"run_setup printed no config account:\n{setup}")
-        wait_until(
-            lambda: lez_clock_ms(host_url) > 0,
-            timeout=LEZ_CLOCK_TIMEOUT_S,
-            interval=2.0,
-            message="CLOCK_50 never ticked",
-        )
 
         def fund(account_id: str) -> None:
+            wait_until(
+                lambda: lez_clock_ms(host_url) > 0,
+                timeout=LEZ_CLOCK_TIMEOUT_S,
+                interval=1.0,
+                message="CLOCK_50 never ticked",
+            )
             _lez_rln_tool(
                 lez_rln, "fund_account", home, "--to", account_id, "--amount", str(LEZ_PAYER_FUNDING),
                 env={"LEZ_RLN_PAYER": payer},
             )
 
         yield LezRegistry(
-            registry_id=f"logos:local:{base58_to_hex(config_account)}",
+            registry_id=f"logos:local:{base58.b58decode(config_account).hex()}",
             sequencer_url=f"http://{container_name}:{LEZ_SEQUENCER_PORT}/",
             fund=fund,
         )
@@ -306,7 +304,7 @@ def _new_daemon(
         network=network,
         persistence_dir=persistence_dir,
         env=env,
-        startup_timeout=60.0,
+        startup_timeout=30.0,
         extra_args=["--verbose"],
     )
     return daemon, container_name
@@ -356,9 +354,9 @@ def node_b(
     delivery_node_factory: Callable[[str, str], DeliveryNode],
     node_a: DeliveryNode,
 ) -> DeliveryNode:
-    peer = node_multiaddr(node_a)
-    node = delivery_node_factory("B", make_delivery_config(static_peers=[peer]))
-    time.sleep(MESH_STABILIZATION_S)
+    with node_a.watch() as events:
+        node = delivery_node_factory("B", make_delivery_config(static_peers=[node_multiaddr(node_a)]))
+        wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
     return node
 
 
@@ -372,8 +370,7 @@ def rln_node_factory(
 ) -> Iterator[Callable[..., DeliveryNode]]:
     """`delivery_node_factory` for nodes with RLN on the local registry: each daemon
     gets a presets file in its persistence dir, named by LOGOS_DELIVERY_RLN_PRESETS,
-    and the local sequencer in LEZ_RLN_SEQUENCER. A node given `membership` has its
-    payer funded and registers a membership of its own."""
+    and the local sequencer in LEZ_RLN_SEQUENCER."""
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
@@ -382,7 +379,6 @@ def rln_node_factory(
             config_json: str,
             *,
             enable_validation: bool,
-            membership: bool = False,
         ) -> DeliveryNode:
             persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
             (persistence_dir / RLN_PRESETS_FILE).write_text(
@@ -398,9 +394,6 @@ def rln_node_factory(
             )
             stack.enter_context(daemon)
             stack.callback(_save_logs, container_name)
-            node = setup_rln_node(daemon, config_json, label, lez_registry.registry_id)
-            if membership:
-                register_membership(node, lez_registry.fund, timeout=RLN_MEMBERSHIP_TIMEOUT_S)
-            return node
+            return setup_rln_node(daemon, config_json, label, lez_registry.registry_id)
 
         yield _create

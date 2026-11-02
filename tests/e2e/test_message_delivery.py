@@ -26,8 +26,8 @@ from libs.helpers import (
 
 logger = logging.getLogger(__name__)
 
-PROPAGATED_TIMEOUT_S = 40.0
-RECEIVED_TIMEOUT_S = 20.0
+PROPAGATED_TIMEOUT_S = 10.0
+RECEIVED_TIMEOUT_S = 10.0
 
 # The tests share node_a and node_b, so one xdist worker runs them all.
 pytestmark = [pytest.mark.two_node, pytest.mark.xdist_group("message_delivery")]

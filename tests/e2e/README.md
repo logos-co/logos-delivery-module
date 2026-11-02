@@ -183,13 +183,11 @@ already uses that range, `docker network create` fails with "Pool overlaps"; set
 
 ## CI
 
-`.github/workflows/ci.yml` has an `e2e-tests` job (`needs: build-and-test`,
-ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, runs
-`pytest -v -n 4 --dist=loadgroup`, and uploads logs on failure. `build-and-test`
-pre-warms the `install-portable` cachix cache so the e2e job hits it warm. Both e2e jobs
-set up through the composite action `.github/actions/setup-e2e`, and run the tests on
-four xdist workers; `--dist=loadgroup` keeps the tests that share `node_a` and `node_b`
-on one.
+Both e2e jobs in `.github/workflows/ci.yml` build `.#install-portable`, the smoke image
+and the CLI through the composite action `.github/actions/setup-e2e`, and run the tests
+on four xdist workers. The `e2e-tests` job runs `pytest -v -n 4 --dist=loadgroup`, where
+`--dist=loadgroup` keeps the tests that share `node_a` and `node_b` on one, and uploads
+logs on failure.
 
 `e2e-tests` runs the tests not marked `rln`. The `e2e-rln` job runs the `rln` tests; it
 is not a required check. It builds logos-lez-rln through `.github/actions/build-lez-rln`
