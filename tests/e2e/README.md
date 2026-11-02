@@ -109,25 +109,26 @@ If any of these is missing, all e2e tests **skip** with a clear reason.
 nix build .#install-portable
 export LOGOS_MODULES_DIR=$PWD/result/modules
 
-# 2. Build the logoscore smoke image (one-time) + CLI, pinned together.
+# 2. Build the logoscore smoke image (one-time) + CLI, pinned together, at the
+#    commits of .github/actions/setup-e2e.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-cd /tmp/logoscore-py && git checkout aa45db52
+cd /tmp/logoscore-py && git checkout <smoke-image-commit>
 bash tests/docker_smoke/build_smoke_image.sh
 export LOGOSCORE_IMAGE=logoscore:smoke-portable
 cd -
 nix build --out-link /tmp/logoscore-cli \
-  "github:logos-co/logos-logoscore-cli/5a1cf746e841e8e8a8fd48333cff55bd12c45c52#cli"
+  "github:logos-co/logos-logoscore-cli/<logoscore-cli-commit>#cli"
 export PATH="/tmp/logoscore-cli/bin:$PATH"
 
 # 3. For test_rln.py: the LEZ sequencer image, and logos-lez-rln's guest programs
 #    (cargo-risczero, which builds them in docker) and tools, at the pins of ci.yml and
 #    .github/actions/build-lez-rln.
-docker pull harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
-export E2E_LEZ_SEQUENCER_IMAGE=harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
+export E2E_LEZ_SEQUENCER_IMAGE=<sequencer-image>
+docker pull "$E2E_LEZ_SEQUENCER_IMAGE"
 curl -L https://risczero.com/install | bash
-~/.risc0/bin/rzup install cargo-risczero 3.0.5 && ~/.risc0/bin/rzup install rust 1.88.0
+~/.risc0/bin/rzup install cargo-risczero <cargo-risczero-version> && ~/.risc0/bin/rzup install rust <risc0-rust-version>
 git clone https://github.com/logos-co/logos-lez-rln.git /tmp/logos-lez-rln
-cd /tmp/logos-lez-rln && git checkout 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+cd /tmp/logos-lez-rln && git checkout <lez-rln-commit>
 cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
 cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
 export E2E_LEZ_RLN_DIR=/tmp/logos-lez-rln

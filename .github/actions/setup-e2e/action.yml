@@ -13,6 +13,9 @@ inputs:
   attic-token-public:
     description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
     required: true
+  smoke-image-commit:
+    description: The logos-logoscore-py commit the smoke image is built from.
+    default: a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
 
 runs:
   using: composite
@@ -29,7 +32,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ runner.temp }}/logoscore-smoke-image.tar
-        key: logoscore-smoke-image-${{ runner.arch }}-a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
+        key: logoscore-smoke-image-${{ runner.arch }}-${{ inputs.smoke-image-commit }}
 
     # The gha cache backend needs the docker-container driver;
     # the default docker driver can't export type=gha.
@@ -117,7 +120,7 @@ runs:
       run: |
         git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
         cd /tmp/logoscore-py
-        git checkout a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
+        git checkout ${{ inputs.smoke-image-commit }}
         bash tests/docker_smoke/build_smoke_image.sh
         docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-smoke-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV

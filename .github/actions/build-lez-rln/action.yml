@@ -4,6 +4,17 @@ description: >
   programs and its mint_payer, run_setup and fund_account, in E2E_LEZ_RLN_DIR. They
   come from the Actions cache when their pins are unchanged.
 
+inputs:
+  lez-rln-commit:
+    description: The logos-lez-rln commit to build.
+    default: 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+  cargo-risczero-version:
+    description: The cargo-risczero that builds the guest programs.
+    default: 3.0.5
+  risc0-rust-version:
+    description: The risc0 Rust toolchain cargo-risczero checks for.
+    default: 1.88.0
+
 runs:
   using: composite
   steps:
@@ -24,7 +35,7 @@ runs:
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/run_setup
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
           ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
-        key: lez-rln-${{ runner.arch }}-235ddaeee84eec385a2d4b68d69f702a29c14cf3-cargo-risczero-3.0.5-rust-1.88.0
+        key: lez-rln-${{ runner.arch }}-${{ inputs.lez-rln-commit }}-cargo-risczero-${{ inputs.cargo-risczero-version }}-rust-${{ inputs.risc0-rust-version }}
 
     # The guest programs build in risc0's guest builder image, r0.1.88.0, but
     # cargo-risczero still wants the matching risc0 Rust toolchain installed; rustup
@@ -34,12 +45,12 @@ runs:
       shell: bash
       run: |
         curl -L https://risczero.com/install | bash
-        "$HOME/.risc0/bin/rzup" install cargo-risczero 3.0.5
-        "$HOME/.risc0/bin/rzup" install rust 1.88.0
+        "$HOME/.risc0/bin/rzup" install cargo-risczero ${{ inputs.cargo-risczero-version }}
+        "$HOME/.risc0/bin/rzup" install rust ${{ inputs.risc0-rust-version }}
         export PATH="$HOME/.risc0/bin:$PATH"
         git clone https://github.com/logos-co/logos-lez-rln.git "$RUNNER_TEMP/logos-lez-rln"
         cd "$RUNNER_TEMP/logos-lez-rln"
-        git checkout 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+        git checkout ${{ inputs.lez-rln-commit }}
         cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
         cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
 
