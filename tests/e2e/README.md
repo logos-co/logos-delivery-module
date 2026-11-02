@@ -98,9 +98,10 @@ refuses a registration before that and the module does not retry it.
   `E2E_LEZ_SEQUENCER_IMAGE`, the standalone LEZ sequencer image, pulled; and
   `E2E_LEZ_RLN_DIR`, a logos-lez-rln checkout with its guest programs and its
   `run_setup`, `mint_payer` and `fund_account` built (see "Running locally — Linux").
-  Without them the RLN tests skip.
+  Without them the RLN tests fail.
 
-If any of these is missing, all e2e tests **skip** with a clear reason.
+If any of these is missing, the e2e tests **fail** with the missing piece named. Leave
+the RLN tests out with `-m "not rln"`.
 
 ## Running locally — Linux
 

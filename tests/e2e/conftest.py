@@ -12,8 +12,8 @@ Three daemon flavours:
     LEZ sequencer (`lez_registry`), used by the RLN tests.
 
 Every prerequisite (docker, the logoscore image, the built module layout) is
-gated by `_e2e_env_or_skip`, the RLN modules by `_rln_modules_or_skip`, and the
-local LEZ chain by `lez_registry`, so the suite skips cleanly when run without setup.
+checked by `_e2e_env`, and the RLN modules by `_rln_modules`; a missing one fails
+the test with its name.
 """
 
 from __future__ import annotations
@@ -55,7 +55,6 @@ from libs.helpers import (
 
 CONNECTED_TIMEOUT_S = 10.0
 
-LEZ_RLN_TOOLS = ("mint_payer", "run_setup", "fund_account")
 LEZ_START_TIMEOUT_S = 20.0
 LEZ_CLOCK_TIMEOUT_S = 75.0
 LEZ_RLN_TOOL_TIMEOUT_S = 120.0
@@ -88,24 +87,19 @@ def _save_logs(container_name: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def _e2e_env_or_skip() -> tuple[str, Path]:
-    """Single gate: skip unless docker, the logoscore image, and the built
-    delivery_module layout are all present."""
+def _e2e_env() -> tuple[str, Path]:
+    """The logoscore image (LOGOSCORE_IMAGE) and the built module layout
+    (LOGOS_MODULES_DIR). Fails unless docker, the image and the layout are present."""
     from logoscore import docker_available, image_present  # noqa: PLC0415
 
     if not docker_available():
-        pytest.skip("docker not available")
-    image = os.environ.get("LOGOSCORE_IMAGE")
-    if not image:
-        pytest.skip("LOGOSCORE_IMAGE not set")
+        pytest.fail("docker not available")
+    image = os.environ["LOGOSCORE_IMAGE"]
     if not image_present(image):
-        pytest.skip(f"LOGOSCORE_IMAGE={image!r} not present locally")
-    modules_dir_env = os.environ.get("LOGOS_MODULES_DIR")
-    if not modules_dir_env:
-        pytest.skip("LOGOS_MODULES_DIR not set")
-    modules_dir = Path(modules_dir_env)
+        pytest.fail(f"LOGOSCORE_IMAGE={image!r} not present locally")
+    modules_dir = Path(os.environ["LOGOS_MODULES_DIR"])
     if not (modules_dir / "delivery_module" / "manifest.json").is_file():
-        pytest.skip(
+        pytest.fail(
             f"LOGOS_MODULES_DIR={modules_dir} doesn't contain "
             "delivery_module/manifest.json — did you run `nix build .#install-portable`?"
         )
@@ -113,13 +107,13 @@ def _e2e_env_or_skip() -> tuple[str, Path]:
 
 
 @pytest.fixture(scope="session")
-def _rln_modules_or_skip(_e2e_env_or_skip: tuple[str, Path]) -> None:
-    """Skip unless LOGOS_MODULES_DIR also holds the RLN modules (CI stages them
+def _rln_modules(_e2e_env: tuple[str, Path]) -> None:
+    """Fails unless LOGOS_MODULES_DIR also holds the RLN modules (CI stages them
     next to delivery_module)."""
-    _, modules_dir = _e2e_env_or_skip
+    _, modules_dir = _e2e_env
     for module in (RLN_MODULE, LEZ_RLN_MODULE):
         if not (modules_dir / module / "manifest.json").is_file():
-            pytest.skip(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
+            pytest.fail(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
 
 
 def _worker_subnet(worker_id: str) -> str:
@@ -130,7 +124,7 @@ def _worker_subnet(worker_id: str) -> str:
 
 
 @pytest.fixture(scope="session")
-def shared_docker_network(_e2e_env_or_skip: tuple[str, Path], worker_id: str) -> Iterator[str]:
+def shared_docker_network(_e2e_env: tuple[str, Path], worker_id: str) -> Iterator[str]:
     name = f"logosdelivery-e2e-{uuid.uuid4().hex[:8]}"
     r = subprocess.run(
         ["docker", "network", "create", "--subnet", _worker_subnet(worker_id), name],
@@ -189,41 +183,24 @@ def _lez_block_produced(sequencer_url: str) -> bool:
         return False
 
 
-@pytest.fixture(scope="session")
-def lez_registry(
-    _rln_modules_or_skip: None,
-    shared_docker_network: str,
-    tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[LezRegistry]:
-    """An RLN registry on a local LEZ sequencer in `shared_docker_network`, deployed
-    by logos-lez-rln's `run_setup`; `fund` waits for CLOCK_50, which the registry
-    needs before it accepts a registration. Skips unless E2E_LEZ_SEQUENCER_IMAGE
-    names a present image and E2E_LEZ_RLN_DIR a logos-lez-rln checkout with its
-    tools built."""
-    from logoscore import image_present  # noqa: PLC0415
+def _lez_wallet_config(sequencer_url: str) -> dict:
+    """The tools' LEZ wallet config. Without it their wallet writes one that names the
+    public testnet. The wallet sleeps `seq_poll_timeout` between checks for a
+    transaction's inclusion."""
+    return {
+        "sequencer": {"sequencer_addr": sequencer_url},
+        "seq_poll_timeout": "500ms",
+        "seq_tx_poll_max_blocks": 60,
+        "seq_poll_max_retries": 10,
+        "seq_block_poll_max_amount": 100,
+    }
 
-    image = os.environ.get("E2E_LEZ_SEQUENCER_IMAGE")
-    if not image:
-        pytest.skip("E2E_LEZ_SEQUENCER_IMAGE not set")
-    if not image_present(image):
-        pytest.skip(f"E2E_LEZ_SEQUENCER_IMAGE={image!r} not present locally")
-    lez_rln_dir = os.environ.get("E2E_LEZ_RLN_DIR")
-    if not lez_rln_dir:
-        pytest.skip("E2E_LEZ_RLN_DIR not set")
-    lez_rln = Path(lez_rln_dir) / "lez-rln"
-    for tool in LEZ_RLN_TOOLS:
-        if not (lez_rln / "target" / "release" / tool).is_file():
-            pytest.skip(f"E2E_LEZ_RLN_DIR={lez_rln_dir} has no lez-rln/target/release/{tool}")
 
-    home = tmp_path_factory.mktemp("lez-rln-home")
-    payer = _lez_rln_tool(lez_rln, "mint_payer", home).split()[-1]
-    sequencer_config = home / "sequencer_config.json"
-    sequencer_config.write_text(json.dumps(_lez_sequencer_config(payer)))
-
+def _start_lez_sequencer(image: str, network: str, sequencer_config: Path) -> str:
     container_name = f"lez-sequencer-{uuid.uuid4().hex[:8]}"
     r = subprocess.run(
         [
-            "docker", "run", "-d", "--name", container_name, "--network", shared_docker_network,
+            "docker", "run", "-d", "--name", container_name, "--network", network,
             "-p", f"127.0.0.1::{LEZ_SEQUENCER_PORT}",
             "-v", f"{sequencer_config}:/etc/sequencer_service/sequencer_config.json:ro",
             image,
@@ -232,36 +209,56 @@ def lez_registry(
     )
     if r.returncode != 0:
         pytest.fail(f"failed to start the LEZ sequencer: {r.stderr.strip()}")
+    return container_name
+
+
+def _lez_host_url(container_name: str) -> str:
+    port = subprocess.run(
+        ["docker", "port", container_name, str(LEZ_SEQUENCER_PORT)],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()[0].rsplit(":", 1)[1]
+    return f"http://127.0.0.1:{port}/"
+
+
+def _run_setup(lez_rln: Path, home: Path, payer: str) -> str:
+    """Deploy a registry on a fresh tree, paid by `payer`, and return its config account."""
+    setup = _lez_rln_tool(
+        lez_rln, "run_setup", home,
+        env={"LEZ_RLN_PAYER": payer, "LEZ_RLN_TREE_ID_HEX": secrets.token_hex(32), "RISC0_DEV_MODE": "1"},
+    )
+    config_account = next(
+        (line.split()[-1] for line in setup.splitlines() if line.startswith("Config account:")), None
+    )
+    if not config_account:
+        pytest.fail(f"run_setup printed no config account:\n{setup}")
+    return config_account
+
+
+@pytest.fixture(scope="session")
+def lez_registry(
+    _rln_modules: None,
+    shared_docker_network: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[LezRegistry]:
+    """An RLN registry on a local LEZ sequencer (E2E_LEZ_SEQUENCER_IMAGE) in
+    `shared_docker_network`, deployed by the `run_setup` of E2E_LEZ_RLN_DIR; `fund`
+    waits for CLOCK_50, which the registry needs before it accepts a registration."""
+    image = os.environ["E2E_LEZ_SEQUENCER_IMAGE"]
+    lez_rln = Path(os.environ["E2E_LEZ_RLN_DIR"]) / "lez-rln"
+    home = tmp_path_factory.mktemp("lez-rln-home")
+    payer = _lez_rln_tool(lez_rln, "mint_payer", home).split()[-1]
+    sequencer_config = home / "sequencer_config.json"
+    sequencer_config.write_text(json.dumps(_lez_sequencer_config(payer)))
+    container_name = _start_lez_sequencer(image, shared_docker_network, sequencer_config)
     try:
-        port = subprocess.run(
-            ["docker", "port", container_name, str(LEZ_SEQUENCER_PORT)],
-            capture_output=True, text=True, check=True,
-        ).stdout.split()[0].rsplit(":", 1)[1]
-        host_url = f"http://127.0.0.1:{port}/"
-        # Without it the tools' wallet writes one that names the public testnet. The
-        # wallet sleeps `seq_poll_timeout` between checks for a transaction's inclusion.
-        (home / "wallet_config.json").write_text(json.dumps({
-            "sequencer": {"sequencer_addr": host_url},
-            "seq_poll_timeout": "500ms",
-            "seq_tx_poll_max_blocks": 60,
-            "seq_poll_max_retries": 10,
-            "seq_block_poll_max_amount": 100,
-        }))
+        host_url = _lez_host_url(container_name)
+        (home / "wallet_config.json").write_text(json.dumps(_lez_wallet_config(host_url)))
         wait_until(
             lambda: _lez_block_produced(host_url),
             timeout=LEZ_START_TIMEOUT_S,
             message="the LEZ sequencer produced no block",
         )
-
-        setup = _lez_rln_tool(
-            lez_rln, "run_setup", home,
-            env={"LEZ_RLN_PAYER": payer, "LEZ_RLN_TREE_ID_HEX": secrets.token_hex(32), "RISC0_DEV_MODE": "1"},
-        )
-        config_account = next(
-            (line.split()[-1] for line in setup.splitlines() if line.startswith("Config account:")), None
-        )
-        if not config_account:
-            pytest.fail(f"run_setup printed no config account:\n{setup}")
+        config_account = _run_setup(lez_rln, home, payer)
 
         def fund(account_id: str) -> None:
             wait_until(
@@ -311,10 +308,10 @@ def _new_daemon(
 
 
 @pytest.fixture
-def solo_daemon(_e2e_env_or_skip: tuple[str, Path], shared_docker_network: str) -> Iterator:
+def solo_daemon(_e2e_env: tuple[str, Path], shared_docker_network: str) -> Iterator:
     """A fresh, started logoscore container — module mounted, nothing loaded yet.
     The test drives load_module/createNode/start/stop itself."""
-    image, modules_dir = _e2e_env_or_skip
+    image, modules_dir = _e2e_env
     daemon, container_name = _new_daemon(image, modules_dir, shared_docker_network, "solo")
     try:
         daemon.start()
@@ -326,13 +323,13 @@ def solo_daemon(_e2e_env_or_skip: tuple[str, Path], shared_docker_network: str) 
 
 @pytest.fixture(scope="module")
 def delivery_node_factory(
-    _e2e_env_or_skip: tuple[str, Path],
+    _e2e_env: tuple[str, Path],
     shared_docker_network: str,
 ) -> Iterator[Callable[[str, str], DeliveryNode]]:
     """Factory spawning a fully set-up (load+createNode+start) DeliveryNode per
     call. All teardown + log capture is registered on one ExitStack closed when
     the module's tests finish."""
-    image, modules_dir = _e2e_env_or_skip
+    image, modules_dir = _e2e_env
 
     with ExitStack() as stack:
         def _create(label: str, config_json: str) -> DeliveryNode:
@@ -362,8 +359,8 @@ def node_b(
 
 @pytest.fixture(scope="module")
 def rln_node_factory(
-    _e2e_env_or_skip: tuple[str, Path],
-    _rln_modules_or_skip: None,
+    _e2e_env: tuple[str, Path],
+    _rln_modules: None,
     shared_docker_network: str,
     lez_registry: LezRegistry,
     tmp_path_factory: pytest.TempPathFactory,
@@ -371,7 +368,7 @@ def rln_node_factory(
     """`delivery_node_factory` for nodes with RLN on the local registry: each daemon
     gets a presets file in its persistence dir, named by LOGOS_DELIVERY_RLN_PRESETS,
     and the local sequencer in LEZ_RLN_SEQUENCER."""
-    image, modules_dir = _e2e_env_or_skip
+    image, modules_dir = _e2e_env
 
     with ExitStack() as stack:
         def _create(
