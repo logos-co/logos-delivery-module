@@ -16,14 +16,17 @@ import subprocess
 import time
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from logos_integration_test_framework import subscribe as _watch_events
 
 from libs.constants import (
     CLUSTER_ID,
+    FLEET_PRESET,
     LEZ_CLOCK_50_ACCOUNT,
     LEZ_CLOCK_SHARD,
+    LEZ_SEQUENCER_URL,
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
@@ -48,6 +51,8 @@ LEZ_RPC_TIMEOUT_S = 5.0
 # wallet syncs or the valid-root window fills.
 RLN_RETRY_CLASSES = ("not_ready", "transient")
 RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
+
+STORE_QUERY_TIMEOUT_MS = 20000
 
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
@@ -85,11 +90,21 @@ def make_delivery_config(
     return json.dumps(cfg)
 
 
-def make_rln_presets(*, enable_validation: bool, registry_id: str) -> str:
-    """Contents of the RLN presets file for a test node: its `""` entry applies to
-    nodes created without a `preset`."""
+def make_fleet_config(*, mode: str) -> str:
+    """JSON config for `createNode` on the logos.test fleet: the preset's network and
+    RLN, without NAT port mapping. `mode` is "Core" or "Edge"."""
     return json.dumps({
-        "": {
+        "mode": mode,
+        "preset": FLEET_PRESET,
+        "messagingOverrides": {"logLevel": "DEBUG", "nat": "none"},
+    })
+
+
+def make_rln_presets(*, enable_validation: bool, registry_id: str, preset: str = "") -> str:
+    """Contents of the RLN presets file for a test node: its entry applies to nodes
+    created with `preset`, the `""` entry to nodes created without one."""
+    return json.dumps({
+        preset: {
             "enabled": True,
             "registry-id": registry_id,
             "epoch-size-sec": RLN_EPOCH_SIZE_SEC,
@@ -156,6 +171,12 @@ class LogosDelivery:
     def rln_state(self, *, timeout: Optional[float] = None) -> dict:
         return call_ok(self.client, "rlnState", timeout=timeout)
 
+    def connection_status(self, *, timeout: Optional[float] = None) -> str:
+        return call_ok(self.client, "getConnectionStatus", timeout=timeout)
+
+    def store_query(self, query_json: str, peer_addr: str) -> dict:
+        return call_result(self.client, "storeQuery", query_json, peer_addr, STORE_QUERY_TIMEOUT_MS)
+
     def metric(self, name: str, **labels: str) -> float:
         """Value of `name` with `labels` in the node's Prometheus text, 0 if absent."""
         label_text = ",".join(f'{key}="{value}"' for key, value in labels.items())
@@ -215,6 +236,14 @@ def start_node(node: DeliveryNode) -> None:
         raise AssertionError(f"{node.label}: start failed: {event_arg(event, 1)!r}")
 
 
+def in_parallel(*calls: Callable[[], Any]) -> list:
+    """Run `calls` in threads and return their results in order. Raises the first
+    call's exception once all have ended."""
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        futures = [pool.submit(call) for call in calls]
+        return [future.result() for future in futures]
+
+
 def wait_until(condition, *, timeout: float, interval: float = 0.5, message: str = "") -> Any:
     """Call `condition` until it returns a truthy value, and return that value.
     Raises AssertionError with `message` after `timeout` seconds."""
@@ -238,6 +267,20 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
     state = wait_until(settled, timeout=timeout, message=f"{node.label}: RLN still Initializing")
     if state.get("state") != "Ready":
         raise AssertionError(f"{node.label}: rlnState {state!r}")
+
+
+def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> dict:
+    """Poll the node's LEZ wallet until its first sync is over, and return its
+    `wallet_status`; until then every chain read of the RLN modules blocks or answers
+    empty. Raises unless the wallet is `ready`."""
+    def settled():
+        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
+        return status if status.get("state") != "pending" else None
+
+    status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
+    if status.get("state") != "ready":
+        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
+    return status
 
 
 def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: float) -> str:
@@ -264,6 +307,46 @@ def wait_for_valid_roots(node: DeliveryNode, prover: DeliveryNode, *, timeout: f
     return answer["verdict"]
 
 
+def current_epoch() -> int:
+    return int(time.time() // RLN_EPOCH_SIZE_SEC)
+
+
+def seconds_until_epoch(epoch: int) -> float:
+    """Seconds until RLN epoch `epoch` starts; 0 once it has."""
+    return max(0.0, epoch * RLN_EPOCH_SIZE_SEC - time.time())
+
+
+def wait_for_connected(node: DeliveryNode, *, timeout: float) -> None:
+    """Poll `getConnectionStatus` until the node reports one of CONNECTED_STATUSES. A
+    node that connects during `start` does so before a test can watch for
+    `connectionStateChanged`."""
+    wait_until(
+        lambda: node.connection_status() in CONNECTED_STATUSES,
+        timeout=timeout,
+        message=f"{node.label}: not connected",
+    )
+
+
+def stored_messages(node: DeliveryNode, content_topic: str, peers) -> list:
+    """The messages on `content_topic` from the first store peer of `peers` that
+    holds any; empty if none does."""
+    query = json.dumps({
+        "requestId": "e2e",
+        "includeData": True,
+        "paginationForward": True,
+        "contentTopics": [content_topic],
+    })
+    for peer in peers:
+        result = node.store_query(query, peer)
+        if not result.get("success"):
+            logger.info("%s: storeQuery to %s failed: %s", node.label, peer, result.get("error"))
+            continue
+        messages = _from_json_text(result["value"]).get("messages")
+        if messages:
+            return messages
+    return []
+
+
 def rln_membership_state(node: DeliveryNode) -> dict:
     """The node's `get_membership_state` (`active`, `pending`, `failed`, `unknown`, …),
     read live from the chain. While the module registers, `unknown` carries
@@ -274,14 +357,7 @@ def rln_membership_state(node: DeliveryNode) -> dict:
 def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, timeout: float) -> None:
     """Fund the node's LEZ payer and wait for its RLN module to register an `active`
     membership."""
-    def wallet_settled():
-        status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
-        return status if status.get("state") != "pending" else None
-
-    status = wait_until(wallet_settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
-    if status.get("state") != "ready":
-        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
-    fund(status["payer"])
+    fund(wait_for_lez_wallet(node, timeout=timeout)["payer"])
 
     def settled():
         state = rln_membership_state(node)
@@ -332,6 +408,11 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
     if "result" not in reply:
         raise AssertionError(f"{method} returned no result: {reply!r}")
     return reply["result"]
+
+
+def lez_last_block_id() -> int:
+    """The LEZ testnet sequencer's `getLastBlockId`: the chain tip."""
+    return lez_rpc(LEZ_SEQUENCER_URL, "getLastBlockId")
 
 
 def lez_clock_ms(sequencer_url: str) -> int:
