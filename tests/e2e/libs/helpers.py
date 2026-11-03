@@ -199,28 +199,22 @@ class DeliveryNode(LogosDelivery):
         self.registry_id = registry_id
 
 
-def setup_delivery_node(daemon, config_json: str, label: str) -> DeliveryNode:
-    """load_module → createNode → start. Returns a started node.
+def setup_delivery_node(
+    daemon, config_json: str, label: str, *, registry_id: Optional[str] = None
+) -> DeliveryNode:
+    """load_module → createNode → start. Returns a started node. Loading
+    delivery_module also loads the installed modules it can use, the RLN ones
+    included. With `registry_id`, for a node whose presets file turns RLN on for that
+    registry, RLN is `Ready` before start.
 
     createNode waits longer than the module's own 30 s FFI timeout, so the module
     reports the error.
     """
-    node = DeliveryNode(daemon.client(), daemon, label)
-    node.load()
-    node.create_node(config_json)
-    start_node(node)
-    return node
-
-
-def setup_rln_node(daemon, config_json: str, label: str, registry_id: str) -> DeliveryNode:
-    """`setup_delivery_node` for a node whose presets file turns RLN on for
-    `registry_id`, with the RLN module loaded before createNode and RLN `Ready` before
-    start."""
     node = DeliveryNode(daemon.client(), daemon, label, registry_id)
-    node.client.load_module(RLN_MODULE)
     node.load()
     node.create_node(config_json)
-    wait_for_rln_ready(node, timeout=RLN_READY_TIMEOUT_S)
+    if registry_id:
+        wait_for_rln_ready(node, timeout=RLN_READY_TIMEOUT_S)
     start_node(node)
     return node
 

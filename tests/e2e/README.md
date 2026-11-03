@@ -194,7 +194,7 @@ cd tests/e2e
 pip install -r requirements.txt
 pip install --no-deps --force-reinstall \
   "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@<logoscore-py-commit>"
-pytest -v -m "not fleet" -n 4 --dist=loadgroup
+pytest -v -m "not fleet" -n 4
 ```
 
 The sequencer image is amd64 only, so Docker on Apple silicon runs it emulated.
@@ -239,8 +239,7 @@ for `-n 4`. The fleet tests' networks take a range docker picks.
 ## CI
 
 `.github/workflows/ci.yml` runs the tests on four xdist workers in two jobs, both set up
-by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`, with
-`--dist=loadgroup` to keep the tests that share `node_a` and `node_b` on one worker.
+by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`.
 `e2e-tests-rln` runs the `rln` tests except the `fleet` ones, and is not a required check.
 
 The workflow `e2e-fleet.yml` runs the `fleet` tests nightly and on demand, on master

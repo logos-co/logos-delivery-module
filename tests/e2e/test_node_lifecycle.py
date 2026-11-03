@@ -11,16 +11,16 @@ from libs.constants import CONTENT_TOPIC
 from libs.helpers import LogosDelivery, make_delivery_config
 
 
-def test_create_start_and_stop_node(solo_daemon):
-    delivery = LogosDelivery(solo_daemon.client())
+def test_create_start_and_stop_node(daemon_factory):
+    delivery = LogosDelivery(daemon_factory("solo").client())
     delivery.load()
     delivery.create_node(make_delivery_config())
     delivery.start()
     delivery.stop()
 
 
-def test_createNode_twice_rejected(solo_daemon):
-    delivery = LogosDelivery(solo_daemon.client())
+def test_createNode_twice_rejected(daemon_factory):
+    delivery = LogosDelivery(daemon_factory("solo").client())
     delivery.load()
     delivery.create_node(make_delivery_config())
 
@@ -29,10 +29,10 @@ def test_createNode_twice_rejected(solo_daemon):
     assert second.get("error"), "rejection carried no error message"
 
 
-def test_query_and_subscribe_methods(solo_daemon):
+def test_query_and_subscribe_methods(daemon_factory):
     """Every post-start RPC method round-trips: the queries, plus subscribe +
     unsubscribe (the only public methods otherwise unexercised e2e)."""
-    delivery = LogosDelivery(solo_daemon.client())
+    delivery = LogosDelivery(daemon_factory("solo").client())
     delivery.load()
     delivery.create_node(make_delivery_config())
     delivery.start()
