@@ -166,7 +166,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 ## Troubleshooting
 
 Teardown saves every container's log to `$E2E_LOG_DIR` (default `/tmp`). CI uploads
-them on failure as the `e2e-test-logs` or `e2e-rln-logs` artifact. Set
+them on failure as the `e2e-test-logs` or `e2e-tests-rln-logs` artifact. Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16`. If another
@@ -179,4 +179,4 @@ for `-n 4`.
 `.github/workflows/ci.yml` runs the tests on four xdist workers in two jobs, both set up
 by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`, with
 `--dist=loadgroup` to keep the tests that share `node_a` and `node_b` on one worker.
-`e2e-rln` runs the `rln` tests and is not a required check.
+`e2e-tests-rln` runs the `rln` tests and is not a required check.

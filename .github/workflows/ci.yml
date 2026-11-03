@@ -68,7 +68,7 @@ jobs:
           retention-days: 7
 
   # The RLN e2e tests on a local LEZ chain.
-  e2e-rln:
+  e2e-tests-rln:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
@@ -97,6 +97,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-rln-logs
+          name: e2e-tests-rln-logs
           path: ${{ runner.temp }}/e2e-logs/*.log
           retention-days: 7
