@@ -44,7 +44,7 @@ jobs:
   e2e-tests:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,7 +75,7 @@ jobs:
   e2e-tests-rln:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -15,7 +15,7 @@ inputs:
     required: true
   logoscore-py-commit:
     description: The logos-logoscore-py commit of the logosctl image and the Python client.
-    default: 8c140cc53b9535fd21e3da500d38247c615d9352
+    default: edfe322c2f9e2d54962da752451d1609dcbe3fbf
 
 runs:
   using: composite
