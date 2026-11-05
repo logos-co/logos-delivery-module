@@ -15,7 +15,7 @@ Two `delivery_module` daemons in a shared docker network, peered **directly** vi
 A's container-routable multiaddr and dials it; gossipsub/relay handles the rest.
 
 ```
-docker network "logosdelivery-e2e-<uuid>"  (172.31.0.0/16)
+docker network "logosdelivery-e2e-<uuid>"  (one /24 of 172.31.0.0/16 per xdist worker)
   ┌────────────────────────────┐        ┌────────────────────────────┐
   │ logoscore-a  (node A)       │◀──────▶│ logoscore-b  (node B)       │
   │ relay, cluster 198, shard 0 │ relay  │ staticnodes=[A multiaddr]   │
@@ -40,6 +40,9 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
 | `test_send_with_rln_off_propagates` | 2 | a sender with RLN off sees `messagePropagated` |
 | `test_send_without_membership_reports_error` | 2 | a sender with RLN on and no membership sees `messageError` |
+| `test_node_registers_membership` | 1 | a node's RLN module waits for funding, then registers an `active` membership (see "RLN") |
+| `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
+| `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
@@ -68,10 +71,13 @@ freshly published message should pin `arg3` to `"live"`.
 
 ## RLN
 
-`test_rln.py` runs nodes with RLN on the LEZ testnet registry used by `logos.test`,
-without a membership. RLN is turned on through a presets file named by
-`LOGOS_DELIVERY_RLN_PRESETS` instead of the `logos.test` preset, because that preset
-always turns proof validation off (see `docs/pages/rln.md`).
+`test_rln.py` runs nodes with RLN on a local LEZ chain. `lez_registry` in `conftest.py`
+starts the standalone LEZ sequencer on the worker's docker network and deploys an RLN
+registry on it with logos-lez-rln's `run_setup`. Nodes read the sequencer's URL from
+`LEZ_RLN_SEQUENCER` and the registry id from the presets file named by
+`LOGOS_DELIVERY_RLN_PRESETS`. After `lez_registry.fund` funds a node's LEZ payer, the
+node's RLN module registers a membership by itself. Funding waits for the chain's `CLOCK_50`,
+because the registry refuses registrations before it.
 
 ## Prerequisites
 
@@ -80,13 +86,17 @@ always turns proof validation off (see `docs/pages/rln.md`).
   `logos-co/logos-logoscore-py/tests/docker_smoke/build_smoke_image.sh`.
 - `LOGOS_MODULES_DIR` env: a directory containing `delivery_module/manifest.json`
   (the output of `nix build .#install-portable` → `result/modules`).
-- A host-side `logoscore` CLI on `PATH` (the client shells out to it). Build it from
-  `logos-co/logos-logoscore-cli` pinned to the same commit as the smoke image.
-- For `test_rln.py`: `liblogos_rln_module` and `liblogos_lez_rln_module` in
-  `LOGOS_MODULES_DIR` (CI stages them next to `delivery_module`), and outbound HTTPS to
-  `testnet.lez.logos.co`. Without the modules the RLN tests skip.
+- A host-side `logoscore` CLI on `PATH` (the client shells out to it), copied out of
+  the logoscore image so it matches the daemon.
+- For `test_rln.py`:
+  - `liblogos_rln_module` and `liblogos_lez_rln_module` in `LOGOS_MODULES_DIR` (CI
+    stages them next to `delivery_module`).
+  - `E2E_LEZ_SEQUENCER_IMAGE` env: the standalone LEZ sequencer image, pulled.
+  - `E2E_LEZ_RLN_DIR` env: a logos-lez-rln checkout with its guest programs and tools
+    built (see "Running locally — Linux").
 
-If any of these is missing, all e2e tests **skip** with a clear reason.
+If any of these is missing, the e2e tests **fail** and name it. `-m "not rln"` leaves
+the RLN tests out.
 
 ## Running locally — Linux
 
@@ -95,21 +105,40 @@ If any of these is missing, all e2e tests **skip** with a clear reason.
 nix build .#install-portable
 export LOGOS_MODULES_DIR=$PWD/result/modules
 
-# 2. Build the logoscore smoke image (one-time) + CLI, pinned together.
+# 2. Build the logoscore image (one-time) at the logoscore-py-commit of
+#    .github/actions/setup-e2e, and copy its CLI out.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-cd /tmp/logoscore-py && git checkout aa45db52
+cd /tmp/logoscore-py && git checkout <logoscore-py-commit>
 bash tests/docker_smoke/build_smoke_image.sh
 export LOGOSCORE_IMAGE=logoscore:smoke-portable
 cd -
-nix build --out-link /tmp/logoscore-cli \
-  "github:logos-co/logos-logoscore-cli/5a1cf746e841e8e8a8fd48333cff55bd12c45c52#cli"
-export PATH="/tmp/logoscore-cli/bin:$PATH"
+docker create --name logoscore-cli logoscore:smoke-portable
+docker cp logoscore-cli:/opt/logoscore - | tar -x -C /tmp
+docker rm logoscore-cli
+export PATH="/tmp/logoscore/bin:$PATH"
 
-# 3. Install deps + run.
+# 3. For test_rln.py: the LEZ sequencer image and logos-lez-rln, at the pins of
+#    .github/actions/setup-lez-rln.
+export E2E_LEZ_SEQUENCER_IMAGE=<sequencer-image>
+docker pull "$E2E_LEZ_SEQUENCER_IMAGE"
+cargo install rzup --version <rzup-version> --locked
+rzup install cargo-risczero <cargo-risczero-version> && rzup install rust <risc0-rust-version>
+git clone https://github.com/logos-co/logos-lez-rln.git /tmp/logos-lez-rln
+cd /tmp/logos-lez-rln && git checkout <lez-rln-commit>
+cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
+cargo build --release --manifest-path lez-rln/Cargo.toml --bin mint_payer --bin run_setup --bin fund_account
+export E2E_LEZ_RLN_DIR=/tmp/logos-lez-rln
+cd -
+
+# 4. Install deps + run.
 cd tests/e2e
 pip install -r requirements.txt
-pytest -v
+pip install --no-deps --force-reinstall \
+  "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@<logoscore-py-commit>"
+pytest -v -n 4 --dist=loadgroup
 ```
+
+The sequencer image is amd64 only, so Docker on Apple silicon runs it emulated.
 
 ## Running locally — macOS
 
@@ -128,8 +157,10 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 | `clusterId` | `198` | isolated test cluster (interop's `DEFAULT_CLUSTER_ID`) |
 | `numShardsInNetwork` | `1` | single shard → every content topic maps to shard 0 |
 | `discv5Discovery` | `false` | peering is explicit via `staticnodes`, not discovery |
+| `nat` | `none` | a container has no router to map ports on, and the mapping can take QUIC's port |
 | `staticnodes` | `[A multiaddr]` (node B only) | direct dial of node A |
-| `store` / `filter` / `lightpush` | `false` | not exercised here |
+| `store` / `filter` | `false` | not exercised here |
+| `lightpush` / `lightpushnode` | `false` / unset | set by the light push test only, `lightpush` on its server and `lightpushnode` on its `relay: false` client |
 
 > The cluster + shard must match across both nodes (they do — same config builder).
 > A peer is reached via `getNodeInfo("Multiaddrs")` with the container IP
@@ -137,17 +168,18 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 
 ## Troubleshooting
 
-Daemon container logs are saved to `$E2E_LOG_DIR` (default `/tmp`) on teardown, and
-uploaded as the `e2e-test-logs` artifact in CI on failure. Set
+Teardown saves every container's log to `$E2E_LOG_DIR` (default `/tmp`). CI uploads
+them on failure as the `e2e-test-logs` or `e2e-tests-rln-logs` artifact. Set
 `LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
-The docker network uses `172.31.0.0/16`. If another network on the host already uses
-that range, `docker network create` fails with "Pool overlaps"; set
-`E2E_NETWORK_SUBNET` to a free range.
+Each xdist worker's docker network takes its own /24 of `172.31.0.0/16`. If another
+network on the host already uses that range, `docker network create` fails with "Pool
+overlaps". Set `E2E_NETWORK_SUBNET` to a free range with a /24 per worker, such as a /22
+for `-n 4`.
 
 ## CI
 
-`.github/workflows/ci.yml` has an `e2e-tests` job (`needs: build-and-test`,
-ubuntu-latest) that builds `.#install-portable`, builds the smoke image + CLI, runs
-`pytest -v`, and uploads logs on failure. `build-and-test` pre-warms the
-`install-portable` cachix cache so the e2e job hits it warm.
+`.github/workflows/ci.yml` runs the tests on four xdist workers in two jobs, both set up
+by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`, with
+`--dist=loadgroup` to keep the tests that share `node_a` and `node_b` on one worker.
+`e2e-tests-rln` runs the `rln` tests and is not a required check.
