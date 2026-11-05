@@ -6,8 +6,8 @@ description: >
 
 inputs:
   sequencer-image:
-    description: The standalone LEZ sequencer, the LEZ release the RLN modules use.
-    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone:v0.3.1
+    description: The standalone LEZ sequencer.
+    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone:v0.3.2
   lez-rln-commit:
     description: The logos-lez-rln commit to build.
     default: 235ddaeee84eec385a2d4b68d69f702a29c14cf3

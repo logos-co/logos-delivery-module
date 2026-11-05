@@ -135,7 +135,7 @@ def shared_docker_network(_e2e_env: tuple[str, Path], worker_id: str) -> Iterato
 
 
 def _lez_sequencer_config(payer: str) -> dict:
-    """LEZ v0.3.1's `lez/sequencer/service/configs/docker/sequencer_config.json`, with
+    """`lez/sequencer/service/configs/docker/sequencer_config.json`, with
     `payer` as the only genesis account and 500 ms blocks so CLOCK_50 ticks within half
     a minute."""
     return {
