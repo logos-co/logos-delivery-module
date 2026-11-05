@@ -10,6 +10,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The xdist worker count for `pytest -n auto` in the e2e jobs.
+  PYTEST_XDIST_AUTO_NUM_WORKERS: 4
+
 jobs:
   build-and-test:
     environment: ${{ github.ref == 'refs/heads/master' && 'public-cache' || '' }}
@@ -55,7 +59,7 @@ jobs:
         run: |
           mkdir -p ${{ runner.temp }}/e2e-logs
           cd tests/e2e
-          pytest -v -m "not rln" -n 4 --dist=loadgroup
+          pytest -v -m "not rln" -n auto --dist=loadgroup
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
 
@@ -89,7 +93,7 @@ jobs:
         run: |
           mkdir -p ${{ runner.temp }}/e2e-logs
           cd tests/e2e
-          pytest -v -m rln -n 4 --durations=0
+          pytest -v -m rln -n auto --durations=0
         env:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
 

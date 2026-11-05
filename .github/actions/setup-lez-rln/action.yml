@@ -6,11 +6,14 @@ description: >
 
 inputs:
   sequencer-image:
-    description: The standalone LEZ sequencer v0.3.1, the LEZ release the RLN modules use.
-    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
+    description: The standalone LEZ sequencer, the LEZ release the RLN modules use.
+    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone:v0.3.1@sha256:b90dd1890b9b2d429a2793a69a1c98e0dcaf61db8e01a5cfd592eea0fa3c4688
   lez-rln-commit:
     description: The logos-lez-rln commit to build.
     default: 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+  rzup-version:
+    description: The rzup, from crates.io, that installs cargo-risczero and the risc0 Rust toolchain.
+    default: 0.5.2
   cargo-risczero-version:
     description: The cargo-risczero that builds the guest programs.
     default: 3.0.5
@@ -21,6 +24,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Require Linux
+      if: runner.os != 'Linux'
+      shell: bash
+      run: |
+        echo "::error::setup-lez-rln supports Linux runners only"
+        exit 1
+
     # logos-lez-rln's tools link libpcsclite (keycard_wallet).
     - name: Install libpcsclite
       shell: bash
@@ -37,7 +47,7 @@ runs:
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/run_setup
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
           ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
-        key: lez-rln-${{ runner.arch }}-${{ inputs.lez-rln-commit }}-cargo-risczero-${{ inputs.cargo-risczero-version }}-rust-${{ inputs.risc0-rust-version }}
+        key: lez-rln-${{ runner.arch }}-${{ inputs.lez-rln-commit }}-rzup-${{ inputs.rzup-version }}-cargo-risczero-${{ inputs.cargo-risczero-version }}-rust-${{ inputs.risc0-rust-version }}
 
     # The guest programs build in docker, but cargo-risczero still needs the risc0 Rust
     # toolchain installed.
@@ -45,10 +55,9 @@ runs:
       if: steps.lez-rln.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        curl -L https://risczero.com/install | bash
-        "$HOME/.risc0/bin/rzup" install cargo-risczero ${{ inputs.cargo-risczero-version }}
-        "$HOME/.risc0/bin/rzup" install rust ${{ inputs.risc0-rust-version }}
-        export PATH="$HOME/.risc0/bin:$PATH"
+        cargo install rzup --version ${{ inputs.rzup-version }} --locked
+        rzup install cargo-risczero ${{ inputs.cargo-risczero-version }}
+        rzup install rust ${{ inputs.risc0-rust-version }}
         git clone https://github.com/logos-co/logos-lez-rln.git "$RUNNER_TEMP/logos-lez-rln"
         cd "$RUNNER_TEMP/logos-lez-rln"
         git checkout ${{ inputs.lez-rln-commit }}

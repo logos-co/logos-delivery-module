@@ -1,19 +1,20 @@
 name: Set up e2e environment
 description: >
   Builds the delivery module and its dependency modules (LOGOS_MODULES_DIR), the
-  logoscore smoke image (LOGOSCORE_IMAGE) and the logoscore CLI (PATH), and installs
-  the Python test dependencies. The smoke image and the dependency modules come from
+  logoscore image (LOGOSCORE_IMAGE) and the logoscore CLI (PATH), and installs
+  the Python test dependencies. The logoscore image and the dependency modules come from
   the Actions cache when their pins are unchanged.
 
 inputs:
+  # Attic is the self-hosted Nix binary cache at cache.nix.logos.co.
   attic-token-ci:
     description: ATTIC_TOKEN_CI, for the Nix cache.
     required: true
   attic-token-public:
     description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
     required: true
-  smoke-image-commit:
-    description: The logos-logoscore-py commit the smoke image is built from.
+  logoscore-image-commit:
+    description: The logos-logoscore-py commit the logoscore image is built from.
     default: a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
 
 runs:
@@ -25,22 +26,22 @@ runs:
         attic-token-ci: ${{ inputs.attic-token-ci }}
         attic-token-public: ${{ inputs.attic-token-public }}
 
-    - name: Restore the cached smoke image
-      id: smoke-image
+    - name: Restore the cached logoscore image
+      id: logoscore-image
       uses: actions/cache/restore@v4
       with:
-        path: ${{ runner.temp }}/logoscore-smoke-image.tar
-        key: logoscore-smoke-image-${{ runner.arch }}-${{ inputs.smoke-image-commit }}
+        path: ${{ runner.temp }}/logoscore-image.tar
+        key: logoscore-image-${{ runner.arch }}-${{ inputs.logoscore-image-commit }}
 
     # The default docker driver can't export to the gha cache backend.
     - name: Set up Docker Buildx
-      if: steps.smoke-image.outputs.cache-hit != 'true'
+      if: steps.logoscore-image.outputs.cache-hit != 'true'
       uses: docker/setup-buildx-action@v3
 
     # The buildx in build_smoke_image.sh needs ACTIONS_RUNTIME_TOKEN and
     # ACTIONS_CACHE_URL for the gha cache, and GitHub only gives them to actions.
     - name: Expose Actions runtime for buildx gha cache
-      if: steps.smoke-image.outputs.cache-hit != 'true'
+      if: steps.logoscore-image.outputs.cache-hit != 'true'
       uses: crazy-max/ghaction-github-runtime@v3
 
     - name: Build delivery-module (install-portable layout)
@@ -104,16 +105,16 @@ runs:
         chmod -R u+w merged-modules
         echo "LOGOS_MODULES_DIR=$PWD/merged-modules" >> $GITHUB_ENV
 
-    - name: Load the cached smoke image
-      if: steps.smoke-image.outputs.cache-hit == 'true'
+    - name: Load the cached logoscore image
+      if: steps.logoscore-image.outputs.cache-hit == 'true'
       shell: bash
       run: |
-        docker load -i "$RUNNER_TEMP/logoscore-smoke-image.tar"
-        rm "$RUNNER_TEMP/logoscore-smoke-image.tar"
+        docker load -i "$RUNNER_TEMP/logoscore-image.tar"
+        rm "$RUNNER_TEMP/logoscore-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
 
-    - name: Checkout logoscore-py and build smoke image
-      if: steps.smoke-image.outputs.cache-hit != 'true'
+    - name: Checkout logoscore-py and build the logoscore image
+      if: steps.logoscore-image.outputs.cache-hit != 'true'
       shell: bash
       env:
         BUILDX_CACHE_FROM: type=gha
@@ -121,20 +122,20 @@ runs:
       run: |
         git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
         cd /tmp/logoscore-py
-        git checkout ${{ inputs.smoke-image-commit }}
+        git checkout ${{ inputs.logoscore-image-commit }}
         bash tests/docker_smoke/build_smoke_image.sh
-        docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-smoke-image.tar"
+        docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
 
-    - name: Save the smoke image
-      if: steps.smoke-image.outputs.cache-hit != 'true'
+    - name: Save the logoscore image
+      if: steps.logoscore-image.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
-        path: ${{ runner.temp }}/logoscore-smoke-image.tar
-        key: ${{ steps.smoke-image.outputs.cache-primary-key }}
+        path: ${{ runner.temp }}/logoscore-image.tar
+        key: ${{ steps.logoscore-image.outputs.cache-primary-key }}
 
     - name: Build logoscore CLI binary (host PATH)
-      # Must match the daemon commit baked into the smoke image above.
+      # Must match the daemon commit baked into the logoscore image above.
       shell: bash
       run: |
         nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/665ac28bc77f45e3c610f40fef975a12609de531#cli"

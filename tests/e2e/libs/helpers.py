@@ -205,14 +205,14 @@ def setup_rln_node(daemon, config_json: str, label: str, registry_id: str) -> De
 
 
 def start_node(node: DeliveryNode) -> None:
-    """Start the node and wait for `nodeStarted`, since `start` returns before the node
-    is up."""
-    with node.watch() as events:
-        time.sleep(SUBSCRIBE_GRACE_S)
-        node.start()
-        event = wait_for_event(events, "nodeStarted", timeout=NODE_STARTED_TIMEOUT_S)
-    if event_arg(event, 0) is not True:
-        raise AssertionError(f"{node.label}: start failed: {event_arg(event, 1)!r}")
+    """Start the node and wait until it reports `IsRunning`, since `start` returns before
+    the node is up."""
+    node.start()
+    wait_until(
+        lambda: node.get_node_info("IsRunning") == "true",
+        timeout=NODE_STARTED_TIMEOUT_S,
+        message=f"{node.label}: node not running",
+    )
 
 
 def wait_until(condition, *, timeout: float, interval: float = 0.5, message: str = "") -> Any:
@@ -335,7 +335,8 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
 
 
 def lez_clock_ms(sequencer_url: str) -> int:
-    """CLOCK_50's timestamp, 0 while the RLN registry still refuses registrations."""
+    """CLOCK_50's timestamp in ms. LEZ's clock program writes CLOCK_50 every 50 blocks, and
+    the RLN registry refuses registrations while the timestamp is still 0."""
     account = lez_rpc(sequencer_url, "getAccount", LEZ_CLOCK_50_ACCOUNT)
     shard = account["data"]["shards"].get(LEZ_CLOCK_SHARD, [])
     return int.from_bytes(bytes(shard[8:16]), "little")

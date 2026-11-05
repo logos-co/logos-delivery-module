@@ -87,7 +87,7 @@ because the registry refuses registrations before it.
 - `LOGOS_MODULES_DIR` env: a directory containing `delivery_module/manifest.json`
   (the output of `nix build .#install-portable` → `result/modules`).
 - A host-side `logoscore` CLI on `PATH` (the client shells out to it). Build it from
-  `logos-co/logos-logoscore-cli` pinned to the same commit as the smoke image.
+  `logos-co/logos-logoscore-cli` pinned to the same commit as the logoscore image.
 - For `test_rln.py`:
   - `liblogos_rln_module` and `liblogos_lez_rln_module` in `LOGOS_MODULES_DIR` (CI
     stages them next to `delivery_module`).
@@ -105,10 +105,10 @@ the RLN tests out.
 nix build .#install-portable
 export LOGOS_MODULES_DIR=$PWD/result/modules
 
-# 2. Build the logoscore smoke image (one-time) + CLI, pinned together, at the
+# 2. Build the logoscore image (one-time) + CLI, pinned together, at the
 #    commits of .github/actions/setup-e2e.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-cd /tmp/logoscore-py && git checkout <smoke-image-commit>
+cd /tmp/logoscore-py && git checkout <logoscore-image-commit>
 bash tests/docker_smoke/build_smoke_image.sh
 export LOGOSCORE_IMAGE=logoscore:smoke-portable
 cd -
@@ -120,8 +120,8 @@ export PATH="/tmp/logoscore-cli/bin:$PATH"
 #    .github/actions/setup-lez-rln.
 export E2E_LEZ_SEQUENCER_IMAGE=<sequencer-image>
 docker pull "$E2E_LEZ_SEQUENCER_IMAGE"
-curl -L https://risczero.com/install | bash
-~/.risc0/bin/rzup install cargo-risczero <cargo-risczero-version> && ~/.risc0/bin/rzup install rust <risc0-rust-version>
+cargo install rzup --version <rzup-version> --locked
+rzup install cargo-risczero <cargo-risczero-version> && rzup install rust <risc0-rust-version>
 git clone https://github.com/logos-co/logos-lez-rln.git /tmp/logos-lez-rln
 cd /tmp/logos-lez-rln && git checkout <lez-rln-commit>
 cargo risczero build --manifest-path lez-rln/methods/guest/Cargo.toml
