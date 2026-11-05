@@ -86,8 +86,8 @@ because the registry refuses registrations before it.
   `logos-co/logos-logoscore-py/tests/docker_smoke/build_smoke_image.sh`.
 - `LOGOS_MODULES_DIR` env: a directory containing `delivery_module/manifest.json`
   (the output of `nix build .#install-portable` → `result/modules`).
-- A host-side `logoscore` CLI on `PATH` (the client shells out to it). Build it from
-  `logos-co/logos-logoscore-cli` pinned to the same commit as the logoscore image.
+- A host-side `logoscore` CLI on `PATH` (the client shells out to it), copied out of
+  the logoscore image so it matches the daemon.
 - For `test_rln.py`:
   - `liblogos_rln_module` and `liblogos_lez_rln_module` in `LOGOS_MODULES_DIR` (CI
     stages them next to `delivery_module`).
@@ -105,16 +105,17 @@ the RLN tests out.
 nix build .#install-portable
 export LOGOS_MODULES_DIR=$PWD/result/modules
 
-# 2. Build the logoscore image (one-time) + CLI, pinned together, at the
-#    commits of .github/actions/setup-e2e.
+# 2. Build the logoscore image (one-time) at the logoscore-py-commit of
+#    .github/actions/setup-e2e, and copy its CLI out.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
-cd /tmp/logoscore-py && git checkout <logoscore-image-commit>
+cd /tmp/logoscore-py && git checkout <logoscore-py-commit>
 bash tests/docker_smoke/build_smoke_image.sh
 export LOGOSCORE_IMAGE=logoscore:smoke-portable
 cd -
-nix build --out-link /tmp/logoscore-cli \
-  "github:logos-co/logos-logoscore-cli/<logoscore-cli-commit>#cli"
-export PATH="/tmp/logoscore-cli/bin:$PATH"
+docker create --name logoscore-cli logoscore:smoke-portable
+docker cp logoscore-cli:/opt/logoscore - | tar -x -C /tmp
+docker rm logoscore-cli
+export PATH="/tmp/logoscore/bin:$PATH"
 
 # 3. For test_rln.py: the LEZ sequencer image and logos-lez-rln, at the pins of
 #    .github/actions/setup-lez-rln.
@@ -132,6 +133,8 @@ cd -
 # 4. Install deps + run.
 cd tests/e2e
 pip install -r requirements.txt
+pip install --no-deps --force-reinstall \
+  "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@<logoscore-py-commit>"
 pytest -v -n 4 --dist=loadgroup
 ```
 

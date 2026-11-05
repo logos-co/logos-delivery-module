@@ -13,9 +13,9 @@ inputs:
   attic-token-public:
     description: ATTIC_TOKEN_PUBLIC, for the Nix cache.
     required: true
-  logoscore-image-commit:
-    description: The logos-logoscore-py commit the logoscore image is built from.
-    default: a58573eb2c33916c0da2ba08ecb1ceca2fbb7617
+  logoscore-py-commit:
+    description: The logos-logoscore-py commit of the logoscore image and the Python client.
+    default: edfe322c2f9e2d54962da752451d1609dcbe3fbf
 
 runs:
   using: composite
@@ -31,7 +31,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/logoscore-image.tar
-        key: logoscore-image-${{ runner.arch }}-${{ inputs.logoscore-image-commit }}
+        key: logoscore-image-${{ runner.arch }}-${{ inputs.logoscore-py-commit }}
 
     # The default docker driver can't export to the gha cache backend.
     - name: Set up Docker Buildx
@@ -122,7 +122,7 @@ runs:
       run: |
         git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
         cd /tmp/logoscore-py
-        git checkout ${{ inputs.logoscore-image-commit }}
+        git checkout ${{ inputs.logoscore-py-commit }}
         bash tests/docker_smoke/build_smoke_image.sh
         docker save logoscore:smoke-portable -o "$RUNNER_TEMP/logoscore-image.tar"
         echo "LOGOSCORE_IMAGE=logoscore:smoke-portable" >> $GITHUB_ENV
@@ -134,12 +134,15 @@ runs:
         path: ${{ runner.temp }}/logoscore-image.tar
         key: ${{ steps.logoscore-image.outputs.cache-primary-key }}
 
-    - name: Build logoscore CLI binary (host PATH)
-      # Must match the daemon commit baked into the logoscore image above.
+    # The image's own CLI, so the host client matches the daemon.
+    # Through tar, because `docker cp` fails on the bundle's read-only directories.
+    - name: Copy the logoscore CLI out of the logoscore image (host PATH)
       shell: bash
       run: |
-        nix build -L --out-link /tmp/logoscore-cli "github:logos-co/logos-logoscore-cli/665ac28bc77f45e3c610f40fef975a12609de531#cli"
-        echo "/tmp/logoscore-cli/bin" >> $GITHUB_PATH
+        docker create --name logoscore-cli logoscore:smoke-portable
+        docker cp logoscore-cli:/opt/logoscore - | tar -x -C "$RUNNER_TEMP"
+        docker rm logoscore-cli
+        echo "$RUNNER_TEMP/logoscore/bin" >> $GITHUB_PATH
 
     - uses: actions/setup-python@v5
       with:
@@ -153,4 +156,4 @@ runs:
       run: |
         cd tests/e2e
         pip install -r requirements.txt
-        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@edfe322c2f9e2d54962da752451d1609dcbe3fbf"
+        pip install --no-deps --force-reinstall "logoscore @ git+https://github.com/logos-co/logos-logoscore-py.git@${{ inputs.logoscore-py-commit }}"
