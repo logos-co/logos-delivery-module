@@ -5,8 +5,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
+#include <fstream>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -35,6 +38,13 @@ extern "C" {
 #include <liblogosdelivery_kernel.h>
 #include <liblogosdelivery_rln.h>
 }
+
+#if defined(_WIN32)
+#define DELIVERY_ENVIRON _environ
+#else
+extern char** environ;
+#define DELIVERY_ENVIRON environ
+#endif
 
 namespace {
 int64_t currentTimestampNs() {
@@ -564,9 +574,10 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
 }
 
 // Locates the object that carries kernel/messaging settings for this config
-// shape: kernelConf when present, messagingOverrides for the layered shapes,
-// top level for the legacy flat shape.
-static nlohmann::json* configTarget(nlohmann::json& cfgObj)
+// shape: kernelConf when present, messagingOverrides (created if needed) for
+// the layered shapes, top level for the legacy flat shape. Null for a kernel
+// entry without a kernelConf object, left for the parser to reject.
+static nlohmann::json* settingsTarget(nlohmann::json& cfgObj)
 {
     const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
     const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
@@ -583,7 +594,8 @@ static nlohmann::json* configTarget(nlohmann::json& cfgObj)
     }
     auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
     if (!overridesKey) {
-        return nullptr;
+        cfgObj["messagingOverrides"] = nlohmann::json::object();
+        overridesKey = "messagingOverrides";
     }
     return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
 }
@@ -613,25 +625,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     }
 
     if (!persistencePath.empty() || disableRlnValidation) {
-        nlohmann::json* target = &cfgObj;
-        const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-        const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-            && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
-        if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
-            kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
-            target = &cfgObj[*kernelConfKey];
-        } else if (kernelEntry) {
-            // Kernel entry without a kernelConf object: leave the config
-            // untouched for the parser to reject.
-            target = nullptr;
-        } else if (!isFlatShape(cfgObj)) {
-            auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
-            if (!overridesKey) {
-                cfgObj["messagingOverrides"] = nlohmann::json::object();
-                overridesKey = "messagingOverrides";
-            }
-            target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
-        }
+        nlohmann::json* target = settingsTarget(cfgObj);
         if (target && !persistencePath.empty()
             && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
             (*target)["localStoragePath"] = persistencePath + "/data";
@@ -642,6 +636,166 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     }
 
     return cfgObj.dump();
+}
+
+static constexpr const char* kConfigFileEnvVar = "LOGOS_DELIVERY_CONFIG_FILE";
+static constexpr const char* kNodeEnvVarPrefix = "LOGOS_DELIVERY_NODE_";
+static constexpr const char* kDefaultInitializeConfig = R"({"preset":"logos.test"})";
+
+// Lowercased with '-' and '_' dropped, so a camelCase key and its kebab-case
+// alias ("storeMessageDbUrl", "store-message-db-url") compare equal.
+static std::string normalizedKey(const std::string& key)
+{
+    std::string out;
+    for (char c : key) {
+        if (c != '-' && c != '_') {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    return out;
+}
+
+// Sets key, first dropping any spelling of it already present: the upstream
+// parser rejects a field given twice.
+static void setOverride(nlohmann::json& obj, const std::string& key, nlohmann::json value)
+{
+    const std::string wanted = normalizedKey(key);
+    for (auto it = obj.begin(); it != obj.end();) {
+        if (normalizedKey(it.key()) == wanted) {
+            it = obj.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    obj[key] = std::move(value);
+}
+
+// The non-empty LOGOS_DELIVERY_NODE_* variables, keyed by the name after the
+// prefix.
+static std::map<std::string, std::string> nodeEnvOverrides()
+{
+    std::map<std::string, std::string> out;
+    const std::string prefix = kNodeEnvVarPrefix;
+    for (char** env = DELIVERY_ENVIRON; env && *env; ++env) {
+        const std::string entry = *env;
+        const auto eq = entry.find('=');
+        if (eq == std::string::npos || eq <= prefix.size()
+            || entry.compare(0, prefix.size(), prefix) != 0) {
+            continue;
+        }
+        std::string value = entry.substr(eq + 1);
+        if (!value.empty()) {
+            out[entry.substr(prefix.size(), eq - prefix.size())] = std::move(value);
+        }
+    }
+    return out;
+}
+
+// Env values are strings, which the upstream parser reads like CLI arguments;
+// only list fields need a JSON array.
+static nlohmann::json envValue(const std::string& raw)
+{
+    if (!raw.empty() && raw.front() == '[') {
+        nlohmann::json parsed = nlohmann::json::parse(raw, nullptr, /*allow_exceptions=*/false);
+        if (parsed.is_array()) {
+            return parsed;
+        }
+    }
+    return raw;
+}
+
+// Builds the initialize() config: the file named by LOGOS_DELIVERY_CONFIG_FILE,
+// or the built-in default, with LOGOS_DELIVERY_NODE_* variables applied over it.
+// ENTRY_LAYER, MODE and PRESET shape the config; every other name becomes the
+// kebab-case field key the CLI derives the same variable from.
+static std::optional<std::string> configFromEnvironment(std::string& error)
+{
+    nlohmann::json cfgObj;
+    if (const char* path = std::getenv(kConfigFileEnvVar); path != nullptr && *path != '\0') {
+        std::ifstream in(path);
+        if (!in) {
+            error = std::string(kConfigFileEnvVar) + ": cannot read " + path;
+            return std::nullopt;
+        }
+        cfgObj = nlohmann::json::parse(in, nullptr, /*allow_exceptions=*/false);
+        if (!cfgObj.is_object()) {
+            error = std::string(kConfigFileEnvVar) + ": " + path + " is not a JSON object";
+            return std::nullopt;
+        }
+    } else {
+        cfgObj = nlohmann::json::parse(kDefaultInitializeConfig);
+    }
+
+    auto overrides = nodeEnvOverrides();
+    for (const auto& entry : overrides) {
+        fprintf(stderr, "DeliveryModuleImpl: initialize applies %s%s\n", kNodeEnvVarPrefix, entry.first.c_str());
+    }
+    auto take = [&overrides](const char* name) -> std::optional<std::string> {
+        auto it = overrides.find(name);
+        if (it == overrides.end()) {
+            return std::nullopt;
+        }
+        std::string value = std::move(it->second);
+        overrides.erase(it);
+        return value;
+    };
+
+    if (auto entryLayer = take("ENTRY_LAYER")) {
+        setOverride(cfgObj, "entryLayer", *entryLayer);
+    }
+    if (auto mode = take("MODE")) {
+        setOverride(cfgObj, "mode", *mode);
+    }
+    const auto preset = take("PRESET");
+
+    const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
+    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
+        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
+    if (kernelEntry && !findKey(cfgObj, {"kernelconf"})) {
+        nlohmann::json kernelConf = nlohmann::json::object();
+        if (auto presetKey = findKey(cfgObj, {"preset"})) {
+            kernelConf["preset"] = cfgObj[*presetKey];
+            cfgObj.erase(*presetKey);
+        }
+        cfgObj["kernelConf"] = std::move(kernelConf);
+    }
+
+    if (preset) {
+        nlohmann::json* presetTarget = kernelEntry ? settingsTarget(cfgObj) : &cfgObj;
+        if (presetTarget == nullptr) {
+            error = "kernelConf is not a JSON object";
+            return std::nullopt;
+        }
+        setOverride(*presetTarget, "preset", *preset);
+    }
+
+    if (!overrides.empty()) {
+        nlohmann::json* target = settingsTarget(cfgObj);
+        if (target == nullptr) {
+            error = "config has no object to apply LOGOS_DELIVERY_NODE_* overrides to";
+            return std::nullopt;
+        }
+        for (const auto& [name, value] : overrides) {
+            std::string key = toLowerCopy(name);
+            std::replace(key.begin(), key.end(), '_', '-');
+            setOverride(*target, key, envValue(value));
+        }
+    }
+
+    return cfgObj.dump();
+}
+
+StdLogosResult DeliveryModuleImpl::initialize()
+{
+    fprintf(stderr, "DeliveryModuleImpl::initialize called\n");
+
+    std::string error;
+    const auto cfg = configFromEnvironment(error);
+    if (!cfg) {
+        fprintf(stderr, "DeliveryModuleImpl: initialize failed: %s\n", error.c_str());
+        return {false, {}, error};
+    }
+    return createNode(*cfg);
 }
 
 StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
