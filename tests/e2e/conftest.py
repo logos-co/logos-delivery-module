@@ -1,6 +1,6 @@
 """Fixtures for the delivery_module e2e suite.
 
-Four daemon flavours:
+Five daemon flavours:
   * `solo_daemon` (function scope) — one fresh logosctl container per test, used
     by the single-node lifecycle/query tests. Fresh because createNode is
     once-per-context: a started node can't be re-created, so tests can't share one.
@@ -14,7 +14,8 @@ Four daemon flavours:
   * `lez_wallet` (session scope) — one daemon whose LEZ module creates a new wallet
     without syncing; a node on the LEZ testnet starts from a copy of it.
 
-`_e2e_env` and `_rln_modules` fail the test when a prerequisite is missing.
+`_e2e_env`, `_rln_modules` and `rln_membership` fail the test when a prerequisite is
+missing.
 """
 
 from __future__ import annotations
@@ -65,6 +66,7 @@ DAEMON_START_ATTEMPTS = 3
 
 LEZ_WALLET_FILES = ("storage.json", "payer.json")
 LEZ_WALLET_TIMEOUT_S = 60.0
+LEZ_TESTNET_TIMEOUT_S = 60.0
 UNREACHABLE_SEQUENCER = "http://127.0.0.1:1"
 
 LEZ_START_TIMEOUT_S = 20.0
@@ -101,8 +103,6 @@ def _save_logs(container_name: str) -> None:
 def _announce(config: pytest.Config, text: str) -> None:
     """Write `text` to the terminal past pytest's output capture."""
     reporter = config.pluginmanager.getplugin("terminalreporter")
-    if reporter is None:
-        return
     with config.pluginmanager.getplugin("capturemanager").global_and_fixture_disabled():
         reporter.write_line(text)
         reporter.flush()
@@ -235,6 +235,12 @@ def lez_wallet(
     the testnet starts from so that its wallet skips the sync from block 0. A daemon
     whose sequencer is unreachable creates it without syncing."""
     image, modules_dir = _e2e_env
+    last_block_id = wait_until(
+        _lez_testnet_last_block_id,
+        timeout=LEZ_TESTNET_TIMEOUT_S,
+        interval=1.0,
+        message="the LEZ testnet sequencer answered no getLastBlockId",
+    )
     daemon, container_name = _start_daemon(
         image, modules_dir, shared_docker_network, "lez-wallet",
         env={LEZ_SEQUENCER_ENV: UNREACHABLE_SEQUENCER},
@@ -258,7 +264,7 @@ def lez_wallet(
             path.unlink()
     storage_path = wallet_home / "storage.json"
     storage = json.loads(storage_path.read_text())
-    storage["last_synced_block"] = lez_last_block_id()
+    storage["last_synced_block"] = last_block_id
     storage_path.write_text(json.dumps(storage))
     return wallet
 
@@ -323,6 +329,13 @@ def _lez_block_produced(sequencer_url: str) -> bool:
         return lez_rpc(sequencer_url, "getLastBlockId") >= 1
     except AssertionError:
         return False
+
+
+def _lez_testnet_last_block_id() -> int | None:
+    try:
+        return lez_last_block_id()
+    except AssertionError:
+        return None
 
 
 def _lez_wallet_config(sequencer_url: str) -> dict:
@@ -454,6 +467,7 @@ def _start_daemon(
             daemon.start()
             return daemon, container_name
         except LogosctlError as e:
+            _save_logs(container_name)
             daemon.stop()
             _remove_container(container_name)
             if "port is already allocated" not in str(e) or attempt == DAEMON_START_ATTEMPTS:

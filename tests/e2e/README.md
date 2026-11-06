@@ -51,7 +51,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
 `messageSent` never fires (interop S06 vs S07).
 
-## Event payload shape (read before extending receive assertions)
+## Event payload shape
 
 `delivery_module`'s public methods are **synchronous** — `client.call(...)` returns
 the `StdLogosResult` `{success, value, error}` directly; there are no per-call

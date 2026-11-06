@@ -32,6 +32,5 @@ runs:
           find "$MEMBERSHIP_DIR" -type f
           exit 1
         fi
-        ls -l "${keystores[0]}"
         echo "::notice::Restored the RLN membership: ${keystores[0]#"$MEMBERSHIP_DIR"/}"
         echo "E2E_RLN_MEMBERSHIP_DIR=$MEMBERSHIP_DIR" >> "$GITHUB_ENV"

@@ -6,7 +6,12 @@ import uuid
 
 import pytest
 
-from libs.constants import FLEET_ENTRY_NODES, FLEET_PUBSUB_TOPIC, RLN_VALID_MESSAGES
+from libs.constants import (
+    FLEET_CONTENT_TOPIC_PREFIX,
+    FLEET_ENTRY_NODES,
+    FLEET_PUBSUB_TOPIC,
+    RLN_VALID_MESSAGES,
+)
 from libs.helpers import (
     event_content_topic,
     event_payload,
@@ -27,8 +32,7 @@ VALID_ROOTS_TIMEOUT_S = 180.0
 PROPAGATED_TIMEOUT_S = 120.0
 RECEIVED_TIMEOUT_S = 60.0
 STORED_TIMEOUT_S = 60.0
-# An Edge node's `subscribe` returns before a fleet node holds the filter subscription: it
-# waits 1 s, then subscribes at the fleet.
+# An Edge node subscribes at the fleet 1 s after its `subscribe` returns.
 FILTER_SUBSCRIBE_GRACE_S = 3.0
 
 PAYLOAD = "Fleet round trip"
@@ -42,7 +46,7 @@ pytestmark = [
 
 
 def _content_topic() -> str:
-    return f"/fleet-test/1/{uuid.uuid4().hex}/proto"
+    return f"{FLEET_CONTENT_TOPIC_PREFIX}{uuid.uuid4().hex}/proto"
 
 
 def _sender(fleet_node_factory, fleet_membership, label: str, *, mode: str):
@@ -95,7 +99,7 @@ def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
     messages = wait_until(
         lambda: stored_messages(sender, content_topic, FLEET_ENTRY_NODES),
         timeout=STORED_TIMEOUT_S,
-        interval=1,
+        interval=1.0,
         message="no fleet store node holds the message",
     )
     assert [base64.b64decode(m["message"]["payload"]) for m in messages] == [PAYLOAD.encode()]

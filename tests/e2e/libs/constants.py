@@ -32,7 +32,8 @@ RLN_VALID_MESSAGES = "logos_delivery_rln_valid_messages_total_total"
 FLEET_PRESET = "logos.test"
 # The `logos.test` preset's registry on the LEZ testnet (docs/pages/rln.md).
 FLEET_REGISTRY_ID = "logos:testnet:fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971"
-# Autosharding maps /fleet-test/1/... to shard 6.
+FLEET_CONTENT_TOPIC_PREFIX = "/fleet-test/1/"
+# Autosharding maps FLEET_CONTENT_TOPIC_PREFIX to shard 6.
 FLEET_PUBSUB_TOPIC = "/waku/2/rs/2/6"
 # The preset's entry nodes (logos-delivery `networks_config.nim`), which serve store.
 FLEET_ENTRY_NODES = (

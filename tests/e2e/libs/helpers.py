@@ -483,9 +483,7 @@ def parse_event(event: dict) -> dict:
 
     `logosctl watch` serializes a typed event as
     {"event": <name>, "data": {"arg0": <1st arg>, "arg1": <2nd arg>, ...}},
-    so each codegen event arg
-    lands at argN by position. The vector<uint8_t> payload arg of messageReceived
-    is the one whose serialization is still unverified.
+    so each codegen event arg lands at argN by position.
     """
     data = event.get("data", {})
     return data if isinstance(data, dict) else {}
