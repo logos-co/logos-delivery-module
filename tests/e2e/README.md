@@ -1,7 +1,7 @@
 # logos-delivery-module e2e tests
 
 End-to-end checks that run the built `delivery_module` + `liblogosdelivery`
-inside real `logoscore` daemon containers and drive them over RPC. Per PR: red on
+inside real `logosctl` daemon containers and drive them over RPC. Per PR: red on
 regressions in `delivery_module` / `liblogosdelivery` / the codegen+RPC path.
 
 Mock-based C++ unit tests (and the in-process C++ integration tests) live in
@@ -17,7 +17,7 @@ A's container-routable multiaddr and dials it; gossipsub/relay handles the rest.
 ```
 docker network "logosdelivery-e2e-<uuid>"  (one /24 of 172.31.0.0/16 per xdist worker)
   ┌────────────────────────────┐        ┌────────────────────────────┐
-  │ logoscore-a  (node A)       │◀──────▶│ logoscore-b  (node B)       │
+  │ logosctl-a  (node A)        │◀──────▶│ logosctl-b  (node B)        │
   │ relay, cluster 198, shard 0 │ relay  │ staticnodes=[A multiaddr]   │
   └────────────────────────────┘        └────────────────────────────┘
 ```
@@ -55,7 +55,7 @@ result events. Only message delivery is async, via the typed events
 `messageReceived` / `messageQueued` / `messagePropagated` / `messageSent` /
 `messageError` / `connectionStateChanged`.
 
-The logoscore CLI serializes a typed event as `{"event": <name>, "data": {"arg0":
+`logosctl watch` serializes a typed event as `{"event": <name>, "data": {"arg0":
 <1st arg>, "arg1": <2nd arg>, ...}}` — each codegen event arg lands at `argN` by
 position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTopic`
 = `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
@@ -82,15 +82,15 @@ because the registry refuses registrations before it.
 ## Prerequisites
 
 - `docker` available on host.
-- `LOGOSCORE_IMAGE` env: `logoscore:smoke-portable`, built once from
-  `logos-co/logos-logoscore-py/tests/docker_smoke/build_smoke_image.sh`.
-- `LOGOS_MODULES_DIR` env: a directory containing `delivery_module/manifest.json`
-  (the output of `nix build .#install-portable` → `result/modules`).
-- A host-side `logoscore` CLI on `PATH` (the client shells out to it), copied out of
-  the logoscore image so it matches the daemon.
+- `LOGOSCTL_IMAGE` env: `logosctl:smoke-portable`, built once from
+  `logos-co/logos-logoscore-py/tests/logosctl/docker_smoke/build_smoke_image.sh`.
+- `LOGOS_MODULES_DIR` env: the `modules/` of a logosctl session where `logosctl install`
+  put this repo's `nix build .#lgx-portable` and its released dependencies.
+- A host-side `logosctl` CLI on `PATH` (the client shells out to it): the image's own,
+  copied out of `/opt/logosctl`, or a `logos-co/logos-logoscore-cli` release.
 - For `test_rln.py`:
   - `liblogos_rln_module` and `liblogos_lez_rln_module` in `LOGOS_MODULES_DIR` (CI
-    stages them next to `delivery_module`).
+    installs them next to `delivery_module`).
   - `E2E_LEZ_SEQUENCER_IMAGE` env: the standalone LEZ sequencer image, pulled.
   - `E2E_LEZ_RLN_DIR` env: a logos-lez-rln checkout with its guest programs and tools
     built (see "Running locally — Linux").
@@ -101,21 +101,33 @@ the RLN tests out.
 ## Running locally — Linux
 
 ```bash
-# 1. Build the module in install-portable layout.
-nix build .#install-portable
-export LOGOS_MODULES_DIR=$PWD/result/modules
-
-# 2. Build the logoscore image (one-time) at the logoscore-py-commit of
+# 1. Build the logosctl image (one-time) at the logoscore-py-commit of
 #    .github/actions/setup-e2e, and copy its CLI out.
 git clone https://github.com/logos-co/logos-logoscore-py.git /tmp/logoscore-py
 cd /tmp/logoscore-py && git checkout <logoscore-py-commit>
-bash tests/docker_smoke/build_smoke_image.sh
-export LOGOSCORE_IMAGE=logoscore:smoke-portable
+bash tests/logosctl/docker_smoke/build_smoke_image.sh
+export LOGOSCTL_IMAGE=logosctl:smoke-portable
 cd -
-docker create --name logoscore-cli logoscore:smoke-portable
-docker cp logoscore-cli:/opt/logoscore - | tar -x -C /tmp
-docker rm logoscore-cli
-export PATH="/tmp/logoscore/bin:$PATH"
+docker rm -f logosctl-cli 2>/dev/null
+docker create --name logosctl-cli logosctl:smoke-portable
+docker cp logosctl-cli:/opt/logosctl - | tar -x -C /tmp
+docker rm logosctl-cli
+export PATH="/tmp/logosctl/bin:$PATH"
+
+# 2. Build the module and install it into its own logosctl session, next to the
+#    released RLN modules. CI runs the same commands. Bump these versions by hand
+#    when flake.lock moves the RLN modules. No test uses kad service discovery, so
+#    libp2p_module is not installed.
+nix build .#lgx-portable
+export LOGOSCTL_CONFIG_DIR=/tmp/logosctl-modules
+logosctl daemon start --detach
+logosctl catalog refresh
+logosctl install liblogos_lez_rln_module --version 5.1.0 -y
+logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
+logosctl install result/*.lgx -y
+logosctl daemon stop
+export LOGOS_MODULES_DIR=$LOGOSCTL_CONFIG_DIR/modules
+unset LOGOSCTL_CONFIG_DIR
 
 # 3. For test_rln.py: the LEZ sequencer image and logos-lez-rln, at the pins of
 #    .github/actions/setup-lez-rln.
@@ -143,7 +155,7 @@ The sequencer image is amd64 only, so Docker on Apple silicon runs it emulated.
 ## Running locally — macOS
 
 Docker-mode on macOS (arm64) needs a Linux remote builder for
-`nix build .#install-portable` (the Linux `delivery_module_plugin.so` + bundled
+`nix build .#lgx-portable` (the Linux `delivery_module_plugin.so` + bundled
 dylibs), which isn't shipped here. Use CI to validate, or a Linux host.
 
 ## Configuration schema
@@ -170,7 +182,7 @@ Node configs are built by `libs/helpers.make_delivery_config()` and follow the
 
 Teardown saves every container's log to `$E2E_LOG_DIR` (default `/tmp`). CI uploads
 them on failure as the `e2e-test-logs` or `e2e-tests-rln-logs` artifact. Set
-`LOGOSCORE_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
+`LOGOSCTL_PY_FORWARD_OUTPUT=1` to also mirror CLI + daemon output into pytest logs.
 
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16`. If another
 network on the host already uses that range, `docker network create` fails with "Pool
