@@ -44,7 +44,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 | `test_lightpushed_message_reaches_filter_client` | 2 | an Edge sender's message reaches an Edge receiver through the `logos.test` fleet (see "Fleet") |
-| `test_lightpushed_message_is_stored` | 1 | an Edge sender's message is in a fleet store node |
+| `test_lightpushed_message_is_stored` | 1 | an Edge sender's message reaches a fleet store node |
 | `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
 | `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
 
@@ -65,7 +65,7 @@ position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTop
 = `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
 
 `messageReceived` carries the `contentTopic` (`arg1`) and the `vector<uint8_t>`
-`payload` (`arg2`), which arrives as `bytes`; the fleet tests assert both.
+`payload` (`arg2`). The payload arrives as `bytes`.
 
 `source` (`arg3`) is `"live"` or `"history"`. A node that has been down and
 comes back can replay what it missed as `"history"`, so a test asserting on a
@@ -81,46 +81,42 @@ registry on it with logos-lez-rln's `run_setup`. Nodes read the sequencer's URL 
 node's RLN module registers a membership by itself. Funding waits for the chain's `CLOCK_50`,
 because the registry refuses registrations before it.
 
-A node on the LEZ testnet starts from `lez_wallet` and sends with `rln_membership`. Its
-LEZ wallet syncs the testnet from the block after its last synced one, and RLN waits for
-it: from block 0 that takes several minutes. So `lez_wallet` is one new wallet per
-session: a daemon whose sequencer (`LEZ_RLN_SEQUENCER`) is unreachable creates it without
-syncing, and its `last_synced_block` is then set to the testnet sequencer's
-`getLastBlockId`. The wallet has no private notes to find in the blocks it skips. Its
-config, which names the sequencer, is left out, so each node writes its own.
-`rln_membership` is the testnet membership in `E2E_RLN_MEMBERSHIP_DIR`, a directory
-holding `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`).
+A node on the LEZ testnet starts from `lez_wallet` and sends with `rln_membership`. A LEZ
+wallet syncs the chain from the block after its last synced one, and RLN waits for that
+sync. From block 0 the sync takes several minutes, so `lez_wallet` is one new wallet per
+session whose `last_synced_block` is the testnet's last block. A daemon with an
+unreachable sequencer (`LEZ_RLN_SEQUENCER`) creates the wallet, so that it doesn't sync
+either. The wallet loses nothing in the blocks it skips, because it has no private notes
+there.
+
+`rln_membership` is the testnet membership in `E2E_RLN_MEMBERSHIP_DIR`. That directory
+holds `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`).
 
 ## Fleet
 
-`test_fleet.py`, marked `fleet`, sends through the live `logos.test` fleet. Each test
-runs nodes on the `logos.test` preset (`helpers.make_fleet_config`: `mode` `Core` or
-`Edge`, the preset's network and RLN, no NAT port mapping) and checks that what one
-sends reaches a second node, started in parallel with it, or a fleet store node. 
-An Edge receiver's `subscribe` returns before a fleet node holds its filter subscription,
-so the receiver waits 3 s before the send. Each node is in its own docker network,
-so the message has to cross the fleet. The sender holds the membership.
-Every node validates proofs: its presets file has a `logos.test` entry
-with `enable-validation` on, which the module's built-in entry leaves off.
+`test_fleet.py` (marker `fleet`) sends through the live `logos.test` fleet. Each test
+checks that a message from one node reaches a second node, or one of the fleet's store
+nodes. Each node runs in its own docker network, so the message has to cross the fleet.
+Every node validates RLN proofs, because its presets file turns validation on, which the
+module's built-in `logos.test` entry leaves off. An Edge node subscribes at the fleet 1 s
+after its `subscribe` returns, so an Edge receiver waits 3 s before the sender sends.
 
-Two proofs with the same `message_id` in one epoch disclose the membership's secret to
-anyone who sees both, and every copy of the membership starts from the same counters.
-So the fleet tests run one at a time, each sender starting from the keystore the
-previous one left (`fleet_membership`); under xdist that takes `--dist=loadgroup`, and
-`fleet_membership` fails without it. Across runs, `E2E_FLEET_EPOCH_FILE` names a file
-holding the last epoch a run sent in: a run sends only in a later epoch, waiting if it
-has to and printing how long, and writes the epoch when it ends. Without the file it
-waits for the next epoch. CI keeps the file in the Actions cache and runs the fleet tests
-only on master, since a branch's cache entries are invisible to master's runs; locally,
-point it at a file of your own. Local and CI runs don't share it, so don't run the fleet
-tests while another run from the same membership sends.
+Two proofs with the same `message_id` in one epoch reveal the membership's secret to
+anyone who sees both. Every copy of the membership starts from the same `message_id`s,
+so the fleet tests run one at a time, and each sender goes on from the keystore the
+previous sender left (`fleet_membership`). Under xdist, this needs `--dist=loadgroup`.
+Each run also writes the last epoch it sent in to the file `E2E_FLEET_EPOCH_FILE` names,
+and the next run sends only in a later epoch. Without the file, a run waits for the next
+epoch. CI keeps the file in the Actions cache and runs the fleet tests only on master.
+Locally, point `E2E_FLEET_EPOCH_FILE` at a file of your own, and don't run the fleet
+tests while another run sends with the same membership.
 
 ```bash
 E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/fleet-epoch \
   pytest -v -m fleet
 ```
 
-`storeQuery` takes an explicit peer, so the store test queries the preset's entry nodes
+`storeQuery` needs a peer, so the store test asks the preset's entry nodes
 (`FLEET_ENTRY_NODES`) in turn.
 
 ## Prerequisites
@@ -234,7 +230,7 @@ them on failure as the `e2e-test-logs`, `e2e-tests-rln-logs` or `e2e-fleet-logs`
 Each xdist worker's docker network takes its own /24 of `172.31.0.0/16`. If another
 network on the host already uses that range, `docker network create` fails with "Pool
 overlaps". Set `E2E_NETWORK_SUBNET` to a free range with a /24 per worker, such as a /22
-for `-n 4`. The fleet tests' networks take a range docker picks.
+for `-n 4`. Docker picks the range of each fleet test's network.
 
 ## CI
 
@@ -243,11 +239,11 @@ by `.github/actions/setup-e2e`. `e2e-tests` runs the tests not marked `rln`, wit
 `--dist=loadgroup` to keep the tests that share `node_a` and `node_b` on one worker.
 `e2e-tests-rln` runs the `rln` tests except the `fleet` ones, and is not a required check.
 
-The workflow `e2e-fleet.yml` runs the `fleet` tests nightly and on demand, on master
-only, never on PRs, and its runs queue (see "Fleet"). It restores the testnet membership
-through `.github/actions/restore-rln-membership`, which unpacks the repository secret
-`RLN_KEYSTORE` into `E2E_RLN_MEMBERSHIP_DIR`. The secret is replaced after every renewal
-from the logosctl config dir that holds the membership:
+`e2e-fleet.yml` runs the `fleet` tests nightly and on demand, only on master, and its
+runs queue (see "Fleet"). Its membership comes from the repository secret
+`RLN_KEYSTORE`, which `.github/actions/restore-rln-membership` unpacks into
+`E2E_RLN_MEMBERSHIP_DIR`. After every renewal of the membership, replace the secret from
+the logosctl config dir that holds the membership:
 
 ```bash
 COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \

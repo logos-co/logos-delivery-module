@@ -1,21 +1,20 @@
 name: E2E fleet
 
-# Joins the live logos.test fleet. Kept off PRs so that they do not depend on it.
+# The fleet tests join the live logos.test fleet, so PRs don't run them and don't depend on it.
 on:
   schedule:
     - cron: '5 5 * * *'
   workflow_dispatch:
 
-# Runs queue: each sends with the CI RLN membership through the fleet, and reads the
-# last epoch the previous one sent in.
+# Runs queue instead of overlapping, because each run sends with the same RLN membership
+# and reads the last epoch the previous run sent in.
 concurrency:
   group: e2e-fleet
   cancel-in-progress: false
 
 jobs:
   e2e-fleet:
-    # Only on master: a branch's cache entries are invisible to master's runs, so a run
-    # elsewhere would send without the epoch record master's runs go by.
+    # Only on master, so that every run reads the epoch the previous run saved.
     if: github.ref == 'refs/heads/master'
     environment: public-cache
     runs-on: ubuntu-latest
@@ -35,8 +34,7 @@ jobs:
         with:
           rln-keystore: ${{ secrets.RLN_KEYSTORE }}
 
-      # The last RLN epoch a fleet run sent in. Entries can't be overwritten, so each run
-      # saves its own and the newest one is restored.
+      # The last RLN epoch a fleet run sent in.
       - name: Restore the last fleet epoch
         uses: actions/cache/restore@v4
         with:
@@ -53,8 +51,7 @@ jobs:
           E2E_LOG_DIR: ${{ runner.temp }}/e2e-logs
           E2E_FLEET_EPOCH_FILE: ${{ runner.temp }}/fleet-epoch/epoch
 
-      # The record the next run reads: written here so that a failed or cancelled run
-      # leaves one too. 600 s is the RLN epoch.
+      # This step records the epoch even when the run fails or is cancelled.
       - name: Record the last fleet epoch
         if: always()
         run: |

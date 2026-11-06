@@ -1,7 +1,8 @@
 name: Restore the RLN membership
 description: >
-  Unpacks the repository secret RLN_KEYSTORE, liblogos_rln_module's keystore folder as
-  tar.gz and base64 (tests/e2e/README.md, "CI"), and sets E2E_RLN_MEMBERSHIP_DIR to it.
+  Unpacks the repository secret RLN_KEYSTORE into a directory and sets
+  E2E_RLN_MEMBERSHIP_DIR to it. The secret is liblogos_rln_module's keystore folder as a
+  base64 tar.gz, and tests/e2e/README.md ("CI") says how to make it.
 
 inputs:
   rln-keystore:

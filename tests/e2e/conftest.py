@@ -12,7 +12,7 @@ Five daemon flavours:
   * `fleet_node_factory` (function scope) — daemons on the logos.test fleet, each
     in its own docker network, used by the fleet tests.
   * `lez_wallet` (session scope) — one daemon whose LEZ module creates a new wallet
-    without syncing; a node on the LEZ testnet starts from a copy of it.
+    without syncing. A node on the LEZ testnet starts from a copy of that wallet.
 
 `_e2e_env`, `_rln_modules` and `rln_membership` fail the test when a prerequisite is
 missing.
@@ -101,7 +101,7 @@ def _save_logs(container_name: str) -> None:
 
 
 def _announce(config: pytest.Config, text: str) -> None:
-    """Write `text` to the terminal past pytest's output capture."""
+    """Write `text` to the terminal while pytest captures the test's output."""
     reporter = config.pluginmanager.getplugin("terminalreporter")
     with config.pluginmanager.getplugin("capturemanager").global_and_fixture_disabled():
         reporter.write_line(text)
@@ -126,12 +126,13 @@ def _remove_container(name: str) -> None:
 
 
 def _copy_keystore_back(container_name: str, membership: Path) -> None:
-    """Replace the RLN keystore in `membership` with the node's, without its lock.
-    Raises if the node's `rln_allocations.json` is the one it started from."""
+    """Replace the RLN keystore in `membership` with the node's, without the node's lock
+    file. Raises if the node's `rln_allocations.json` did not change, because the next
+    sender would then reuse the `message_id`s this node sent with."""
     keystore = membership / RLN_MODULE
     allocations, = keystore.glob("*/rln_allocations.json")
     started_with = allocations.read_bytes()
-    # Removed first: if the copy fails, no later node starts from counters this one has used.
+    # A failed copy then leaves no keystore, rather than one whose `message_id`s this node used.
     shutil.rmtree(keystore)
     subprocess.run(
         ["docker", "cp", f"{container_name}:/persistence/{RLN_MODULE}", str(keystore)],
@@ -174,9 +175,9 @@ def _rln_modules(_e2e_env: tuple[str, Path]) -> None:
 
 @pytest.fixture(scope="session")
 def rln_membership(_rln_modules: None) -> Path:
-    """The RLN membership on the LEZ testnet in E2E_RLN_MEMBERSHIP_DIR: module folders
-    laid out like a daemon's persistence dir (`<module>/<instance>/`). Fails if it
-    holds no keystore."""
+    """The testnet RLN membership in E2E_RLN_MEMBERSHIP_DIR. The directory is laid out
+    like a daemon's persistence dir (`<module>/<instance>/`), so a node's persistence
+    dir can take a copy of it."""
     membership_dir = Path(os.environ["E2E_RLN_MEMBERSHIP_DIR"])
     if not any(membership_dir.glob(f"{RLN_MODULE}/*/rln_sealed.json")):
         pytest.fail(
@@ -192,11 +193,11 @@ def fleet_membership(
     request: pytest.FixtureRequest,
     worker_id: str,
 ) -> Iterator[Path]:
-    """A copy of the RLN membership for the nodes that send through the fleet. Each
-    sender's keystore is copied back here when its test ends, so the next sender goes
-    on from its `message_id`s. Across runs, which restore the same counters, the file
-    named by E2E_FLEET_EPOCH_FILE holds the last epoch a run sent in, and this run
-    sends only in a later one; without the file it waits for the next epoch."""
+    """A copy of the RLN membership for the fleet senders. Each sender's keystore is
+    copied back here when its test ends, so the next sender goes on from its
+    `message_id`s. Every run starts from the same `message_id`s, so a run sends only in
+    an epoch after the one in E2E_FLEET_EPOCH_FILE. Without that file, the run waits for
+    the next epoch."""
     if worker_id != "master" and not request.config.getoption("loadgroup"):
         pytest.fail(
             "the fleet tests go on from each other's message_ids, so they need one xdist "
@@ -231,9 +232,11 @@ def lez_wallet(
     shared_docker_network: str,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
-    """A new LEZ wallet with `last_synced_block` at the testnet's tip, which a node on
-    the testnet starts from so that its wallet skips the sync from block 0. A daemon
-    whose sequencer is unreachable creates it without syncing."""
+    """A new LEZ wallet whose `last_synced_block` is the testnet's last block. A node on
+    the testnet starts from a copy of it, so the node's wallet doesn't sync the chain
+    from block 0, which takes minutes. The wallet has no private notes in the blocks it
+    skips. A daemon with an unreachable sequencer creates the wallet, so that it doesn't
+    sync either."""
     image, modules_dir = _e2e_env
     last_block_id = wait_until(
         _lez_testnet_last_block_id,
@@ -258,7 +261,7 @@ def lez_wallet(
         _save_logs(container_name)
         daemon.stop()
     wallet_home, = wallet.glob(f"{LEZ_RLN_MODULE}/*/wallet-home")
-    # wallet_config.json names the unreachable sequencer; each node writes its own.
+    # wallet_config.json names the unreachable sequencer, and each node writes its own.
     for path in wallet_home.iterdir():
         if path.name not in LEZ_WALLET_FILES:
             path.unlink()
@@ -446,8 +449,8 @@ def _start_daemon(
     persistence_dir: Path | None = None,
     env: dict[str, str] | None = None,
 ):
-    """A started logosctl container. A start that docker refuses with a host port
-    already allocated is retried under a new container name.
+    """A started logosctl container. A start is retried under a new container name
+    when another container takes the host port first.
     TODO: logos-logoscore-py#37"""
     from logosctl import LogosctlDockerDaemon, LogosctlError  # noqa: PLC0415
 
@@ -569,12 +572,10 @@ def fleet_node_factory(
     lez_wallet: Path,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Callable[..., DeliveryNode]]:
-    """Factory for nodes on the logos.test fleet, each in its own docker network so
-    that a test's nodes reach each other only through the fleet. Every node starts
-    with a copy of `lez_wallet`, and gets a presets file whose `logos.test` entry turns
-    proof validation on, which the module's built-in entry leaves off. A node given
-    `membership` starts with a copy of it and copies its keystore back when the test
-    ends."""
+    """Factory for nodes on the logos.test fleet. Each node runs in its own docker
+    network, so a test's nodes reach each other only through the fleet. The presets file
+    turns proof validation on, which the module's built-in `logos.test` entry leaves
+    off."""
     image, modules_dir = _e2e_env
 
     with ExitStack() as stack:

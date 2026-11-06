@@ -91,8 +91,8 @@ def make_delivery_config(
 
 
 def make_fleet_config(*, mode: str) -> str:
-    """JSON config for `createNode` on the logos.test fleet: the preset's network and
-    RLN, without NAT port mapping. `mode` is "Core" or "Edge"."""
+    """JSON config for `createNode` on the logos.test preset. `mode` is "Core" or "Edge".
+    NAT port mapping is off, because a container has no router to map ports on."""
     return json.dumps({
         "mode": mode,
         "preset": FLEET_PRESET,
@@ -101,8 +101,8 @@ def make_fleet_config(*, mode: str) -> str:
 
 
 def make_rln_presets(*, enable_validation: bool, registry_id: str, preset: str = "") -> str:
-    """Contents of the RLN presets file for a test node: its entry applies to nodes
-    created with `preset`, the `""` entry to nodes created without one."""
+    """Contents of the RLN presets file for a test node. The entry applies to nodes
+    created with `preset`. The `""` entry applies to nodes created without a preset."""
     return json.dumps({
         preset: {
             "enabled": True,
@@ -237,8 +237,8 @@ def start_node(node: DeliveryNode) -> None:
 
 
 def in_parallel(*calls: Callable[[], Any]) -> list:
-    """Run `calls` in threads and return their results in order. Raises the first
-    call's exception once all have ended."""
+    """Run `calls` in threads and return their results in order. If calls fail, the
+    exception of the first failed call in `calls` is raised once all calls have ended."""
     with ThreadPoolExecutor(max_workers=len(calls)) as pool:
         futures = [pool.submit(call) for call in calls]
         return [future.result() for future in futures]
@@ -271,8 +271,8 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
 
 def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> dict:
     """Poll the node's LEZ wallet until its first sync is over, and return its
-    `wallet_status`; until then every chain read of the RLN modules blocks or answers
-    empty. Raises unless the wallet is `ready`."""
+    `wallet_status`. Until then, the RLN modules' chain reads block or answer empty.
+    Raises unless the wallet is `ready`."""
     def settled():
         status = _from_json_text(node.client.call(LEZ_RLN_MODULE, "wallet_status"))
         return status if status.get("state") != "pending" else None
@@ -312,14 +312,13 @@ def current_epoch() -> int:
 
 
 def seconds_until_epoch(epoch: int) -> float:
-    """Seconds until RLN epoch `epoch` starts; 0 once it has."""
+    """Seconds until RLN epoch `epoch` starts, or 0 if it has started."""
     return max(0.0, epoch * RLN_EPOCH_SIZE_SEC - time.time())
 
 
 def wait_for_connected(node: DeliveryNode, *, timeout: float) -> None:
-    """Poll `getConnectionStatus` until the node reports one of CONNECTED_STATUSES. A
-    node that connects during `start` does so before a test can watch for
-    `connectionStateChanged`."""
+    """Poll `getConnectionStatus` rather than wait for `connectionStateChanged`, because
+    a node can connect during `start`, before a test can watch its events."""
     wait_until(
         lambda: node.connection_status() in CONNECTED_STATUSES,
         timeout=timeout,
@@ -328,8 +327,8 @@ def wait_for_connected(node: DeliveryNode, *, timeout: float) -> None:
 
 
 def stored_messages(node: DeliveryNode, content_topic: str, peers) -> list:
-    """The messages on `content_topic` from the first store peer of `peers` that
-    holds any; empty if none does."""
+    """The messages on `content_topic` from the first store peer in `peers` that holds
+    any, or an empty list."""
     query = json.dumps({
         "requestId": "e2e",
         "includeData": True,
@@ -411,7 +410,7 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
 
 
 def lez_last_block_id() -> int:
-    """The LEZ testnet sequencer's `getLastBlockId`: the chain tip."""
+    """The LEZ testnet sequencer's `getLastBlockId`."""
     return lez_rpc(LEZ_SEQUENCER_URL, "getLastBlockId")
 
 
