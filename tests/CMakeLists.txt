@@ -10,6 +10,7 @@ logos_test(
     MODULE_SOURCES
         ../src/delivery_module_plugin.cpp
         ../src/service_discovery_plugin.cpp
+        ../src/libp2p_bring_up.cpp
         ../src/rln_bridge.cpp
         ../src/rln_presets.cpp
         mocks/delivery_module_events_stub.cpp
@@ -44,6 +45,7 @@ if(LIBLOGOSDELIVERY_PATH)
         MODULE_SOURCES
             ../src/delivery_module_plugin.cpp
             ../src/service_discovery_plugin.cpp
+            ../src/libp2p_bring_up.cpp
             ../src/rln_bridge.cpp
             ../src/rln_presets.cpp
             mocks/delivery_module_events_stub.cpp

@@ -36,6 +36,9 @@ public:
     static inline bool lookupThrows = false;
     /// The config the last createNode was given.
     static inline std::string lastCreateNodeConfig;
+    /// When true, getNodeInfo answers success with a peer id -- a node that
+    /// exists and runs, as after a module reload.
+    static inline bool nodeInfoSucceeds = false;
 
     static void reset()
     {
@@ -47,6 +50,7 @@ public:
         lookupRecords = nullptr;
         lookupThrows = false;
         lastCreateNodeConfig.clear();
+        nodeInfoSucceeds = false;
     }
 
     StdLogosResult createNode(const std::string& config, logos::CallError* err = nullptr, int = 0)
@@ -72,7 +76,9 @@ public:
         return StdLogosResult{bringUpSucceeds, {}, ""};
     }
     StdLogosResult getNodeInfo(const std::string&, logos::CallError* = nullptr, int = 0)
-    { return StdLogosResult{}; }
+    {
+        return nodeInfoSucceeds ? StdLogosResult{true, "12D3KooWExisting", ""} : StdLogosResult{};
+    }
 
     StdLogosResult discoStart(logos::CallError* = nullptr, int = 0) { return StdLogosResult{}; }
     StdLogosResult discoStop(logos::CallError* = nullptr, int = 0) { return StdLogosResult{}; }

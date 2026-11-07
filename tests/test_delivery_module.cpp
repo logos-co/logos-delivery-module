@@ -20,6 +20,7 @@
 #include "base64.h"
 #include "discovery_config.h"
 #include "service_discovery_plugin.h"
+#include "libp2p_bring_up.h"
 #include "libp2p_module_api.h"
 #include "rln_presets.h"
 #include "mocks/delivery_module_events_stub.h"
@@ -35,6 +36,11 @@ static DeliveryModuleImpl* createInitializedImpl(LogosTestContext& t) {
     auto* impl = new DeliveryModuleImpl();
     LOGOS_ASSERT_TRUE(impl->createNode(R"({"logLevel":"INFO"})").success);
     return impl;
+}
+
+// A discovery plugin's bring-up from a libp2p client and its createNode config.
+static std::shared_ptr<Libp2pBringUp> discoveryBringUp(Libp2pModule* libp2p, std::string config) {
+    return std::make_shared<Libp2pBringUp>(libp2p, std::move(config), [](const std::string&) {});
 }
 
 // RLN is never in the node config and has no method of its own: it comes from
@@ -298,7 +304,7 @@ LOGOS_TEST(successful_start_does_not_stop_the_node) {
 LOGOS_TEST(discovery_start_reports_absent_libp2p_module) {
     Libp2pModule libp2p("delivery_module");
     Libp2pModule::createNodeErrorCode = "object_unavailable";
-    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+    DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(&libp2p, "{}"));
 
     char err[1024] = {};
     const LdServiceDiscoveryPlugin* vt = plugin.vtable();
@@ -317,11 +323,11 @@ LOGOS_TEST(discovery_hands_libp2p_every_bootstrap_peer) {
     Libp2pModule::reset();
     Libp2pModule::bringUpSucceeds = true;
     Libp2pModule libp2p("delivery_module");
-    DeliveryServiceDiscoveryPlugin plugin(&libp2p, R"({"bootstrapNodes":[
+    DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(&libp2p, R"({"bootstrapNodes":[
         {"peerId":"16Uiu2HAmA","addrs":["/ip4/10.0.0.1/tcp/1"]},
         {"peerId":"16Uiu2HAmB","addrs":["/ip4/10.0.0.2/tcp/1"]},
         {"peerId":"16Uiu2HAmC","addrs":["/ip4/10.0.0.3/tcp/1"]}],
-        "mountKad":true,"mountServiceDiscovery":true})");
+        "mountKad":true,"mountServiceDiscovery":true})"));
 
     char err[1024] = {};
     const LdServiceDiscoveryPlugin* vt = plugin.vtable();
@@ -350,7 +356,7 @@ LOGOS_TEST(discovery_start_timeout_is_a_notice_and_never_reissued) {
             Libp2pModule::startError = "Failed to start libp2p: timeout";
         }
         Libp2pModule libp2p("delivery_module");
-        DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+        DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(&libp2p, "{}"));
 
         char err[1024] = {};
         const LdServiceDiscoveryPlugin* vt = plugin.vtable();
@@ -372,7 +378,7 @@ LOGOS_TEST(discovery_lookup_survives_a_record_with_a_non_string_peer_id) {
     Libp2pModule::lookupRecords = nlohmann::json::parse(
         R"([{"peerId":42,"addrs":[]},{"peerId":null},{"peerId":"16Uiu2HAmA","addrs":[]}])");
     Libp2pModule libp2p("delivery_module");
-    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+    DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(&libp2p, "{}"));
 
     char err[1024] = {};
     char* out = nullptr;
@@ -391,7 +397,7 @@ LOGOS_TEST(discovery_entry_point_turns_an_exception_into_an_error) {
     Libp2pModule::bringUpSucceeds = true;
     Libp2pModule::lookupThrows = true;
     Libp2pModule libp2p("delivery_module");
-    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+    DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(&libp2p, "{}"));
 
     char err[1024] = {};
     char* out = nullptr;
@@ -410,7 +416,7 @@ LOGOS_TEST(discovery_start_refusal_fails_the_bring_up) {
     Libp2pModule::bringUpSucceeds = true;
     Libp2pModule::startError = "Failed to start libp2p: address already in use";
     Libp2pModule libp2p("delivery_module");
-    DeliveryServiceDiscoveryPlugin plugin(&libp2p, "{}");
+    DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(&libp2p, "{}"));
 
     char err[1024] = {};
     const LdServiceDiscoveryPlugin* vt = plugin.vtable();
@@ -426,7 +432,7 @@ LOGOS_TEST(discovery_start_refusal_fails_the_bring_up) {
 }
 
 LOGOS_TEST(discovery_start_without_libp2p_client_fails_cleanly) {
-    DeliveryServiceDiscoveryPlugin plugin(nullptr, "{}");
+    DeliveryServiceDiscoveryPlugin plugin(discoveryBringUp(nullptr, "{}"));
 
     char err[256] = {};
     const LdServiceDiscoveryPlugin* vt = plugin.vtable();
@@ -782,6 +788,36 @@ LOGOS_TEST(createNode_installs_rln_plugin) {
     delete impl;
 }
 
+// A node started again after a stop gets its RLN backend brought up again:
+// stop publishes Stopped, the next start runs the bring-up anew (here against
+// no framework context, so it settles on Failed again, as createNode's did).
+LOGOS_TEST(stop_then_start_brings_the_rln_backend_up_again) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    delivery_test_events::resetRlnStateEvent();
+    delivery_test_events::resetNodeLifecycleEvents();
+    RlnPresetsFile presets(kRlnPresetTable);
+    auto* impl = createRlnImpl(t);
+    LOGOS_ASSERT_EQ(settledRlnState(*impl), std::string("Failed"));
+    const int afterBringUp = awaitRlnStateEvents(2).transitions; // Initializing, Failed
+
+    LOGOS_ASSERT_TRUE(impl->stop().success);
+    const auto stopped = awaitRlnStateEvents(afterBringUp + 1);
+    LOGOS_ASSERT_EQ(stopped.state, std::string("Stopped"));
+
+    LOGOS_ASSERT_TRUE(impl->start().success);
+    const auto restarted = awaitRlnStateEvents(afterBringUp + 3); // Initializing, Failed again
+    LOGOS_ASSERT_EQ(restarted.state, std::string("Failed"));
+    LOGOS_ASSERT_EQ(settledRlnState(*impl), std::string("Failed"));
+
+    // Starting an already-started node does not spawn a second bring-up while
+    // the first one's verdict stands.
+    LOGOS_ASSERT_TRUE(impl->start().success);
+    LOGOS_ASSERT_EQ(awaitRlnStateEvents(afterBringUp + 5).transitions, afterBringUp + 5);
+    delete impl;
+    delivery_test_rln::resetRlnMockState();
+}
+
 // The stop after a failed start and an explicit stop() both stop the RLN
 // backend, and both join the bring-up thread on the way -- from different
 // threads, possibly at once. They must not race that join.
@@ -1055,6 +1091,431 @@ LOGOS_TEST(an_omitted_enable_validation_defaults_to_on) {
 
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableNoValidation, table).empty());
     LOGOS_ASSERT_FALSE(table["logos.test"].enableValidation);
+}
+
+// A deployment with native Mix: relay on one registry, mix on another.
+static constexpr const char* kRlnPresetTableWithMix = R"({
+  "logos.test": {
+    "enabled": true,
+    "registry-id": "reg",
+    "rln-identifier": "rln-id",
+    "epoch-size-sec": 600,
+    "rate-limit": 100,
+    "mix-registry-id": "mixreg",
+    "mix-rate-limit": 20,
+    "mix-metadata-topic": "/mix/1/metadata/proto"
+  }
+})";
+
+static constexpr const char* kMixNodeCfg =
+    R"({"logLevel":"INFO","preset":"logos.test","mix":true})";
+
+// The mix deployment with a membership allocator: the RLN module asks it
+// first for both registries.
+static constexpr const char* kRlnPresetTableWithAllocator = R"({
+  "logos.test": {
+    "enabled": true,
+    "registry-id": "reg",
+    "epoch-size-sec": 600,
+    "rate-limit": 100,
+    "mix-registry-id": "mixreg",
+    "mix-rate-limit": 20,
+    "mix-metadata-topic": "/mix/1/metadata/proto",
+    "allocator-peer-id": "16Uiu2HAmAllocator",
+    "allocator-multiaddr": "/ip4/127.0.0.1/tcp/9000"
+  }
+})";
+
+// The built-in presets take the same allocator defaults as a parsed table:
+// the RLN-enabled one discovers with peer-any, the others ask no allocator.
+LOGOS_TEST(builtin_presets_carry_the_allocator_defaults) {
+    std::string err;
+    const RlnPresetEntry test = resolveRlnPreset("logos.test", err);
+    LOGOS_ASSERT_TRUE(err.empty());
+    LOGOS_ASSERT_TRUE(test.hasAllocator());
+    LOGOS_ASSERT_TRUE(test.allocatorDiscover);
+    LOGOS_ASSERT_EQ(test.allocatorAuthType, std::string("peer-any"));
+    LOGOS_ASSERT_TRUE(test.allocatorPeerId.empty());
+    for (const char* name : {"", "logos.dev"}) {
+        const RlnPresetEntry off = resolveRlnPreset(name, err);
+        LOGOS_ASSERT_TRUE(err.empty());
+        LOGOS_ASSERT_FALSE(off.enabled);
+        LOGOS_ASSERT_FALSE(off.hasAllocator());
+    }
+}
+
+// A preset's allocator defaults to the peer-any vector; its keys are read as
+// written; the combinations that cannot work are refused where written.
+LOGOS_TEST(preset_table_parses_the_allocator_with_defaults_and_refusals) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableWithAllocator, table).empty());
+    const RlnPresetEntry& e = table["logos.test"];
+    LOGOS_ASSERT_TRUE(e.hasAllocator());
+    LOGOS_ASSERT_EQ(e.allocatorPeerId, std::string("16Uiu2HAmAllocator"));
+    LOGOS_ASSERT_EQ(e.allocatorMultiaddr, std::string("/ip4/127.0.0.1/tcp/9000"));
+    LOGOS_ASSERT_EQ(e.allocatorAuthType, std::string("peer-any"));
+    LOGOS_ASSERT_TRUE(e.allocatorAuthPayload.empty());
+    LOGOS_ASSERT_TRUE(e.allocatorAuthProvider.empty());
+
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
+            "allocator-peer-id":"p","allocator-multiaddr":"/m","allocator-auth-type":"eth-allowlist",
+            "allocator-auth-provider":"rln_sign_module","allocator-auth-args":"{\"rate_max\":100}"}})",
+        table).empty());
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorAuthType, std::string("eth-allowlist"));
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorAuthProvider, std::string("rln_sign_module"));
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorAuthArgs, std::string("{\"rate_max\":100}"));
+
+    // Without allocator keys an RLN preset still asks the allocators
+    // discovery finds, with the peer-any vector; a disabled preset asks none.
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableWithMix, table).empty());
+    LOGOS_ASSERT_TRUE(table["logos.test"].hasAllocator());
+    LOGOS_ASSERT_TRUE(table["logos.test"].allocatorDiscover);
+    LOGOS_ASSERT_TRUE(table["logos.test"].allocatorPeerId.empty());
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorAuthType, std::string("peer-any"));
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(R"({"logos.test":{"enabled":false}})", table).empty());
+    LOGOS_ASSERT_FALSE(table["logos.test"].hasAllocator());
+    LOGOS_ASSERT_TRUE(table["logos.test"].allocatorAuthType.empty());
+
+    // Discovery off and no peer: funded provisioning only. Off with a peer:
+    // that peer alone.
+    const std::string base = R"("enabled":true,"registry-id":"reg","epoch-size-sec":600)";
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(R"({"logos.test":{)" + base + R"(,"allocator-discover":false}})", table).empty());
+    LOGOS_ASSERT_FALSE(table["logos.test"].hasAllocator());
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(
+        R"({"logos.test":{)" + base + R"(,"allocator-discover":false,"allocator-peer-id":"p","allocator-multiaddr":"/m"}})",
+        table).empty());
+    LOGOS_ASSERT_TRUE(table["logos.test"].hasAllocator());
+    LOGOS_ASSERT_FALSE(table["logos.test"].allocatorDiscover);
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorAuthType, std::string("peer-any"));
+
+    struct Refused { std::string entry; std::string needle; };
+    for (const Refused& r : {
+             Refused{R"({"logos.test":{)" + base + R"(,"allocator-peer-id":"p"}})", "both allocator-peer-id and allocator-multiaddr"},
+             Refused{R"({"logos.test":{)" + base + R"(,"allocator-multiaddr":"/m"}})", "both allocator-peer-id and allocator-multiaddr"},
+             Refused{R"({"logos.test":{)" + base + R"(,"allocator-discover":"yes"}})", "allocator-discover must be a boolean"},
+             Refused{R"({"logos.test":{)" + base + R"(,"allocator-auth-type":"eth-allowlist"}})", "needs allocator-auth-payload or allocator-auth-provider"},
+             Refused{R"({"logos.test":{"enabled":false,"allocator-discover":true}})", "RLN is not enabled"},
+             Refused{R"({"logos.test":{)" + base + R"(,"allocator-peer-id":"p","allocator-multiaddr":"/m",
+                        "allocator-auth-payload":"00","allocator-auth-provider":"m"}})", "sets both"},
+             Refused{R"({"logos.test":{)" + base + R"(,"allocator-peer-id":"p","allocator-multiaddr":"/m",
+                        "allocator-auth-type":"eth-allowlist"}})", "needs allocator-auth-payload or allocator-auth-provider"},
+             Refused{R"({"logos.test":{"enabled":false,"allocator-peer-id":"p","allocator-multiaddr":"/m"}})", "RLN is not enabled"},
+         }) {
+        const std::string err = parseRlnPresetTable(r.entry, table);
+        LOGOS_ASSERT_TRUE(err.find(r.needle) != std::string::npos);
+    }
+}
+
+// The peer-any payload is the auth vectors' bare frame for the rate.
+LOGOS_TEST(the_peer_any_payload_is_the_bare_frame_for_the_rate) {
+    LOGOS_ASSERT_EQ(peerAnyAuthPayload(100), std::string("026400000000000000"));
+    LOGOS_ASSERT_EQ(peerAnyAuthPayload(20), std::string("021400000000000000"));
+    LOGOS_ASSERT_EQ(peerAnyAuthPayload(0x1234), std::string("023412000000000000"));
+}
+
+// With an allocator every registry entry is an object carrying its own
+// allocator block: the peer-any payload binds that registry's rate, so relay
+// and mix get different ones; explicit payload material passes through.
+LOGOS_TEST(the_backend_start_config_carries_the_allocator_per_registry) {
+    DeliveryRlnConfig cfg;
+    cfg.enabled = true;
+    cfg.registryId = "reg";
+    cfg.epochSizeSec = 600;
+    cfg.rateLimit = 100;
+    cfg.mixRegistryId = "mixreg";
+    cfg.mixEpochSizeSec = 10;
+    cfg.mixMaxEpochGap = 3;
+    cfg.mixRateLimit = 20;
+    cfg.allocatorDiscover = true;
+    cfg.allocatorPeerId = "16Uiu2HAmAllocator";
+    cfg.allocatorMultiaddr = "/ip4/127.0.0.1/tcp/9000";
+    cfg.allocatorAuthType = "peer-any";
+
+    auto start = nlohmann::json::parse(rlnBackendStartConfig(cfg));
+    LOGOS_ASSERT_EQ(start["registries"].size(), static_cast<size_t>(2));
+    const nlohmann::json relayAllocator{
+        {"discover", true}, {"peer_id", "16Uiu2HAmAllocator"}, {"multiaddr", "/ip4/127.0.0.1/tcp/9000"},
+        {"auth_type", "peer-any"}, {"auth_payload", "026400000000000000"}};
+    LOGOS_ASSERT_TRUE(start["registries"][0] == nlohmann::json({{"registry_id", "reg"}, {"allocator", relayAllocator}}));
+    LOGOS_ASSERT_TRUE(start["registries"][1]["allocator"]["auth_payload"].get<std::string>() == "021400000000000000");
+    LOGOS_ASSERT_EQ(start["registries"][1]["registry_id"].get<std::string>(), std::string("mixreg"));
+    LOGOS_ASSERT_EQ(start["registries"][1]["epoch_size_sec"].get<int>(), 10);
+    LOGOS_ASSERT_FALSE(start.contains("allocator"));
+
+    // No rate: the module's default rate binds the payload.
+    DeliveryRlnConfig relay = cfg;
+    relay.rateLimit = 0;
+    relay.mixRegistryId.clear();
+    auto only = nlohmann::json::parse(rlnBackendStartConfig(relay));
+    LOGOS_ASSERT_EQ(only["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(only["registries"][0]["allocator"]["auth_payload"].get<std::string>(), std::string("026400000000000000"));
+
+    // A producer, or a payload, from the preset passes through unchanged.
+    DeliveryRlnConfig producer = relay;
+    producer.allocatorAuthType = "eth-allowlist";
+    producer.allocatorAuthProvider = "rln_sign_module";
+    producer.allocatorAuthArgs = "{\"rate_max\":100}";
+    auto viaProducer = nlohmann::json::parse(rlnBackendStartConfig(producer));
+    const nlohmann::json& block = viaProducer["registries"][0]["allocator"];
+    LOGOS_ASSERT_EQ(block["auth_type"].get<std::string>(), std::string("eth-allowlist"));
+    LOGOS_ASSERT_EQ(block["auth_provider"].get<std::string>(), std::string("rln_sign_module"));
+    LOGOS_ASSERT_EQ(block["auth_args"].get<std::string>(), std::string("{\"rate_max\":100}"));
+    LOGOS_ASSERT_FALSE(block.contains("auth_payload"));
+    DeliveryRlnConfig payload = relay;
+    payload.allocatorAuthPayload = "02aa00000000000000";
+    auto viaPayload = nlohmann::json::parse(rlnBackendStartConfig(payload));
+    LOGOS_ASSERT_EQ(viaPayload["registries"][0]["allocator"]["auth_payload"].get<std::string>(), std::string("02aa00000000000000"));
+
+    // Discovery alone: the block names no peer. A peer with discovery off:
+    // the block says so. Neither: a plain-string entry, funded only.
+    DeliveryRlnConfig discovered = relay;
+    discovered.allocatorPeerId.clear();
+    discovered.allocatorMultiaddr.clear();
+    auto viaDiscovery = nlohmann::json::parse(rlnBackendStartConfig(discovered));
+    LOGOS_ASSERT_TRUE(viaDiscovery["registries"][0]["allocator"]
+                      == nlohmann::json({{"discover", true}, {"auth_type", "peer-any"}, {"auth_payload", "026400000000000000"}}));
+    DeliveryRlnConfig pinned = relay;
+    pinned.allocatorDiscover = false;
+    auto viaPeer = nlohmann::json::parse(rlnBackendStartConfig(pinned));
+    LOGOS_ASSERT_TRUE(viaPeer["registries"][0]["allocator"]["discover"] == nlohmann::json(false));
+    LOGOS_ASSERT_EQ(viaPeer["registries"][0]["allocator"]["peer_id"].get<std::string>(), std::string("16Uiu2HAmAllocator"));
+    DeliveryRlnConfig funded = discovered;
+    funded.allocatorDiscover = false;
+    auto viaFunding = nlohmann::json::parse(rlnBackendStartConfig(funded));
+    LOGOS_ASSERT_TRUE(viaFunding["registries"][0] == nlohmann::json("reg"));
+}
+
+// The shared bring-up issues createNode and start once each, whoever asks.
+LOGOS_TEST(the_libp2p_bring_up_issues_each_call_once) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule libp2p("test");
+    std::vector<std::string> lines;
+    Libp2pBringUp bringUp(&libp2p, "{}", [&lines](const std::string& l) { lines.push_back(l); });
+    LOGOS_ASSERT_FALSE(bringUp.ready());
+    LOGOS_ASSERT_TRUE(bringUp.ensure().empty());
+    LOGOS_ASSERT_TRUE(bringUp.ready());
+    LOGOS_ASSERT_TRUE(bringUp.ensure().empty());
+    LOGOS_ASSERT_EQ(Libp2pModule::startCalls, 1);
+    LOGOS_ASSERT_FALSE(lines.empty());
+
+    Libp2pModule::reset();
+    Libp2pModule::createNodeErrorCode = "object_unavailable";
+    Libp2pBringUp absent(&libp2p, "{}", [](const std::string&) {});
+    LOGOS_ASSERT_EQ(absent.ensure(), std::string(Libp2pBringUp::kUnavailable));
+    LOGOS_ASSERT_EQ(Libp2pModule::startCalls, 0);
+    Libp2pBringUp none(nullptr, "{}", [](const std::string&) {});
+    LOGOS_ASSERT_EQ(none.ensure(), std::string("no libp2p_module client"));
+    Libp2pModule::reset();
+}
+
+// A createNode libp2p refuses because a node already exists (a module
+// reload, another consumer) is taken as that node, created and running: no
+// second start, which would crash libp2p_module.
+LOGOS_TEST(a_refused_createNode_on_a_running_node_issues_no_second_start) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = false; // createNode: success=false
+    Libp2pModule::nodeInfoSucceeds = true;
+    Libp2pModule libp2p("test");
+    Libp2pBringUp bringUp(&libp2p, "{}", [](const std::string&) {});
+    LOGOS_ASSERT_TRUE(bringUp.ensure().empty());
+    LOGOS_ASSERT_TRUE(bringUp.ready());
+    LOGOS_ASSERT_EQ(Libp2pModule::startCalls, 0);
+
+    // Refused and nobody answers: the refusal verdict stands.
+    Libp2pModule::reset();
+    Libp2pBringUp refused(&libp2p, "{}", [](const std::string&) {});
+    LOGOS_ASSERT_FALSE(refused.ensure().empty());
+    Libp2pModule::reset();
+}
+
+// Two callers (the RLN bring-up thread and the discovery plugin's start)
+// share one bring-up: one createNode, one start, both ready.
+LOGOS_TEST(concurrent_ensure_calls_share_one_bring_up) {
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule libp2p("test");
+    Libp2pBringUp bringUp(&libp2p, "{}", [](const std::string&) {});
+    std::string a, b;
+    std::thread ta([&] { a = bringUp.ensure(); });
+    std::thread tb([&] { b = bringUp.ensure(); });
+    ta.join();
+    tb.join();
+    LOGOS_ASSERT_TRUE(a.empty());
+    LOGOS_ASSERT_TRUE(b.empty());
+    LOGOS_ASSERT_TRUE(bringUp.ready());
+    LOGOS_ASSERT_EQ(Libp2pModule::startCalls, 1);
+    Libp2pModule::reset();
+}
+
+// rlnBridgeEnable after a failed bring-up runs the bring-up again instead of
+// enabling a bridge with no backend behind it.
+LOGOS_TEST(rlnBridgeEnable_after_a_failed_bring_up_tries_again) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    delivery_test_events::resetRlnStateEvent();
+    RlnPresetsFile presets(kRlnPresetTable);
+    auto* impl = createRlnImpl(t);
+    LOGOS_ASSERT_EQ(settledRlnState(*impl), std::string("Failed"));
+    const int afterBringUp = awaitRlnStateEvents(2).transitions;
+    (void)impl->rlnBridgeEnable(); // fails here too (no framework context)
+    const auto again = awaitRlnStateEvents(afterBringUp + 2); // Initializing, Failed
+    LOGOS_ASSERT_EQ(again.transitions, afterBringUp + 2);
+    LOGOS_ASSERT_EQ(again.state, std::string("Failed"));
+    delete impl;
+    delivery_test_rln::resetRlnMockState();
+}
+
+// The mix keys the library needs beyond the registry default to native Mix's
+// own scope and epoch profile.
+LOGOS_TEST(preset_table_parses_the_mix_registry_with_defaults) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableWithMix, table).empty());
+    const RlnPresetEntry& e = table["logos.test"];
+    LOGOS_ASSERT_TRUE(e.hasMix());
+    LOGOS_ASSERT_EQ(e.rateLimit, static_cast<uint64_t>(100));
+    LOGOS_ASSERT_EQ(e.mixRegistryId, std::string("mixreg"));
+    LOGOS_ASSERT_EQ(e.mixRlnIdentifier, std::string(kMixRlnIdentifierV1));
+    LOGOS_ASSERT_EQ(e.mixEpochSizeSec, static_cast<uint64_t>(10));
+    LOGOS_ASSERT_EQ(e.mixMaxEpochGap, static_cast<uint64_t>(3));
+    LOGOS_ASSERT_EQ(e.mixRateLimit, static_cast<uint64_t>(20));
+    LOGOS_ASSERT_EQ(e.mixMetadataTopic, std::string("/mix/1/metadata/proto"));
+
+    // Set, they are taken as written.
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
+            "mix-registry-id":"mixreg","mix-metadata-topic":"/t","mix-epoch-size-sec":600,
+            "mix-max-epoch-gap":1,"mix-rln-identifier":")" + std::string(64, 'a') + R"("}})",
+        table).empty());
+    LOGOS_ASSERT_EQ(table["logos.test"].mixEpochSizeSec, static_cast<uint64_t>(600));
+    LOGOS_ASSERT_EQ(table["logos.test"].mixMaxEpochGap, static_cast<uint64_t>(1));
+    LOGOS_ASSERT_EQ(table["logos.test"].mixRlnIdentifier, std::string(64, 'a'));
+
+    // Without a mix registry nothing mix-related is in force.
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
+    LOGOS_ASSERT_FALSE(table["logos.test"].hasMix());
+    LOGOS_ASSERT_EQ(table["logos.test"].rateLimit, static_cast<uint64_t>(0));
+}
+
+// A mix registry that cannot work is refused where it is written.
+LOGOS_TEST(preset_table_refuses_an_unusable_mix_entry) {
+    std::map<std::string, RlnPresetEntry> table;
+    // Mix proofs ride relay RLN.
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":false,"mix-registry-id":"mixreg","mix-metadata-topic":"/t"}})",
+        table).empty());
+    // One registry runs one epoch size.
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
+            "mix-registry-id":"reg","mix-metadata-topic":"/t"}})",
+        table).empty());
+    // The library needs the topic the proof metadata is published on.
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
+            "mix-registry-id":"mixreg"}})",
+        table).empty());
+    // The identifier is 32 bytes of hex to the library.
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
+            "mix-registry-id":"mixreg","mix-metadata-topic":"/t","mix-rln-identifier":"zz"}})",
+        table).empty());
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
+            "mix-registry-id":"mixreg","mix-metadata-topic":"/t","mix-epoch-size-sec":0}})",
+        table).empty());
+}
+
+// One start() names both registries: the relay one as this call's defaults,
+// the mix one as an object with its own epoch, gap and rate. Pinned as JSON
+// because the RLN module parses exactly this shape (liblogos_rln_module 0.14.2).
+LOGOS_TEST(the_backend_start_config_names_both_registries) {
+    DeliveryRlnConfig cfg;
+    cfg.enabled = true;
+    cfg.registryId = "reg";
+    cfg.epochSizeSec = 600;
+    cfg.rateLimit = 100;
+    cfg.mixRegistryId = "mixreg";
+    cfg.mixEpochSizeSec = 10;
+    cfg.mixMaxEpochGap = 3;
+    cfg.mixRateLimit = 20;
+
+    auto start = nlohmann::json::parse(rlnBackendStartConfig(cfg));
+    LOGOS_ASSERT_EQ(start.value("epoch_size_sec", 0), 600);
+    LOGOS_ASSERT_EQ(start.value("rate_limit", 0), 100);
+    LOGOS_ASSERT_FALSE(start.contains("max_epoch_gap"));
+    LOGOS_ASSERT_EQ(start["registries"].size(), static_cast<size_t>(2));
+    LOGOS_ASSERT_EQ(start["registries"][0].get<std::string>(), std::string("reg"));
+    const nlohmann::json expectedMix{
+        {"registry_id", "mixreg"}, {"epoch_size_sec", 10}, {"max_epoch_gap", 3}, {"rate_limit", 20}};
+    LOGOS_ASSERT_TRUE(start["registries"][1] == expectedMix);
+
+    // Relay only, no rate: the module's own defaults, one plain entry.
+    DeliveryRlnConfig relay;
+    relay.enabled = true;
+    relay.registryId = "reg";
+    relay.epochSizeSec = 600;
+    relay.maxEpochGap = 2;
+    auto only = nlohmann::json::parse(rlnBackendStartConfig(relay));
+    LOGOS_ASSERT_EQ(only.value("max_epoch_gap", 0), 2);
+    LOGOS_ASSERT_FALSE(only.contains("rate_limit"));
+    LOGOS_ASSERT_EQ(only["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_TRUE(only["registries"][0].is_string());
+}
+
+// A config that turns mix on inherits the deployment's mix registry, scope and
+// metadata topic from the preset, so a host does not copy them.
+LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_to_a_mix_node) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableWithMix);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(kMixNodeCfg).success);
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_EQ(libCfg.value("mix-rln-registry-id", ""), std::string("mixreg"));
+    LOGOS_ASSERT_EQ(libCfg.value("mix-rln-identifier-hex", ""), std::string(kMixRlnIdentifierV1));
+    LOGOS_ASSERT_EQ(libCfg.value("mix-rln-metadata-topic", ""), std::string("/mix/1/metadata/proto"));
+
+    // The resolved deployment names the mix registry too.
+    const auto state = impl.rlnState().value;
+    LOGOS_ASSERT_EQ(state.value("registryId", ""), std::string("reg"));
+    LOGOS_ASSERT_EQ(state.value("mixRegistryId", ""), std::string("mixreg"));
+    LOGOS_ASSERT_EQ(state.value("mixRlnIdentifier", ""), std::string(kMixRlnIdentifierV1));
+    LOGOS_ASSERT_EQ(state.value("mixEpochSizeSec", 0), 10);
+    LOGOS_ASSERT_EQ(state.value("mixMaxEpochGap", 0), 3);
+    (void)settledRlnState(impl);
+}
+
+LOGOS_TEST(a_caller_supplied_mix_key_wins_and_a_relay_only_node_gets_none) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableWithMix);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    {
+        DeliveryModuleImpl impl;
+        LOGOS_ASSERT_TRUE(impl.createNode(
+            R"({"logLevel":"INFO","preset":"logos.test","mix":true,"mix-rln-metadata-topic":"/mine"})")
+            .success);
+        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+        LOGOS_ASSERT_EQ(libCfg.value("mix-rln-metadata-topic", ""), std::string("/mine"));
+        LOGOS_ASSERT_EQ(libCfg.value("mix-rln-registry-id", ""), std::string("mixreg"));
+        (void)settledRlnState(impl);
+    }
+    delivery_test_rln::resetRlnMockState();
+    {
+        // mix off (or absent): the library is told nothing about mix.
+        DeliveryModuleImpl impl;
+        LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
+        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+        LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-registry-id"));
+        LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-identifier-hex"));
+        // But the deployment is still reported.
+        LOGOS_ASSERT_EQ(impl.rlnState().value.value("mixRegistryId", ""), std::string("mixreg"));
+        (void)settledRlnState(impl);
+    }
 }
 
 // The identifier scopes the application, so a deployment that does not name
@@ -1347,8 +1808,7 @@ LOGOS_TEST(createNode_fails_when_a_requested_plugin_cannot_be_set_up) {
 // ---------------------------------------------------------------------------
 // RlnBridge, driven directly.
 //
-// The bridge is reachable here for the first time: it now calls the typed
-// client, whose stub answers from the calling thread with whatever stubError()
+// The bridge calls the typed client, whose stub answers from the calling thread with whatever stubError()
 // says, so a request op's whole reply path runs inside the test with no host,
 // no chain and no waiting. What these pin is the SHAPE the delivery library
 // receives — the two error dialects, and the classification that decides
@@ -1450,8 +1910,9 @@ LOGOS_TEST(rln_bridge_disabled_still_answers_the_request) {
     LOGOS_ASSERT_EQ(delivery_test_rln::g_lastResponseReqId, static_cast<uint64_t>(10));
     const auto reply = nlohmann::json::parse(delivery_test_rln::g_lastResponseJson);
     const auto inner = nlohmann::json::parse(reply["error"].get<std::string>());
-    // Permanent: enable() happens once, at createNode. Retrying cannot help.
-    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("permanent"));
+    // Transient: enable() runs on the bring-up thread, so a request that
+    // arrives first finds the bridge up on its retry.
+    LOGOS_ASSERT_EQ(inner["class"].get<std::string>(), std::string("transient"));
     LOGOS_ASSERT_EQ(inner["kind"].get<std::string>(),
                     std::string("rln_bridge_disabled"));
 }

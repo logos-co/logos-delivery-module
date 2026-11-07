@@ -5,26 +5,36 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <atomic>
 #include <thread>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
 
+#include "rln_presets.h"
+
 class DeliveryServiceDiscoveryPlugin;
+class Libp2pBringUp;
 class RlnBridge;
 
-// Everything the delivery library no longer knows about RLN. Resolved from
-// the createNode config's network preset (see src/rln_presets.h), never
-// carried in the config itself.
-struct DeliveryRlnConfig {
-    bool enabled = false;
-    bool manageBackend = true;
-    std::string registryId;
-    std::string rlnIdentifier;
-    uint64_t epochSizeSec = 0;
-    uint64_t maxEpochGap = 0;
-};
+// The RLN settings this plugin holds for the delivery library: the createNode
+// config's network preset, resolved (see src/rln_presets.h), never carried in
+// the config itself.
+using DeliveryRlnConfig = RlnPresetEntry;
+
+// The liblogos_rln_module `start` config for a deployment: the relay registry
+// pinned to this call's defaults (epoch size, gap, rate) and, when the
+// deployment has one, the mix registry as an object with its own values —
+// one call that configures both, so the module provisions a membership per
+// registry at that registry's rate.
+std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg);
+
+// Where this node's RLN stands; see DeliveryModuleImpl::rlnState.
+enum class RlnState { Disabled, Initializing, Ready, Failed, Stopped };
+
+// The name rlnState() and rlnStateChanged publish for `state`.
+const char* rlnStateName(RlnState state);
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -397,7 +407,9 @@ public:
      * @return Value `{"state": "<state>", "message": "<detail>"}`, plus
      *         `registryId`, `rlnIdentifier` and `epochSizeSec` once a preset
      *         has enabled RLN — the resolved deployment, so a caller can name
-     *         or query it without a second copy of the preset table.
+     *         or query it without a second copy of the preset table — and,
+     *         for a deployment with native Mix, `mixRegistryId`,
+     *         `mixRlnIdentifier`, `mixEpochSizeSec` and `mixMaxEpochGap`.
      * @see rlnStateChanged for the same transitions as an event.
      */
     StdLogosResult rlnState();
@@ -552,9 +564,15 @@ private:
      */
     std::string startRlnBackend();
 
+    // After the backend is up: a registry whose preset names a rate the
+    // chain's bounds do not admit is reported now, as a reason, rather than
+    // later as a membership that never appears. Returns the reason, or empty
+    // when every named rate fits or the bounds could not be read.
+    std::string checkRlnRateBounds(const DeliveryRlnConfig& cfg);
+
     // Publishes an RLN state transition: stores it and emits
     // rlnStateChanged. A repeat of the current state is not re-emitted.
-    void setRlnState(const char* state, const std::string& message);
+    void setRlnState(RlnState state, const std::string& message);
 
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
@@ -563,6 +581,23 @@ private:
     // because both may join the bring-up thread at once.
     void stopRlnBackend();
     std::mutex rlnBackendStopMutex;
+    // stop() runs stopRlnBackend on its own thread: it makes an outbound
+    // module call, which the caller's thread may not be allowed to, and it
+    // joins a bring-up that can be minutes into the chain. Joined before the
+    // next bring-up and in releaseNode.
+    void stopRlnBackendAsync();
+    void joinRlnStop();
+    std::thread rlnStopThread;
+
+    // Runs startRlnBackend on rlnBringUpThread and publishes Ready/Failed.
+    // createNode's bring-up, and every start() after a stop.
+    void spawnRlnBringUp();
+    // start()'s RLN half: restarts a backend this module stopped.
+    void ensureRlnBackend();
+    // Whether this module's startBackend call succeeded and no stop followed.
+    std::atomic<bool> rlnBackendRunning{false};
+    // Whether a bring-up thread is between spawn and its Ready/Failed.
+    std::atomic<bool> rlnBringUpActive{false};
 
     // Undoes installRlnPlugin: clears the library's RLN plugin and resets both
     // copies of the RLN config. A no-op unless this instance installed it.
@@ -580,7 +615,7 @@ private:
 
     // Guards the published RLN state against the bring-up thread.
     mutable std::mutex rlnStateMutex;
-    std::string rlnStateName{"Disabled"};
+    RlnState rlnStateValue{RlnState::Disabled};
     std::string rlnStateMessage;
     // The resolved deployment, published so a caller can query the same
     // registry this node answers for without resolving the preset itself.
@@ -593,8 +628,7 @@ private:
     // and started by bringUpRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
 
-    // Everything the delivery library no longer knows about RLN (see
-    // DeliveryRlnConfig).
+    // The RLN settings held for the delivery library (see DeliveryRlnConfig).
     // Never null. Replaced, never mutated: a writer publishes a new snapshot.
     std::shared_ptr<const DeliveryRlnConfig> rlnConfig =
         std::make_shared<const DeliveryRlnConfig>();
@@ -626,6 +660,11 @@ private:
     // Outlives every plugin call: logos-delivery releases the registration when
     // the context is destroyed, which happens in this class's destructor.
     std::unique_ptr<DeliveryServiceDiscoveryPlugin> discoPlugin;
+
+    // This node's libp2p_module bring-up, shared by service discovery and the
+    // RLN allocator path (both need a started node, neither may start it
+    // twice). Created with the node, released with it.
+    std::shared_ptr<Libp2pBringUp> libp2pBringUp;
 
     /// Frees discoPlugin once no entry point is running, or leaks it rather
     /// than freeing it under an abandoned thread that is still inside it.

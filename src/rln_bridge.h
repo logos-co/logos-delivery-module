@@ -23,8 +23,7 @@
 // There is no raw lp_* call here, and no client of our own: the typed client
 // belongs to modules() and already owns an lp client, creates it lazily, does
 // the capability flow, maps transport codes to CallError and frees the reply
-// strings. Hand-rolling that was worth it only while the generated client had
-// no per-call timeout, which is no longer true.
+// strings.
 //
 // Threading: init() is the second-phase constructor. It cannot run during
 // construction, because the module context is not ready yet. Instead it runs
@@ -44,6 +43,8 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+
+#include <nlohmann/json.hpp>
 
 struct StdLogosResult;
 namespace logos { struct CallError; }
@@ -71,6 +72,13 @@ public:
     // return the module's reply text (empty on success, error text otherwise).
     std::string startBackend(std::string configJson);
     std::string stopBackend();
+
+    // A registry's parameters read on the caller's thread, for the bring-up
+    // thread's own checks. Fills `out` with the module's reply value and
+    // returns empty; otherwise the failure text (nothing reaches the library).
+    std::string readRegistryParameters(const std::string& registryId,
+                                       const std::string& rlnIdentifier,
+                                       nlohmann::json& out);
 
     // Op entry points (any thread; return immediately — the reply reaches the
     // library later via logosdelivery_rln_response). The registry and

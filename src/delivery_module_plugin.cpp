@@ -19,6 +19,7 @@
 
 #include "api_call_handler.h"
 #include "discovery_config.h"
+#include "libp2p_bring_up.h"
 #include "service_discovery_plugin.h"
 #include "rln_bridge.h"
 #include "rln_presets.h"
@@ -327,6 +328,9 @@ std::string DeliveryModuleImpl::bringUpRlnBridge()
 
 StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 {
+    // A node whose bring-up failed gets another: the bridge alone answers
+    // nothing useful while the backend is down.
+    ensureRlnBackend();
     const std::string err = bringUpRlnBridge();
     if (!err.empty()) {
         return {false, {}, err};
@@ -384,8 +388,9 @@ void DeliveryModuleImpl::releaseNode()
 {
     // A stop issued after a failed start holds the context handle, and joins
     // the bring-up thread itself: finish it first, so that join is not racing
-    // the one below.
+    // the one below. stop()'s own RLN half runs on its thread too.
     joinFailedStartStop();
+    joinRlnStop();
     // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
     // run while it is still in flight. A no-op when no thread was started.
     joinRlnBringUp();
@@ -411,6 +416,7 @@ void DeliveryModuleImpl::releaseNode()
     // discovery worker, the only caller of the plugin, so no new call can
     // arrive once it returns.
     releaseServiceDiscoveryPlugin();
+    libp2pBringUp.reset();
 }
 
 StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
@@ -418,7 +424,7 @@ StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
     const bool rlnWasInstalled = rlnConfig->enabled;
     releaseNode();
     if (rlnWasInstalled) {
-        setRlnState("Disabled", {});
+        setRlnState(RlnState::Disabled, {});
     }
     return {false, {}, std::move(reason)};
 }
@@ -548,8 +554,8 @@ static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
     return std::nullopt;
 }
 
-// True when the config is the legacy flat shape: any top-level key besides the
-// ones the layered parser consumes marks a bare WakuNodeConf field.
+// True when the config is a bare WakuNodeConf: any top-level key besides the
+// ones the layered parser consumes is a WakuNodeConf field.
 static bool isFlatShape(const nlohmann::json& cfgObj)
 {
     for (const auto& entry : cfgObj.items()) {
@@ -563,41 +569,20 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
     return false;
 }
 
-// Locates the object that carries kernel/messaging settings for this config
-// shape: kernelConf when present, messagingOverrides for the layered shapes,
-// top level for the legacy flat shape.
-static nlohmann::json* configTarget(nlohmann::json& cfgObj)
-{
-    const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
-    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
-        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
-        return &cfgObj[*kernelConfKey];
-    }
-    if (kernelEntry) {
-        return nullptr;
-    }
-    if (isFlatShape(cfgObj)) {
-        return &cfgObj;
-    }
-    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
-    if (!overridesKey) {
-        return nullptr;
-    }
-    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
-}
-
 // Defaults the node's storage directory to the host's per-instance path, so
 // side-by-side instances don't share upstream's cwd-relative "./data". Also
 // carries the preset's validation switch into the config as
 // rln-disable-validation: deployment policy, so it overrides any client key.
-// Each setting goes where the config shape accepts it: kernelConf when
-// present, messagingOverrides (created if needed) for the layered shapes,
-// top level for the legacy flat shape.
+// A deployment with a mix registry supplies the mix RLN keys too
+// (mix-rln-registry-id, mix-rln-identifier-hex, mix-rln-metadata-topic) for a
+// config that turns mix on, so a host says `mix: true` and inherits the
+// deployment's registry and scope instead of copying them; a key the caller
+// did set is left alone. Each setting goes where the config shape accepts it:
+// kernelConf when present, messagingOverrides (created if needed) for the
+// layered shapes, top level for a bare WakuNodeConf.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      bool disableRlnValidation)
+                                                      const RlnPresetEntry& preset)
 {
     nlohmann::json cfgObj;
     try {
@@ -612,7 +597,9 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
-    if (!persistencePath.empty() || disableRlnValidation) {
+    const bool disableRlnValidation = preset.enabled && !preset.enableValidation;
+    const bool mixRegistry = preset.enabled && preset.hasMix();
+    if (!persistencePath.empty() || disableRlnValidation || mixRegistry) {
         nlohmann::json* target = &cfgObj;
         const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
         const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
@@ -638,6 +625,22 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         }
         if (target && disableRlnValidation) {
             (*target)["rln-disable-validation"] = true;
+        }
+        if (target && mixRegistry) {
+            const auto mixKey = findKey(*target, {"mix"});
+            const bool mixOn = mixKey && (*target)[*mixKey].is_boolean()
+                && (*target)[*mixKey].get<bool>();
+            if (mixOn) {
+                if (!findKey(*target, {"mix-rln-registry-id"})) {
+                    (*target)["mix-rln-registry-id"] = preset.mixRegistryId;
+                }
+                if (!findKey(*target, {"mix-rln-identifier-hex"})) {
+                    (*target)["mix-rln-identifier-hex"] = preset.mixRlnIdentifier;
+                }
+                if (!findKey(*target, {"mix-rln-metadata-topic"})) {
+                    (*target)["mix-rln-metadata-topic"] = preset.mixMetadataTopic;
+                }
+            }
         }
     }
 
@@ -675,8 +678,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return {false, {}, presetError};
     }
 
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(),
-                                               rlnPreset.enabled && !rlnPreset.enableValidation);
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset);
     if (!cfgWithDefaults) {
         return {false, {}, "Invalid JSON config"};
     }
@@ -686,16 +688,10 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     rlnBridge->init(&modules().liblogos_rln_module);
 
     if (rlnPreset.enabled) {
-        DeliveryRlnConfig fromPreset;
-        fromPreset.manageBackend = rlnPreset.manageBackend;
-        fromPreset.registryId = rlnPreset.registryId;
-        fromPreset.rlnIdentifier = rlnPreset.rlnIdentifier;
-        fromPreset.epochSizeSec = rlnPreset.epochSizeSec;
-        fromPreset.maxEpochGap = rlnPreset.maxEpochGap;
-        if (std::string failure = installRlnPlugin(fromPreset); !failure.empty()) {
+        if (std::string failure = installRlnPlugin(rlnPreset); !failure.empty()) {
             return {false, {}, failure};
         }
-        setRlnState("Initializing", {});
+        setRlnState(RlnState::Initializing, {});
     }
 
     // logosdelivery_ctx_create encodes the config and turns the context address
@@ -832,6 +828,16 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             failure.clear();
         }
     }
+    // libp2p is not contacted here: outbound calls fail on the Qt main thread.
+    // Without a framework (unit tests) there is no modules(); pass null. The
+    // discovery config is the node's whenever discovery wants libp2p; the
+    // allocator path alone takes libp2p's defaults.
+    {
+        Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
+        libp2pBringUp = std::make_shared<Libp2pBringUp>(
+            libp2p, discovery.enabled ? discovery.libp2pConfig : std::string("{}"),
+            [](const std::string& line) { fprintf(stderr, "DeliveryModuleImpl: %s\n", line.c_str()); });
+    }
     if (failure.empty() && discovery.enabled) {
         failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
     }
@@ -843,17 +849,53 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
 
     if (rlnPreset.enabled) {
-        rlnBringUpThread = std::thread([this] {
-            const std::string failure = startRlnBackend();
-            if (failure.empty()) {
-                setRlnState("Ready", {});
-            } else {
-                setRlnState("Failed", failure);
-            }
-        });
+        spawnRlnBringUp();
     }
 
     return {true, {}};
+}
+
+void DeliveryModuleImpl::spawnRlnBringUp()
+{
+    joinRlnBringUp();
+    setRlnState(RlnState::Initializing, {});
+    rlnBringUpActive.store(true);
+    rlnBringUpThread = std::thread([this] {
+        const std::string failure = startRlnBackend();
+        if (failure.empty()) {
+            setRlnState(RlnState::Ready, {});
+        } else {
+            setRlnState(RlnState::Failed, failure);
+        }
+        rlnBringUpActive.store(false);
+    });
+}
+
+void DeliveryModuleImpl::ensureRlnBackend()
+{
+    joinRlnStop();
+    std::lock_guard<std::mutex> lock(rlnBackendStopMutex);
+    const auto config = rlnConfigSnapshot();
+    if (!config->enabled || !config->manageBackend) {
+        return;
+    }
+    if (rlnBackendRunning.load() || rlnBringUpActive.load()) {
+        return;
+    }
+    spawnRlnBringUp();
+}
+
+void DeliveryModuleImpl::stopRlnBackendAsync()
+{
+    joinRlnStop();
+    rlnStopThread = std::thread([this] { stopRlnBackend(); });
+}
+
+void DeliveryModuleImpl::joinRlnStop()
+{
+    if (rlnStopThread.joinable()) {
+        rlnStopThread.join();
+    }
 }
 
 std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string& libp2pConfig)
@@ -862,10 +904,8 @@ std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string&
         return "context not initialized";
     }
 
-    // libp2p is not contacted here: outbound calls fail on the Qt main thread.
-    // Without a framework (unit tests) there is no modules(); pass null.
-    Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
-    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2p, libp2pConfig);
+    (void)libp2pConfig; // the shared bring-up was configured with it at createNode
+    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2pBringUp);
 
     // The vtable is borrowed for the duration of the call and copied by the
     // node, but discoPlugin owns the object every entry point dispatches on,
@@ -908,6 +948,11 @@ StdLogosResult DeliveryModuleImpl::start()
         joinFailedStartStop();
         return {false, {}, "failed to initiate start"};
     }
+    // The RLN backend goes down with the node (stop, or the stop after a failed
+    // start); a node started again needs it up again, or it runs with the
+    // module's worker and poller gone: proofs it generates still verify,
+    // proofs it receives are rejected once the root window goes stale.
+    ensureRlnBackend();
     return {true, {}};
 }
 
@@ -922,7 +967,7 @@ StdLogosResult DeliveryModuleImpl::stop()
     if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
-    stopRlnBackend();
+    stopRlnBackendAsync();
     return {true, {}};
 }
 
@@ -933,13 +978,20 @@ void DeliveryModuleImpl::stopRlnBackend()
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
     const auto config = rlnConfigSnapshot();
-    if (config->enabled && config->manageBackend && rlnBridge->enabled()) {
+    if (!config->enabled || !config->manageBackend) {
+        return;
+    }
+    if (rlnBridge->enabled() && rlnBackendRunning.load()) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
                     failure.c_str());
         }
     }
+    // Either way the next start() brings it up again: the RLN module's start
+    // is idempotent for a backend that never stopped.
+    rlnBackendRunning.store(false);
+    setRlnState(RlnState::Stopped, {});
 }
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)
@@ -1255,28 +1307,55 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
 StdLogosResult DeliveryModuleImpl::rlnState()
 {
     std::lock_guard<std::mutex> lock(rlnStateMutex);
-    nlohmann::json out{{"state", rlnStateName}, {"message", rlnStateMessage}};
+    nlohmann::json out{{"state", rlnStateName(rlnStateValue)}, {"message", rlnStateMessage}};
     if (rlnStateConfig.enabled) {
         out["registryId"] = rlnStateConfig.registryId;
         out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
         out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
+        if (rlnStateConfig.hasMix()) {
+            out["mixRegistryId"] = rlnStateConfig.mixRegistryId;
+            out["mixRlnIdentifier"] = rlnStateConfig.mixRlnIdentifier;
+            out["mixEpochSizeSec"] = rlnStateConfig.mixEpochSizeSec;
+            out["mixMaxEpochGap"] = rlnStateConfig.mixMaxEpochGap;
+        }
+        if (rlnStateConfig.hasAllocator()) {
+            out["allocatorDiscover"] = rlnStateConfig.allocatorDiscover;
+            if (!rlnStateConfig.allocatorPeerId.empty()) {
+                out["allocatorPeerId"] = rlnStateConfig.allocatorPeerId;
+                out["allocatorMultiaddr"] = rlnStateConfig.allocatorMultiaddr;
+            }
+            out["allocatorAuthType"] = rlnStateConfig.allocatorAuthType;
+        }
     }
     return {true, std::move(out)};
 }
 
-void DeliveryModuleImpl::setRlnState(const char* state, const std::string& message)
+const char* rlnStateName(RlnState state)
+{
+    switch (state) {
+    case RlnState::Disabled: return "Disabled";
+    case RlnState::Initializing: return "Initializing";
+    case RlnState::Ready: return "Ready";
+    case RlnState::Failed: return "Failed";
+    case RlnState::Stopped: return "Stopped";
+    }
+    return "Disabled";
+}
+
+void DeliveryModuleImpl::setRlnState(RlnState state, const std::string& message)
 {
     {
         std::lock_guard<std::mutex> lock(rlnStateMutex);
-        if (rlnStateName == state && rlnStateMessage == message) {
+        if (rlnStateValue == state && rlnStateMessage == message) {
             return;
         }
-        rlnStateName = state;
+        rlnStateValue = state;
         rlnStateMessage = message;
     }
-    fprintf(stderr, "DeliveryModuleImpl: rln %s%s%s\n", state,
+    const char* name = rlnStateName(state);
+    fprintf(stderr, "DeliveryModuleImpl: rln %s%s%s\n", name,
             message.empty() ? "" : ": ", message.c_str());
-    rlnStateChanged(state, message, currentTimestampNs());
+    rlnStateChanged(name, message, currentTimestampNs());
 }
 
 std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
@@ -1321,22 +1400,148 @@ std::string DeliveryModuleImpl::startRlnBackend()
         return "rln bridge unavailable (" + failure + "); answering falls to rlnRespond";
     }
 
-    // A host sharing the backend with Mix owns its configuration and lifetime.
-    if (!rlnConfig->manageBackend) return {};
+    // A host sharing the backend with other consumers owns its configuration
+    // and lifetime; this module then only checks that what it will prove with
+    // fits the chain.
+    if (!rlnConfig->manageBackend) {
+        return checkRlnRateBounds(*rlnConfig);
+    }
 
-    // The delivery library no longer starts the backend, so this module does:
-    // a node that mounts RLN over a stopped module would Ignore every inbound
-    // RLN message.
-    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig->registryId})}};
-    if (rlnConfig->epochSizeSec != 0) {
-        startCfg["epoch_size_sec"] = rlnConfig->epochSizeSec;
+    // The allocators are found and dialled by the allocator client
+    // (rln_gifter_module) through this node's libp2p_module, which must
+    // be up before the RLN module asks: with the node's plugin discovery when it runs it (discovery needs
+    // that), on libp2p's defaults otherwise. Not being able to is a notice,
+    // not a failure: provisioning then falls back to a funded registration
+    // by itself, and reports why.
+    if (rlnConfig->hasAllocator()) {
+        const std::string failure = libp2pBringUp ? libp2pBringUp->ensure() : "no libp2p_module client";
+        if (!failure.empty()) {
+            fprintf(stderr,
+                    "DeliveryModuleImpl: libp2p_module not up (%s); no allocator can be "
+                    "dialled (discover=%s, configured=%s), so the RLN module's provisioning "
+                    "falls back to a funded registration\n",
+                    failure.c_str(), rlnConfig->allocatorDiscover ? "true" : "false",
+                    rlnConfig->allocatorPeerId.empty() ? "none" : rlnConfig->allocatorPeerId.c_str());
+        }
     }
-    if (rlnConfig->maxEpochGap != 0) {
-        startCfg["max_epoch_gap"] = rlnConfig->maxEpochGap;
-    }
-    const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
+
+    // This module starts the backend: a node that mounts RLN over a stopped
+    // module would Ignore every inbound RLN message. One call names every registry the deployment uses.
+    const std::string startFailure = rlnBridge->startBackend(rlnBackendStartConfig(*rlnConfig));
     if (!startFailure.empty()) {
         return "rln module start failed: " + startFailure;
+    }
+    rlnBackendRunning.store(true);
+    if (std::string refused = checkRlnRateBounds(*rlnConfig); !refused.empty()) {
+        // The module would keep provisioning, and refusing, in the background.
+        (void)rlnBridge->stopBackend();
+        rlnBackendRunning.store(false);
+        return refused;
+    }
+    return {};
+}
+
+// The RLN module's default rate (liblogos_rln_module DEFAULT_RATE_LIMIT),
+// which a preset without a rate registers at — and binds its peer-any
+// payload to.
+constexpr uint64_t kRlnModuleDefaultRateLimit = 100;
+
+// The `allocator` block of a registry entry: whether to discover, the
+// configured peer when there is one, and the auth vector with the payload a
+// `peer-any` request for `rateLimit` carries, unless the preset supplied
+// payload material of its own.
+static nlohmann::json allocatorBlock(const DeliveryRlnConfig& cfg, uint64_t rateLimit)
+{
+    nlohmann::json block{{"discover", cfg.allocatorDiscover}, {"auth_type", cfg.allocatorAuthType}};
+    if (!cfg.allocatorPeerId.empty()) {
+        block["peer_id"] = cfg.allocatorPeerId;
+        block["multiaddr"] = cfg.allocatorMultiaddr;
+    }
+    if (!cfg.allocatorAuthProvider.empty()) {
+        block["auth_provider"] = cfg.allocatorAuthProvider;
+    } else if (!cfg.allocatorAuthPayload.empty()) {
+        block["auth_payload"] = cfg.allocatorAuthPayload;
+    } else {
+        block["auth_payload"] = peerAnyAuthPayload(rateLimit != 0 ? rateLimit : kRlnModuleDefaultRateLimit);
+    }
+    if (!cfg.allocatorAuthArgs.empty()) {
+        block["auth_args"] = cfg.allocatorAuthArgs;
+    }
+    return block;
+}
+
+std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg)
+{
+    // The relay registry rides this call's defaults: a plain-string entry pins
+    // them for a registry nothing has configured yet and leaves one a host
+    // configured earlier alone. With an
+    // allocator it is an object carrying the allocator block (absent fields
+    // still take this call's defaults); each registry gets its own block
+    // because the peer-any payload binds that registry's rate.
+    nlohmann::json relay = cfg.hasAllocator()
+        ? nlohmann::json{{"registry_id", cfg.registryId}, {"allocator", allocatorBlock(cfg, cfg.rateLimit)}}
+        : nlohmann::json(cfg.registryId);
+    nlohmann::json startCfg{{"epoch_size_sec", cfg.epochSizeSec},
+                            {"registries", nlohmann::json::array({std::move(relay)})}};
+    if (cfg.maxEpochGap != 0) {
+        startCfg["max_epoch_gap"] = cfg.maxEpochGap;
+    }
+    if (cfg.rateLimit != 0) {
+        startCfg["rate_limit"] = cfg.rateLimit;
+    }
+    if (cfg.hasMix()) {
+        // Its own epoch size and gap — what native Mix's proof plugin runs
+        // at — and its own rate; the relay defaults do not apply to it.
+        nlohmann::json mix{{"registry_id", cfg.mixRegistryId},
+                           {"epoch_size_sec", cfg.mixEpochSizeSec},
+                           {"max_epoch_gap", cfg.mixMaxEpochGap}};
+        if (cfg.mixRateLimit != 0) {
+            mix["rate_limit"] = cfg.mixRateLimit;
+        }
+        if (cfg.hasAllocator()) {
+            mix["allocator"] = allocatorBlock(cfg, cfg.mixRateLimit);
+        }
+        startCfg["registries"].push_back(std::move(mix));
+    }
+    return startCfg.dump();
+}
+
+std::string DeliveryModuleImpl::checkRlnRateBounds(const DeliveryRlnConfig& cfg)
+{
+    struct Named {
+        const char* what;
+        const std::string& registryId;
+        const std::string& rlnIdentifier;
+        uint64_t rate;
+    };
+    const Named named[] = {
+        {"rate-limit", cfg.registryId, cfg.rlnIdentifier, cfg.rateLimit},
+        {"mix-rate-limit", cfg.mixRegistryId, cfg.mixRlnIdentifier, cfg.mixRateLimit},
+    };
+    for (const Named& n : named) {
+        if (n.rate == 0 || n.registryId.empty()) {
+            continue;
+        }
+        nlohmann::json params;
+        const std::string failure =
+            rlnBridge->readRegistryParameters(n.registryId, n.rlnIdentifier, params);
+        if (!failure.empty()) {
+            // Bounds that cannot be read now are not a refusal: the module
+            // checks them again before it registers.
+            fprintf(stderr, "DeliveryModuleImpl: registry %s bounds unavailable (%s)\n",
+                    n.registryId.c_str(), failure.c_str());
+            continue;
+        }
+        const auto bound = [&params](const char* key) -> uint64_t {
+            auto it = params.find(key);
+            return it != params.end() && it->is_number_unsigned() ? it->get<uint64_t>() : 0;
+        };
+        const uint64_t min = bound("min_rate_limit");
+        const uint64_t max = bound("max_rate_limit");
+        if ((min != 0 && n.rate < min) || (max != 0 && n.rate > max)) {
+            return "registry " + n.registryId + " admits rates " + std::to_string(min) + "..="
+                   + std::to_string(max) + "; preset " + n.what + " is " + std::to_string(n.rate);
+        }
     }
     return {};
 }

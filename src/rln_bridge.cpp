@@ -2,6 +2,10 @@
 #include "liblogos_rln_module_api.h" // generated from metadata.json#optional_dependencies
 
 #include <nlohmann/json.hpp>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 
 #include <liblogosdelivery_rln.h> // logosdelivery_rln_response
@@ -161,10 +165,9 @@ std::string RlnBridge::callFail(Op op, const logos::CallError& err)
 // reports a decode artifact to the library as if it were the module's error.
 std::string RlnBridge::resultReply(Op op, const StdLogosResult& r)
 {
-    // Residue of the heuristic this bridge used before refusals were typed:
-    // success=false with no error text. The client now folds every canonical
-    // refusal into the CallError and gives a non-object reply a message of its
-    // own, so what is left here is a module that answered nothing usable.
+    // The client folds every canonical refusal into the CallError and gives a
+    // non-object reply a message of its own, so success=false with no error
+    // text is a module that answered nothing usable.
     if (!r.success && r.error.empty()) {
         return transportFail(op, kPermanent, kDecodeKind,
                              std::string(opName(op)) + ": refusal with no message");
@@ -186,17 +189,18 @@ std::string RlnBridge::tstrReply(Op op, const std::string& value)
     return value;
 }
 
-// Permanent, not transient: enable() runs once at createNode, so a bridge that
-// is not serving now never will be for this node. Told that, the library can
-// fail the request instead of retrying it until its own budget runs out.
+// Transient: enable() runs on the bring-up thread, after createNode returned,
+// and the library's first membership read at node start can arrive before
+// it. Told transient, the library retries within its own budget and finds
+// the bridge up; told permanent it would give the node up for good.
 bool RlnBridge::rejectIfNotEnabled(Op op, uint64_t reqId) const
 {
     if (m_enabled.load(std::memory_order_acquire)) {
         return false;
     }
-    const char* why = m_rlnModule ? "rln bridge is not enabled"
+    const char* why = m_rlnModule ? "rln bridge is not enabled yet"
                                   : "rln-module client is not set for rln bridge";
-    respond(reqId, transportFail(op, kPermanent, kDisabledKind,
+    respond(reqId, transportFail(op, kTransient, kDisabledKind,
                                  std::string(opName(op)) + ": " + why));
     return true;
 }
@@ -237,6 +241,52 @@ std::string RlnBridge::stopBackend()
     logos::CallError err;
     const StdLogosResult r = m_rlnModule->stop(&err, timeoutMsFor(Op::Stop));
     return lifecycleResult(Op::Stop, r, err);
+}
+
+std::string RlnBridge::readRegistryParameters(const std::string& registryId,
+                                              const std::string& rlnIdentifier,
+                                              nlohmann::json& out)
+{
+    if (!m_enabled.load(std::memory_order_acquire)) {
+        return "rln bridge is not enabled";
+    }
+    // The async twin, waited on here: the completion runs on the client's
+    // thread, and the reply box is shared by value so a late completion after
+    // this frame is gone writes into a box nobody reads (see the capture rule
+    // on the op entry points below).
+    struct Reply {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        logos::AsyncResult<StdLogosResult> res;
+    };
+    auto reply = std::make_shared<Reply>();
+    const int timeoutMs = timeoutMsFor(Op::GetParameters);
+    m_rlnModule->get_registry_parametersAsyncResult(
+        registryId, rlnIdentifier,
+        [reply](logos::AsyncResult<StdLogosResult> r) {
+            {
+                std::lock_guard<std::mutex> lock(reply->m);
+                reply->res = std::move(r);
+                reply->done = true;
+            }
+            reply->cv.notify_all();
+        },
+        timeoutMs);
+    std::unique_lock<std::mutex> lock(reply->m);
+    if (!reply->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs + 1000),
+                            [&reply] { return reply->done; })) {
+        return std::string(opName(Op::GetParameters)) + ": no reply";
+    }
+    if (!reply->res.error.ok()) {
+        return std::string(opName(Op::GetParameters)) + ": " + reply->res.error.code + ": "
+               + reply->res.error.message;
+    }
+    if (!reply->res.value.success) {
+        return std::string(opName(Op::GetParameters)) + ": " + reply->res.value.error;
+    }
+    out = reply->res.value.value;
+    return {};
 }
 
 // The op entry points below carry no precondition: every one of them answers
