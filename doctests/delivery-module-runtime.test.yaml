@@ -149,8 +149,8 @@ sections:
           `liblogos_lez_rln_module` — which reads the pins
           straight out of the lock.
         run: |
-          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-rln-module#lgx' -o rln-lgx
-          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
+          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=fix/multi-registry&rev=6f0203bff4b34c1b1bf9d51a16149817f9d98f72&dir=logos-rln-module#lgx' -o rln-lgx
+          nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=fix/multi-registry&rev=6f0203bff4b34c1b1bf9d51a16149817f9d98f72&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
           cp -f rln-lgx/*.lgx lez-rln-lgx/*.lgx packages/
         post_text: "Two more `.lgx` packages, one per module in the chain:"
         extra_run:

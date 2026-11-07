@@ -197,10 +197,23 @@ def rln_node_factory(
     image, modules_dir = _e2e_env_or_skip
 
     with ExitStack() as stack:
-        def _create(label: str, config_json: str, *, enable_validation: bool) -> DeliveryNode:
+        def _create(
+            label: str,
+            config_json: str,
+            *,
+            enable_validation: bool,
+            mix_registry_id: str = "",
+            allocator: tuple[str, str] | None = None,
+            allocator_discover: bool | None = None,
+        ) -> DeliveryNode:
             persistence_dir = tmp_path_factory.mktemp(f"persistence-{label.lower()}")
             (persistence_dir / RLN_PRESETS_FILE).write_text(
-                make_rln_presets(enable_validation=enable_validation)
+                make_rln_presets(
+                    enable_validation=enable_validation,
+                    mix_registry_id=mix_registry_id,
+                    allocator=allocator,
+                    allocator_discover=allocator_discover,
+                )
             )
             daemon, container_name = _new_daemon(
                 image, modules_dir, shared_docker_network, label,

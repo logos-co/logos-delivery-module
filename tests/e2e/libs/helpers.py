@@ -23,6 +23,7 @@ from libs.constants import (
     NODE_TCP_PORT,
     NUM_SHARDS_IN_NETWORK,
     RLN_EPOCH_SIZE_SEC,
+    RLN_MIX_METADATA_TOPIC,
     RLN_REGISTRY_ID,
 )
 
@@ -63,17 +64,33 @@ def make_delivery_config(*, tcp_port: int = NODE_TCP_PORT, static_peers: Optiona
     return json.dumps(cfg)
 
 
-def make_rln_presets(*, enable_validation: bool) -> str:
+def make_rln_presets(
+    *,
+    enable_validation: bool,
+    mix_registry_id: str = "",
+    allocator: tuple[str, str] | None = None,
+    allocator_discover: bool | None = None,
+) -> str:
     """Contents of the RLN presets file for a test node: its `""` entry applies to
-    nodes created without a `preset`."""
-    return json.dumps({
-        "": {
-            "enabled": True,
-            "registry-id": RLN_REGISTRY_ID,
-            "epoch-size-sec": RLN_EPOCH_SIZE_SEC,
-            "enable-validation": enable_validation,
-        },
-    })
+    nodes created without a `preset`. With `mix_registry_id` the deployment also
+    carries native Mix's registry, so the module starts the backend for both.
+    With `allocator` (peer id, multiaddr) the RLN module asks that allocator for
+    the memberships after the ones discovery finds; `allocator_discover` False
+    turns discovery off (and, without `allocator`, the allocator path)."""
+    entry: dict[str, Any] = {
+        "enabled": True,
+        "registry-id": RLN_REGISTRY_ID,
+        "epoch-size-sec": RLN_EPOCH_SIZE_SEC,
+        "enable-validation": enable_validation,
+    }
+    if mix_registry_id:
+        entry["mix-registry-id"] = mix_registry_id
+        entry["mix-metadata-topic"] = RLN_MIX_METADATA_TOPIC
+    if allocator:
+        entry["allocator-peer-id"], entry["allocator-multiaddr"] = allocator
+    if allocator_discover is not None:
+        entry["allocator-discover"] = allocator_discover
+    return json.dumps({"": entry})
 
 
 def call_result(client, method: str, *args: Any, timeout: Optional[float] = None) -> dict:

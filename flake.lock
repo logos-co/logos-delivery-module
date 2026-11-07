@@ -2,11 +2,11 @@
   "nodes": {
     "crane": {
       "locked": {
-        "lastModified": 1780532242,
-        "narHash": "sha256-D+BsdpxmtUwtqGoY0IXPhHgTlmqgcZKCEo1oMyn7ep0=",
+        "lastModified": 1792350552,
+        "narHash": "sha256-292lvpvxTGKryKxh3/3tcIVi85CwYGdl4oOi113Sob8=",
         "owner": "ipetkov",
         "repo": "crane",
-        "rev": "59a82a1222dd3b2080b5cc52a1a2e8d5f1b77f37",
+        "rev": "e675a36b7377bebe41d548388a2501cbb16d380d",
         "type": "github"
       },
       "original": {
@@ -4246,18 +4246,18 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1791995741,
-        "narHash": "sha256-F7PpOoEXkjEIRVLU/ucdB3WgDN2fOE7dmmt4dVquZsY=",
-        "ref": "main",
-        "rev": "a814e7feda974a16eaa5dd50667b8fd843177f0e",
-        "revCount": 102,
+        "lastModified": 1793897068,
+        "narHash": "sha256-kKEf5ERwxe+TeYDV/5XmT3tRgUYzUPGibU+rPdIXCK8=",
+        "ref": "fix/multi-registry",
+        "rev": "6f0203bff4b34c1b1bf9d51a16149817f9d98f72",
+        "revCount": 108,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-lez-rln-module",
-        "ref": "main",
-        "rev": "a814e7feda974a16eaa5dd50667b8fd843177f0e",
+        "ref": "fix/multi-registry",
+        "rev": "6f0203bff4b34c1b1bf9d51a16149817f9d98f72",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
@@ -4269,18 +4269,18 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1791995741,
-        "narHash": "sha256-F7PpOoEXkjEIRVLU/ucdB3WgDN2fOE7dmmt4dVquZsY=",
-        "ref": "main",
-        "rev": "a814e7feda974a16eaa5dd50667b8fd843177f0e",
-        "revCount": 102,
+        "lastModified": 1793897068,
+        "narHash": "sha256-kKEf5ERwxe+TeYDV/5XmT3tRgUYzUPGibU+rPdIXCK8=",
+        "ref": "fix/multi-registry",
+        "rev": "6f0203bff4b34c1b1bf9d51a16149817f9d98f72",
+        "revCount": 108,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-rln-module",
-        "ref": "main",
-        "rev": "a814e7feda974a16eaa5dd50667b8fd843177f0e",
+        "ref": "fix/multi-registry",
+        "rev": "6f0203bff4b34c1b1bf9d51a16149817f9d98f72",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
@@ -46153,16 +46153,16 @@
         "rust-rapidsnark": "rust-rapidsnark"
       },
       "locked": {
-        "lastModified": 1791669386,
-        "narHash": "sha256-Tf2YnXIqbAmz2BnEk747WEOnAW6xOlszoe2mn85hRLU=",
+        "lastModified": 1793295142,
+        "narHash": "sha256-X5FHrJ2EPZjpK3j5Lzfu+flei4wepTrYiplUCVQIpow=",
         "owner": "logos-blockchain",
         "repo": "logos-execution-zone",
-        "rev": "1a003bfbfb89fcf987f62975cd08a401169e1b8c",
+        "rev": "1806e873ea2ac0e1b608aa7cf2f9b6e1fb12db21",
         "type": "github"
       },
       "original": {
         "owner": "logos-blockchain",
-        "ref": "v0.3.1",
+        "ref": "v0.4.0-rc1",
         "repo": "logos-execution-zone",
         "type": "github"
       }
@@ -118737,11 +118737,11 @@
         "nixpkgs-windows": "nixpkgs-windows"
       },
       "locked": {
-        "lastModified": 1789006373,
-        "narHash": "sha256-XMsTZhPheGAX+hPd1InIfFwSm8lzdTo3cKC4l2J6Pf0=",
+        "lastModified": 1789054121,
+        "narHash": "sha256-EOG96lY4KnZadh2lczZFMPnfPP9tWXdWt1p1CP8Gvww=",
         "owner": "logos-co",
         "repo": "logos-nix",
-        "rev": "2ab5416a1fb92d6fa3f0dee9a57500df614c4b5d",
+        "rev": "7c1eb8bc390546f32aaf134866a1c7db8e9311cc",
         "type": "github"
       },
       "original": {
@@ -511767,16 +511767,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1791882738,
-        "narHash": "sha256-7KXUW3FKbZAstFiK09LJ1sUnPN2dO5RX9ROCZgGbeZw=",
+        "lastModified": 1790843958,
+        "narHash": "sha256-jtYAaAXT1gxEtzmeYmOGu0IvKPle5J39BOFbgl6os+A=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "3100cf6ff140fb298f09192de610f4037d3bab0f",
+        "rev": "b2ccad3b67335d368eef49ec48b9c8166858e73d",
         "type": "github"
       },
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "rev": "b2ccad3b67335d368eef49ec48b9c8166858e73d",
         "type": "github"
       }
     },

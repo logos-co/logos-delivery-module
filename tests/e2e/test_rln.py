@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from libs.constants import CONTENT_TOPIC
+from libs.constants import CONTENT_TOPIC, RLN_ALLOCATOR_MULTIADDR, RLN_ALLOCATOR_PEER_ID, RLN_MIX_REGISTRY_ID
 from libs.helpers import (
     event_request_id,
     is_connected,
@@ -54,6 +54,38 @@ def test_send_with_rln_off_propagates(delivery_node_factory):
         request_id = sender.send(CONTENT_TOPIC, "rln-off")
         event = wait_for_event(events, "messagePropagated", timeout=PROPAGATED_TIMEOUT_S)
     assert event_request_id(event) == request_id
+
+
+@pytest.mark.rln
+@pytest.mark.skipif(not RLN_MIX_REGISTRY_ID, reason="RLN_MIX_REGISTRY_ID names no mix registry")
+def test_mix_preset_reports_both_registries(rln_node_factory):
+    """A deployment with a mix registry brings RLN up for both registries and
+    reports the mix one beside the relay one."""
+    node = rln_node_factory(
+        "mix-node", make_delivery_config(), enable_validation=False, mix_registry_id=RLN_MIX_REGISTRY_ID
+    )
+    state = node.rln_state()
+    assert state.get("state") == "Ready", state
+    assert state.get("mixRegistryId") == RLN_MIX_REGISTRY_ID, state
+    assert state.get("mixEpochSizeSec") == 10, state
+
+
+@pytest.mark.rln
+@pytest.mark.skipif(not RLN_ALLOCATOR_PEER_ID, reason="RLN_ALLOCATOR_PEER_ID names no allocator")
+def test_allocator_preset_reports_the_allocator(rln_node_factory):
+    """A deployment with a membership allocator brings RLN up and reports the
+    allocator it asks first."""
+    node = rln_node_factory(
+        "alloc-node",
+        make_delivery_config(),
+        enable_validation=False,
+        allocator=(RLN_ALLOCATOR_PEER_ID, RLN_ALLOCATOR_MULTIADDR),
+    )
+    state = node.rln_state()
+    assert state.get("state") == "Ready", state
+    assert state.get("allocatorDiscover") is True, state
+    assert state.get("allocatorPeerId") == RLN_ALLOCATOR_PEER_ID, state
+    assert state.get("allocatorAuthType") == "peer-any", state
 
 
 @pytest.mark.rln
