@@ -18,6 +18,7 @@
 #include "base64.h"
 
 #include "api_call_handler.h"
+#include "disco_trace.h"
 #include "discovery_config.h"
 #include "libp2p_bring_up.h"
 #include "service_discovery_plugin.h"
@@ -821,7 +822,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             ? result.value.get<std::string>()
             : result.value.dump();
         failure = delivery_discovery::fromRequirements(
-            requirements, delivery_discovery::libp2pEnvConfig(), discovery);
+            requirements, delivery_discovery::libp2pEnvConfig(), discovery,
+            rlnPreset.hasAllocator() ? rlnPreset.allocatorBootstrapNodes : std::vector<std::string>{});
         if (!failure.empty() && !discovery.requested) {
             fprintf(stderr, "DeliveryModuleImpl: discovery requirements not understood, no plugin installed: %s\n",
                     failure.c_str());
@@ -829,14 +831,18 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         }
     }
     // libp2p is not contacted here: outbound calls fail on the Qt main thread.
-    // Without a framework (unit tests) there is no modules(); pass null. The
-    // discovery config is the node's whenever discovery wants libp2p; the
-    // allocator path alone takes libp2p's defaults.
+    // Without a framework (unit tests) there is no modules(); pass null. One
+    // libp2p node serves plugin discovery and the allocator path alike, always
+    // mounted for service discovery and bootstrapped to the deployment's DHT
+    // peers, whether or not the plugin is installed.
     {
         Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
         libp2pBringUp = std::make_shared<Libp2pBringUp>(
-            libp2p, discovery.enabled ? discovery.libp2pConfig : std::string("{}"),
-            [](const std::string& line) { fprintf(stderr, "DeliveryModuleImpl: %s\n", line.c_str()); });
+            libp2p, discovery.libp2pConfig,
+            [](const std::string& line) {
+                fprintf(stderr, "DeliveryModuleImpl: %s\n", line.c_str());
+                disco_trace::traceLine(line);
+            });
     }
     if (failure.empty() && discovery.enabled) {
         failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
@@ -1409,19 +1415,22 @@ std::string DeliveryModuleImpl::startRlnBackend()
 
     // The allocators are found and dialled by the allocator client
     // (rln_gifter_module) through this node's libp2p_module, which must
-    // be up before the RLN module asks: with the node's plugin discovery when it runs it (discovery needs
-    // that), on libp2p's defaults otherwise. Not being able to is a notice,
+    // be up before the RLN module asks, mounted for service discovery and
+    // bootstrapped to the deployment's DHT peers. Not being able to is a notice,
     // not a failure: provisioning then falls back to a funded registration
     // by itself, and reports why.
     if (rlnConfig->hasAllocator()) {
         const std::string failure = libp2pBringUp ? libp2pBringUp->ensure() : "no libp2p_module client";
         if (!failure.empty()) {
-            fprintf(stderr,
-                    "DeliveryModuleImpl: libp2p_module not up (%s); no allocator can be "
-                    "dialled (discover=%s, configured=%s), so the RLN module's provisioning "
-                    "falls back to a funded registration\n",
-                    failure.c_str(), rlnConfig->allocatorDiscover ? "true" : "false",
-                    rlnConfig->allocatorPeerId.empty() ? "none" : rlnConfig->allocatorPeerId.c_str());
+            char notice[768];
+            snprintf(notice, sizeof(notice),
+                     "libp2p_module not up (%s); no allocator can be "
+                     "dialled (discover=%s, configured=%s), so the RLN module's provisioning "
+                     "falls back to a funded registration",
+                     failure.c_str(), rlnConfig->allocatorDiscover ? "true" : "false",
+                     rlnConfig->allocatorPeerId.empty() ? "none" : rlnConfig->allocatorPeerId.c_str());
+            fprintf(stderr, "DeliveryModuleImpl: %s\n", notice);
+            disco_trace::traceLine(notice);
         }
     }
 

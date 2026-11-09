@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 /** @brief Env var naming a JSON file of additional RLN presets. */
 inline constexpr const char* kRlnPresetsEnvVar = "LOGOS_DELIVERY_RLN_PRESETS";
@@ -81,6 +82,12 @@ struct RlnPresetEntry {
     std::string allocatorAuthPayload;
     std::string allocatorAuthProvider;
     std::string allocatorAuthArgs;
+    /**
+     * DHT peers ("/.../p2p/<peerId>" multiaddrs) the node's libp2p bootstraps
+     * from for allocator discovery, beside any the delivery node names: the
+     * node names none without plugin kademlia discovery.
+     */
+    std::vector<std::string> allocatorBootstrapNodes;
 
     /** @brief Whether the deployment runs a mix registry beside the relay one. */
     bool hasMix() const { return !mixRegistryId.empty(); }

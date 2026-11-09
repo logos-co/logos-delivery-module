@@ -14,6 +14,7 @@
 
 // Generated at build time from metadata.json#optional_dependencies.
 #include "base64.h"
+#include "disco_trace.h"
 #include "libp2p_bring_up.h"
 #include "libp2p_module_api.h"
 
@@ -30,49 +31,7 @@ constexpr const char* kLibp2pUnavailable =
     "(e.g. discv5, without plugin-kad-discovery); on Windows internal "
     "discovery is the only option";
 
-// Opt-in trace of the plugin boundary to the file named by LD_DISCO_TRACE:
-// logos-core discards a module's own stdout/stderr, so there is no other view.
-FILE* traceFile()
-{
-    static FILE* f = [] () -> FILE* {
-        const char* path = getenv("LD_DISCO_TRACE");
-        if (!path || !*path) {
-            return nullptr;
-        }
-        FILE* h = fopen(path, "a");
-        if (h) {
-            setvbuf(h, nullptr, _IOLBF, 0); // line-buffered, so `tail -f` works
-        }
-        return h;
-    }();
-    return f;
-}
-
-void trace(const char* fmt, ...)
-{
-    FILE* f = traceFile();
-    if (!f) {
-        return;
-    }
-    char stamp[32] = "";
-    const std::time_t now = std::time(nullptr);
-    std::tm tm{};
-#ifdef _WIN32
-    // MinGW declares localtime_r only under _POSIX_C_SOURCE; localtime_s is
-    // the same call with the arguments swapped, returning 0 on success.
-    if (localtime_s(&tm, &now) == 0) {
-#else
-    if (localtime_r(&now, &tm)) {
-#endif
-        std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &tm);
-    }
-    fprintf(f, "[%s] ", stamp);
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(f, fmt, ap);
-    va_end(ap);
-    fputc('\n', f);
-}
+using disco_trace::trace;
 
 /// Counts an entry point in and out, for quiesce().
 struct InFlightGuard {

@@ -25,6 +25,7 @@ logos_module(
         src/delivery_module_plugin.cpp
         src/service_discovery_plugin.h
         src/service_discovery_plugin.cpp
+        src/disco_trace.h
         src/libp2p_bring_up.h
         src/libp2p_bring_up.cpp
         src/rln_bridge.h

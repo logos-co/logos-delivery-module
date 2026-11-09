@@ -1,5 +1,7 @@
 #include "rln_presets.h"
 
+#include "discovery_config.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -68,7 +70,15 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
                         .rlnIdentifier = kLogosDeliveryRlnIdentifier,
                         .epochSizeSec = 600,
                         .allocatorDiscover = true,
-                        .allocatorAuthType = kAllocatorAuthTypeDefault}},
+                        .allocatorAuthType = kAllocatorAuthTypeDefault,
+                        .allocatorBootstrapNodes = {
+                            "/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj",
+                            "/dns4/node-02.do-ams3.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmB8NYprrfQrgWVzsJtYWkfjsXbmJEGNMG6othXsQ53BwG",
+                            "/dns4/node-01.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmF8WtwGPmeGHgYAX2277jHgy5cW9F7zsB8EqUjBZQAZQ3",
+                            "/dns4/node-02.gc-us-central1-a.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmUuXhUW9bdJpzN1kfDziFiUZo4bszTk66cvr7uuyCHXR7",
+                            "/dns4/node-01.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAmL3oU95jh1BZHozn3uNhx8HEneirgr8M1jEAapzXGDqRF",
+                            "/dns4/node-02.ac-cn-hongkong-c.logos.test.status.im/tcp/30303/p2p/16Uiu2HAm28CoBZjpyxsanC8tQpbvZ7bZJnVYuB1EgFzb571qpWsV",
+                        }}},
     };
     return table;
 }
@@ -192,6 +202,22 @@ std::string parseRlnPresetTable(const std::string& json,
         entry.allocatorAuthPayload = stringField(value, "allocator-auth-payload");
         entry.allocatorAuthProvider = stringField(value, "allocator-auth-provider");
         entry.allocatorAuthArgs = stringField(value, "allocator-auth-args");
+        auto bootstrapIt = value.find("allocator-bootstrap-nodes");
+        if (bootstrapIt != value.end()) {
+            if (!bootstrapIt->is_array()) {
+                return "preset \"" + name + "\" allocator-bootstrap-nodes must be an array";
+            }
+            for (const auto& addr : *bootstrapIt) {
+                nlohmann::json node;
+                const std::string bad = addr.is_string()
+                    ? delivery_discovery::bootstrapNodeFrom(addr.get<std::string>(), node)
+                    : "bootstrap node is not a string: " + addr.dump();
+                if (!bad.empty()) {
+                    return "preset \"" + name + "\" allocator-bootstrap-nodes: " + bad;
+                }
+                entry.allocatorBootstrapNodes.push_back(addr.get<std::string>());
+            }
+        }
 
         // The application's own scope unless the deployment names another.
         if (entry.rlnIdentifier.empty()) {
@@ -239,7 +265,7 @@ std::string parseRlnPresetTable(const std::string& json,
         const bool anyAllocatorKey = discoverIt != value.end() || !entry.allocatorPeerId.empty()
             || !entry.allocatorMultiaddr.empty() || !entry.allocatorAuthType.empty()
             || !entry.allocatorAuthPayload.empty() || !entry.allocatorAuthProvider.empty()
-            || !entry.allocatorAuthArgs.empty();
+            || !entry.allocatorAuthArgs.empty() || bootstrapIt != value.end();
         if (anyAllocatorKey && !entry.enabled) {
             return "preset \"" + name + "\" names an allocator but RLN is not enabled";
         }

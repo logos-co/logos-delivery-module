@@ -4,11 +4,13 @@
 // options, laid over LIBP2P_MODULE_CONFIG: a call-time createNode replaces
 // libp2p's options wholesale, so the operator's settings are kept.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -18,9 +20,9 @@ struct PluginRequest {
     /// The node asked for a plugin, whether or not its data is usable.
     bool requested{false};
     bool enabled{false};
-    /// Complete JSON object text for libp2p_module's createNode. Empty unless
-    /// `enabled`.
-    std::string libp2pConfig;
+    /// Complete JSON object text for libp2p_module's createNode, whether or
+    /// not `enabled`: the allocator path runs on the same node.
+    std::string libp2pConfig{"{}"};
 };
 
 namespace detail {
@@ -96,11 +98,26 @@ inline bool splitBootstrapAddress(const std::string& multiaddr, nlohmann::json& 
     return true;
 }
 
+/// The {peerId, addrs[]} bootstrap entry for a "/.../p2p/<peerId>"
+/// multiaddr; the failure reason, empty on success.
+inline std::string bootstrapNodeFrom(const std::string& multiaddr, nlohmann::json& out)
+{
+    if (!splitBootstrapAddress(multiaddr, out)) {
+        return "bootstrap node is not a /p2p/ multiaddr: " + multiaddr;
+    }
+    return detail::checkBootstrapNodes(nlohmann::json::array({out}));
+}
+
 /// Turns {"externalServiceDiscovery": bool, "bootstrapNodes": [...]} into the
-/// plugin request: `base` plus the bootstrap peers and mount flags. Returns
-/// the failure reason, empty on success.
+/// plugin request. `libp2pConfig` is `base` with kad and service discovery
+/// mounted and `bootstrapNodes` the node's peers, then `extraPeers`
+/// ("/.../p2p/<peerId>" multiaddrs), then those of `base`, each peerId once,
+/// at its first place; `enabled` is `externalServiceDiscovery`. Returns the
+/// failure reason, empty on success; on failure `libp2pConfig` is an empty
+/// object.
 inline std::string fromRequirements(const std::string& reply, const nlohmann::json& base,
-                                    PluginRequest& out)
+                                    PluginRequest& out,
+                                    const std::vector<std::string>& extraPeers = {})
 {
     out = PluginRequest{};
 
@@ -109,10 +126,7 @@ inline std::string fromRequirements(const std::string& reply, const nlohmann::js
         || !req["externalServiceDiscovery"].is_boolean()) {
         return "discovery requirements reply is not the expected JSON object";
     }
-    if (!req["externalServiceDiscovery"].get<bool>()) {
-        return {};
-    }
-    out.requested = true;
+    out.requested = req["externalServiceDiscovery"].get<bool>();
 
     nlohmann::json nodes = nlohmann::json::array();
     if (req.contains("bootstrapNodes")) {
@@ -128,17 +142,43 @@ inline std::string fromRequirements(const std::string& reply, const nlohmann::js
             nodes.push_back(node);
         }
     }
-    const std::string bad = detail::checkBootstrapNodes(nodes);
+    std::string bad = detail::checkBootstrapNodes(nodes);
     if (!bad.empty()) {
         return bad;
     }
 
+    const auto addOnce = [&nodes](const nlohmann::json& node) {
+        const bool named = std::any_of(nodes.begin(), nodes.end(), [&node](const nlohmann::json& n) {
+            return n["peerId"] == node["peerId"];
+        });
+        if (!named) {
+            nodes.push_back(node);
+        }
+    };
+    for (const auto& multiaddr : extraPeers) {
+        nlohmann::json node;
+        bad = bootstrapNodeFrom(multiaddr, node);
+        if (!bad.empty()) {
+            return bad;
+        }
+        addOnce(node);
+    }
+
     nlohmann::json full = base.is_object() ? base : nlohmann::json::object();
+    if (full.contains("bootstrapNodes")) {
+        bad = detail::checkBootstrapNodes(full["bootstrapNodes"]);
+        if (!bad.empty()) {
+            return "LIBP2P_MODULE_CONFIG: " + bad;
+        }
+        for (const auto& own : full["bootstrapNodes"]) {
+            addOnce(own);
+        }
+    }
     full["bootstrapNodes"] = nodes;
     full["mountKad"] = true;
     full["mountServiceDiscovery"] = true;
 
-    out.enabled = true;
+    out.enabled = out.requested;
     out.libp2pConfig = full.dump();
     return {};
 }

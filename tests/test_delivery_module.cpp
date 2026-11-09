@@ -20,6 +20,7 @@
 #include "base64.h"
 #include "discovery_config.h"
 #include "service_discovery_plugin.h"
+#include "disco_trace.h"
 #include "libp2p_bring_up.h"
 #include "libp2p_module_api.h"
 #include "rln_presets.h"
@@ -1144,6 +1145,64 @@ LOGOS_TEST(builtin_presets_carry_the_allocator_defaults) {
     }
 }
 
+// logos.test's allocator path bootstraps from the fleet's entry nodes.
+LOGOS_TEST(builtin_logos_test_preset_names_the_allocator_bootstrap_nodes) {
+    std::string err;
+    const RlnPresetEntry test = resolveRlnPreset("logos.test", err);
+    LOGOS_ASSERT_TRUE(err.empty());
+    LOGOS_ASSERT_EQ(test.allocatorBootstrapNodes.size(), size_t{6});
+    for (const auto& addr : test.allocatorBootstrapNodes) {
+        nlohmann::json node;
+        LOGOS_ASSERT_TRUE(delivery_discovery::bootstrapNodeFrom(addr, node).empty());
+    }
+    LOGOS_ASSERT_EQ(test.allocatorBootstrapNodes[0],
+                    std::string("/dns4/node-01.do-ams3.logos.test.status.im/tcp/30303/p2p/"
+                                "16Uiu2HAmQ9X2xDfPG3uL77V9piYDhjq14JhKCtcmNYsTMKNqrKCj"));
+}
+
+// allocator-bootstrap-nodes is read as written; an entry that is not a /p2p/
+// multiaddr fails the table.
+LOGOS_TEST(preset_table_parses_the_allocator_bootstrap_nodes) {
+    const std::string base = R"("enabled":true,"registry-id":"reg","epoch-size-sec":600)";
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(
+        R"({"logos.test":{)" + base + R"(,"allocator-bootstrap-nodes":[
+            "/ip4/10.0.0.1/tcp/1/p2p/16Uiu2HAmA","/ip4/10.0.0.2/tcp/1/p2p/16Uiu2HAmB"]}})",
+        table).empty());
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorBootstrapNodes.size(), size_t{2});
+    LOGOS_ASSERT_EQ(table["logos.test"].allocatorBootstrapNodes[1],
+                    std::string("/ip4/10.0.0.2/tcp/1/p2p/16Uiu2HAmB"));
+
+    for (const char* bad : {R"("/ip4/10.0.0.1/tcp/1")", R"(7)", R"("/p2p/16Uiu2HAmA")"}) {
+        const std::string err = parseRlnPresetTable(
+            R"({"logos.test":{)" + base + R"(,"allocator-bootstrap-nodes":[)" + bad + "]}}", table);
+        LOGOS_ASSERT_TRUE(err.find("allocator-bootstrap-nodes") != std::string::npos);
+    }
+    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
+        R"({"logos.test":{)" + base + R"(,"allocator-bootstrap-nodes":"x"}})", table).empty());
+}
+
+// A preset's allocator-bootstrap-nodes reach libp2p when the node names no
+// DHT peers, with the discovery mounts on.
+LOGOS_TEST(the_libp2p_bring_up_bootstraps_from_the_preset_peers) {
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(
+        R"({"externalServiceDiscovery":false,"bootstrapNodes":[]})", nlohmann::json::object(), req,
+        {"/ip4/10.0.0.1/tcp/30303/p2p/16Uiu2HAmA", "/ip4/10.0.0.2/tcp/30303/p2p/16Uiu2HAmB"}).empty());
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule libp2p("test");
+    Libp2pBringUp bringUp(&libp2p, req.libp2pConfig, [](const std::string&) {});
+    LOGOS_ASSERT_TRUE(bringUp.ensure().empty());
+    const auto handed = nlohmann::json::parse(Libp2pModule::lastCreateNodeConfig);
+    Libp2pModule::reset();
+    LOGOS_ASSERT_TRUE(handed["mountKad"].get<bool>());
+    LOGOS_ASSERT_TRUE(handed["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"].size(), size_t{2});
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"][1]["addrs"][0].get<std::string>(), std::string("/ip4/10.0.0.2/tcp/30303"));
+}
+
 // A preset's allocator defaults to the peer-any vector; its keys are read as
 // written; the combinations that cannot work are refused where written.
 LOGOS_TEST(preset_table_parses_the_allocator_with_defaults_and_refusals) {
@@ -1307,6 +1366,31 @@ LOGOS_TEST(the_libp2p_bring_up_issues_each_call_once) {
     LOGOS_ASSERT_EQ(Libp2pModule::startCalls, 0);
     Libp2pBringUp none(nullptr, "{}", [](const std::string&) {});
     LOGOS_ASSERT_EQ(none.ensure(), std::string("no libp2p_module client"));
+    Libp2pModule::reset();
+}
+
+// The bring-up's log lines reach the LD_DISCO_TRACE sink.
+LOGOS_TEST(the_bring_up_lines_land_in_the_discovery_trace) {
+    struct SinkGuard {
+        FILE* f = tmpfile();
+        SinkGuard() { disco_trace::setTraceSinkForTest(f); }
+        ~SinkGuard() {
+            disco_trace::setTraceSinkForTest(nullptr);
+            if (f) fclose(f);
+        }
+    } sink;
+    LOGOS_ASSERT_TRUE(sink.f != nullptr);
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule libp2p("test");
+    Libp2pBringUp bringUp(&libp2p, "{}", [](const std::string& l) { disco_trace::traceLine(l); });
+    LOGOS_ASSERT_TRUE(bringUp.ensure().empty());
+    rewind(sink.f);
+    std::string text;
+    char buf[256];
+    while (fgets(buf, sizeof(buf), sink.f)) text += buf;
+    LOGOS_ASSERT_TRUE(text.find("libp2p createNode") != std::string::npos);
+    LOGOS_ASSERT_TRUE(text.find("libp2p backend ready") != std::string::npos);
     Libp2pModule::reset();
 }
 
@@ -1672,7 +1756,28 @@ LOGOS_TEST(discovery_from_requirements_disabled_means_no_plugin) {
     delivery_discovery::PluginRequest req;
     LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kDisabledReply, nlohmann::json::object(), req).empty());
     LOGOS_ASSERT_FALSE(req.enabled);
-    LOGOS_ASSERT_TRUE(req.libp2pConfig.empty());
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_TRUE(libp2p["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_TRUE(libp2p["bootstrapNodes"].empty());
+}
+
+// Without the plugin, libp2p still joins the deployment's DHT: the allocator
+// path looks allocators up on it.
+LOGOS_TEST(discovery_from_requirements_without_plugin_still_joins_the_dht) {
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(
+        R"({"externalServiceDiscovery":false,"bootstrapNodes":[
+            "/ip4/10.0.0.1/tcp/30303/p2p/16Uiu2HAmA",
+            "/ip4/10.0.0.2/tcp/30303/p2p/16Uiu2HAmB"]})",
+        nlohmann::json::object(), req).empty());
+    LOGOS_ASSERT_FALSE(req.requested);
+    LOGOS_ASSERT_FALSE(req.enabled);
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_TRUE(libp2p["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{2});
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["peerId"].get<std::string>(), std::string("16Uiu2HAmB"));
 }
 
 LOGOS_TEST(discovery_from_requirements_builds_the_libp2p_config) {
@@ -1688,18 +1793,60 @@ LOGOS_TEST(discovery_from_requirements_builds_the_libp2p_config) {
 }
 
 LOGOS_TEST(discovery_from_requirements_keeps_libp2p_own_config_underneath) {
-    // The node decides the DHT peers and the mounts; everything else in
-    // libp2p's own config survives.
+    // The node decides the mounts and leads the DHT peers; the operator's
+    // peers it does not name follow, and everything else in libp2p's own
+    // config survives.
     delivery_discovery::PluginRequest req;
     const auto base = parseJson(R"({"addrs":["/ip4/0.0.0.0/tcp/9000"],"transport":"tcp",
-        "mountKad":false,"bootstrapNodes":[{"peerId":"stale","addrs":["/ip4/1.1.1.1/tcp/1"]}]})");
+        "mountKad":false,"bootstrapNodes":[{"peerId":"own","addrs":["/ip4/1.1.1.1/tcp/1"]},
+        {"peerId":"16Uiu2HAmB","addrs":["/ip4/9.9.9.9/tcp/1"]}]})");
     LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, base, req).empty());
     const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
     LOGOS_ASSERT_EQ(libp2p["addrs"][0].get<std::string>(), std::string("/ip4/0.0.0.0/tcp/9000"));
     LOGOS_ASSERT_EQ(libp2p["transport"].get<std::string>(), std::string("tcp"));
     LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{3});
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["addrs"][0].get<std::string>(), std::string("/ip4/10.0.0.2/tcp/30303"));
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][2]["peerId"].get<std::string>(), std::string("own"));
+}
+
+// LIBP2P_MODULE_CONFIG's bootstrap peers and listen addresses reach libp2p
+// alongside the node's DHT peers.
+LOGOS_TEST(discovery_from_requirements_merges_the_env_config) {
+    ScopedLibp2pEnv env(R"({"addrs":["/ip4/0.0.0.0/tcp/9100"],
+        "bootstrapNodes":[{"peerId":"16Uiu2HAmOwn","addrs":["/ip4/10.0.0.9/tcp/1"]}]})");
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(
+        R"({"externalServiceDiscovery":false,"bootstrapNodes":["/ip4/10.0.0.1/tcp/30303/p2p/16Uiu2HAmA"]})",
+        delivery_discovery::libp2pEnvConfig(), req).empty());
+    const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+    LOGOS_ASSERT_EQ(libp2p["addrs"][0].get<std::string>(), std::string("/ip4/0.0.0.0/tcp/9100"));
     LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{2});
     LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["peerId"].get<std::string>(), std::string("16Uiu2HAmOwn"));
+}
+
+// The shared bring-up hands libp2p that config as is, plugin or not.
+LOGOS_TEST(the_libp2p_bring_up_creates_a_discovery_node_without_the_plugin) {
+    delivery_discovery::PluginRequest req;
+    LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(
+        R"({"externalServiceDiscovery":false,"bootstrapNodes":[
+            "/ip4/10.0.0.1/tcp/30303/p2p/16Uiu2HAmA",
+            "/ip4/10.0.0.2/tcp/30303/p2p/16Uiu2HAmB"]})",
+        nlohmann::json::object(), req).empty());
+    Libp2pModule::reset();
+    Libp2pModule::bringUpSucceeds = true;
+    Libp2pModule libp2p("test");
+    Libp2pBringUp bringUp(&libp2p, req.libp2pConfig, [](const std::string&) {});
+    LOGOS_ASSERT_TRUE(bringUp.ensure().empty());
+    const auto handed = nlohmann::json::parse(Libp2pModule::lastCreateNodeConfig);
+    Libp2pModule::reset();
+    LOGOS_ASSERT_TRUE(handed["mountKad"].get<bool>());
+    LOGOS_ASSERT_TRUE(handed["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"].size(), size_t{2});
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"][0]["peerId"].get<std::string>(), std::string("16Uiu2HAmA"));
+    LOGOS_ASSERT_EQ(handed["bootstrapNodes"][1]["peerId"].get<std::string>(), std::string("16Uiu2HAmB"));
 }
 
 LOGOS_TEST(discovery_libp2p_env_config_is_read_like_libp2p_module_does) {
