@@ -23,11 +23,11 @@
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
     # The name is load-bearing: the builder resolves each optional_dependencies
     # entry as the input of that name and generates bindings from its LIDL.
-    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=fix/multi-registry&rev=69c8b7f7cd4fbf725146bdfa203460c8651d29e0&dir=logos-rln-module";
+    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=fix/multi-registry&rev=70a25d8dfb7cfeee454561b735fe3ac0aa460d00&dir=logos-rln-module";
     # The registry provider at the same rev: its built-in network table is
     # what resolves the logos.test registry id (logos:testnet) to a sequencer,
     # and the RLN module's own lock may trail it.
-    liblogos_rln_module.inputs.liblogos_lez_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=fix/multi-registry&rev=69c8b7f7cd4fbf725146bdfa203460c8651d29e0&dir=logos-lez-rln-module";
+    liblogos_rln_module.inputs.liblogos_lez_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=fix/multi-registry&rev=70a25d8dfb7cfeee454561b735fe3ac0aa460d00&dir=logos-lez-rln-module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

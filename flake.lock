@@ -4434,18 +4434,18 @@
       },
       "locked": {
         "dir": "logos-lez-rln-module",
-        "lastModified": 1794070031,
-        "narHash": "sha256-imW6H+ge8HLanEj02cd0ucNv29LfecswboDCQvzIpi0=",
+        "lastModified": 1794247126,
+        "narHash": "sha256-hE80L+DOS8Bi0Hs4L+amVN8HBwAZSgdJZj9WFcwvQBY=",
         "ref": "fix/multi-registry",
-        "rev": "69c8b7f7cd4fbf725146bdfa203460c8651d29e0",
-        "revCount": 112,
+        "rev": "70a25d8dfb7cfeee454561b735fe3ac0aa460d00",
+        "revCount": 113,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-lez-rln-module",
         "ref": "fix/multi-registry",
-        "rev": "69c8b7f7cd4fbf725146bdfa203460c8651d29e0",
+        "rev": "70a25d8dfb7cfeee454561b735fe3ac0aa460d00",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
@@ -4458,18 +4458,18 @@
       },
       "locked": {
         "dir": "logos-rln-module",
-        "lastModified": 1794070031,
-        "narHash": "sha256-imW6H+ge8HLanEj02cd0ucNv29LfecswboDCQvzIpi0=",
+        "lastModified": 1794247126,
+        "narHash": "sha256-hE80L+DOS8Bi0Hs4L+amVN8HBwAZSgdJZj9WFcwvQBY=",
         "ref": "fix/multi-registry",
-        "rev": "69c8b7f7cd4fbf725146bdfa203460c8651d29e0",
-        "revCount": 112,
+        "rev": "70a25d8dfb7cfeee454561b735fe3ac0aa460d00",
+        "revCount": 113,
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       },
       "original": {
         "dir": "logos-rln-module",
         "ref": "fix/multi-registry",
-        "rev": "69c8b7f7cd4fbf725146bdfa203460c8651d29e0",
+        "rev": "70a25d8dfb7cfeee454561b735fe3ac0aa460d00",
         "type": "git",
         "url": "https://github.com/logos-co/logos-rln-modules"
       }
