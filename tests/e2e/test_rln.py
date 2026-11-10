@@ -64,7 +64,7 @@ def test_node_registers_membership(rln_node_factory, lez_registry):
 
     state = wait_until(settled, timeout=WALLET_TIMEOUT_S, message="membership never awaited funding")
     if state["provisioning"]["step"] != "awaiting_funding":
-        raise AssertionError(f"membership {state!r}")
+        raise AssertionError(f"membership: {state!r}")
     register_membership(node, lez_registry.fund, timeout=RLN_MEMBERSHIP_TIMEOUT_S)
 
 

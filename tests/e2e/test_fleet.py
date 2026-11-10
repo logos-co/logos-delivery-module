@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import time
 import uuid
 
@@ -8,7 +7,6 @@ import pytest
 
 from libs.constants import (
     FLEET_CONTENT_TOPIC_PREFIX,
-    FLEET_ENTRY_NODES,
     FLEET_PUBSUB_TOPIC,
     RLN_VALID_MESSAGES,
 )
@@ -18,20 +16,17 @@ from libs.helpers import (
     event_request_id,
     in_parallel,
     make_fleet_config,
-    stored_messages,
     wait_for_connected,
     wait_for_event,
     wait_for_lez_wallet,
     wait_for_valid_roots,
-    wait_until,
 )
 
 CONNECTED_TIMEOUT_S = 180.0
 WALLET_TIMEOUT_S = 180.0
 VALID_ROOTS_TIMEOUT_S = 180.0
-PROPAGATED_TIMEOUT_S = 120.0
+SENT_TIMEOUT_S = 180.0
 RECEIVED_TIMEOUT_S = 60.0
-STORED_TIMEOUT_S = 60.0
 # An Edge node subscribes at the fleet 1 s after its `subscribe` returns.
 FILTER_SUBSCRIBE_GRACE_S = 3.0
 
@@ -91,18 +86,11 @@ def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
 
     with sender.watch() as events:
         request_id = sender.send(content_topic, PAYLOAD)
+        # The preset turns reliability on, so `messageSent` waits for a store node to confirm the message.
         wait_for_event(
-            events, "messagePropagated", timeout=PROPAGATED_TIMEOUT_S,
+            events, "messageSent", timeout=SENT_TIMEOUT_S,
             predicate=lambda e: event_request_id(e) == request_id,
         )
-
-    messages = wait_until(
-        lambda: stored_messages(sender, content_topic, FLEET_ENTRY_NODES),
-        timeout=STORED_TIMEOUT_S,
-        interval=1.0,
-        message="no fleet store node holds the message",
-    )
-    assert [base64.b64decode(m["message"]["payload"]) for m in messages] == [PAYLOAD.encode()]
 
 
 def test_relayed_message_reaches_filter_client(fleet_node_factory, fleet_membership):

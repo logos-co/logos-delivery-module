@@ -44,12 +44,12 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_validating_node_receives_message_with_proof` | 2 | a message sent with an RLN proof reaches a validating node |
 | `test_validating_service_relays_lightpush_with_proof` | 3 | a light push client's message with an RLN proof passes a validating light push server and reaches its relay peer |
 | `test_lightpushed_message_reaches_filter_client` | 2 | an Edge sender's message reaches an Edge receiver through the `logos.test` fleet (see "Fleet") |
-| `test_lightpushed_message_is_stored` | 1 | an Edge sender's message reaches a fleet store node |
+| `test_lightpushed_message_is_stored` | 1 | an Edge sender sees `messageSent`, which follows a store node's confirmation |
 | `test_relayed_message_reaches_filter_client` | 2 | a Core sender's message reaches an Edge receiver through the fleet |
 | `test_lightpushed_message_reaches_relay_node` | 2 | an Edge sender's message with an RLN proof passes a validating Core receiver through the fleet |
 
-We assert `messagePropagated`, not `messageSent`: with relay-only / no store peer,
-`messageSent` never fires (interop S06 vs S07).
+Outside the fleet tests, we assert `messagePropagated`, not `messageSent`: with relay-only /
+no store peer, `messageSent` never fires (interop S06 vs S07).
 
 ## Event payload shape
 
@@ -95,8 +95,8 @@ holds `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`
 ## Fleet
 
 `test_fleet.py` (marker `fleet`) sends through the live `logos.test` fleet. Each test
-checks that a message from one node reaches a second node, or one of the fleet's store
-nodes. Each node runs in its own docker network, so the message has to cross the fleet.
+checks that a message from one node reaches a second node, or that a store node confirms
+it. Each node runs in its own docker network, so the message has to cross the fleet.
 Every node validates RLN proofs, because its presets file turns validation on, which the
 module's built-in `logos.test` entry leaves off. An Edge node subscribes at the fleet 1 s
 after its `subscribe` returns, so an Edge receiver waits 3 s before the sender sends.
@@ -116,8 +116,8 @@ E2E_RLN_MEMBERSHIP_DIR=<membership dir> E2E_FLEET_EPOCH_FILE=~/.logos-e2e-local/
   pytest -v -m fleet
 ```
 
-`storeQuery` needs a peer, so the store test asks the preset's entry nodes
-(`FLEET_ENTRY_NODES`) in turn.
+`logos.test` turns reliability on, so `messageSent` follows a store node's confirmation
+that it holds the message, and the store test waits for it.
 
 ## Prerequisites
 

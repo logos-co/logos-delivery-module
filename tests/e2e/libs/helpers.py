@@ -52,8 +52,6 @@ LEZ_RPC_TIMEOUT_S = 5.0
 RLN_RETRY_CLASSES = ("not_ready", "transient")
 RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
 
-STORE_QUERY_TIMEOUT_MS = 20000
-
 CONNECTED_STATUSES = ("PartiallyConnected", "Connected")
 
 
@@ -101,8 +99,8 @@ def make_fleet_config(*, mode: str) -> str:
 
 
 def make_rln_presets(*, enable_validation: bool, registry_id: str, preset: str = "") -> str:
-    """Contents of the RLN presets file for a test node. The entry applies to nodes
-    created with `preset`. The `""` entry applies to nodes created without a preset."""
+    """Contents of the RLN presets file for a test node: one entry, for nodes created
+    with `preset`. The default `""` is the entry for nodes created without a preset."""
     return json.dumps({
         preset: {
             "enabled": True,
@@ -173,9 +171,6 @@ class LogosDelivery:
 
     def connection_status(self, *, timeout: Optional[float] = None) -> str:
         return call_ok(self.client, "getConnectionStatus", timeout=timeout)
-
-    def store_query(self, query_json: str, peer_addr: str) -> dict:
-        return call_result(self.client, "storeQuery", query_json, peer_addr, STORE_QUERY_TIMEOUT_MS)
 
     def metric(self, name: str, **labels: str) -> float:
         """Value of `name` with `labels` in the node's Prometheus text, 0 if absent."""
@@ -266,7 +261,7 @@ def wait_for_rln_ready(node: DeliveryNode, *, timeout: float) -> None:
 
     state = wait_until(settled, timeout=timeout, message=f"{node.label}: RLN still Initializing")
     if state.get("state") != "Ready":
-        raise AssertionError(f"{node.label}: rlnState {state!r}")
+        raise AssertionError(f"{node.label}: rlnState: {state!r}")
 
 
 def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> dict:
@@ -279,7 +274,7 @@ def wait_for_lez_wallet(node: DeliveryNode, *, timeout: float) -> dict:
 
     status = wait_until(settled, timeout=timeout, message=f"{node.label}: LEZ wallet still pending")
     if status.get("state") != "ready":
-        raise AssertionError(f"{node.label}: LEZ wallet {status!r}")
+        raise AssertionError(f"{node.label}: LEZ wallet: {status!r}")
     return status
 
 
@@ -326,26 +321,6 @@ def wait_for_connected(node: DeliveryNode, *, timeout: float) -> None:
     )
 
 
-def stored_messages(node: DeliveryNode, content_topic: str, peers) -> list:
-    """The messages on `content_topic` from the first store peer in `peers` that holds
-    any, or an empty list."""
-    query = json.dumps({
-        "requestId": "e2e",
-        "includeData": True,
-        "paginationForward": True,
-        "contentTopics": [content_topic],
-    })
-    for peer in peers:
-        result = node.store_query(query, peer)
-        if not result.get("success"):
-            logger.info("%s: storeQuery to %s failed: %s", node.label, peer, result.get("error"))
-            continue
-        messages = _from_json_text(result["value"]).get("messages")
-        if messages:
-            return messages
-    return []
-
-
 def rln_membership_state(node: DeliveryNode) -> dict:
     """The node's `get_membership_state` (`active`, `pending`, `failed`, `unknown`, …),
     read live from the chain. While the module registers, `unknown` carries
@@ -365,7 +340,7 @@ def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, time
 
     state = wait_until(settled, timeout=timeout, interval=1.0, message=f"{node.label}: membership not registered")
     if state.get("state") != "active":
-        raise AssertionError(f"{node.label}: membership {state!r}")
+        raise AssertionError(f"{node.label}: membership: {state!r}")
 
 
 def _rln_call(node: DeliveryNode, method: str, *args: str) -> Any:
