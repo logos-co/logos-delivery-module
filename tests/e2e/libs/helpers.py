@@ -99,8 +99,8 @@ def make_fleet_config(*, mode: str) -> str:
 
 
 def make_rln_presets(*, enable_validation: bool, registry_id: str, preset: str = "") -> str:
-    """Contents of the RLN presets file for a test node: one entry, for nodes created
-    with `preset`. The default `""` is the entry for nodes created without a preset."""
+    """Contents of the RLN presets file for a test node. The file's one entry replaces
+    the module's built-in RLN settings."""
     return json.dumps({
         preset: {
             "enabled": True,
