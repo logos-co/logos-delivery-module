@@ -41128,11 +41128,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1792613524,
-        "narHash": "sha256-2jg2Pg8khew8gd+UKzpHrrB+GiabOrsCz4UBcnw7kso=",
+        "lastModified": 1794472347,
+        "narHash": "sha256-5Q3HdGTOQ5Rn2ce/EBd2ilahJRcLv4TeyJtMZchT7Xk=",
         "ref": "poc/discovery-plugin-through-reverseffi",
-        "rev": "775a6a5d707c81c145544b1a3176c31b63928895",
-        "revCount": 2724,
+        "rev": "916275a8a770a9a7b36217ade319e09dc73214b5",
+        "revCount": 2780,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
@@ -328746,17 +328746,17 @@
     "nim-ffi": {
       "flake": false,
       "locked": {
-        "lastModified": 1792611917,
-        "narHash": "sha256-JP+ApVHcJuPi40sNLTtlWj8ceAXARmeaFzuX9gw3zR4=",
+        "lastModified": 1794471694,
+        "narHash": "sha256-txL2EOJj8y9bSAbh+a6ZMupYonSh05wU2LS9VwLZPHY=",
         "owner": "logos-messaging",
         "repo": "nim-ffi",
-        "rev": "c3d5e7a0ab89cbb296531c3c241b175685f09683",
+        "rev": "ca34fd1b5b43a86edd3b364e92d9a4ff0173fe33",
         "type": "github"
       },
       "original": {
         "owner": "logos-messaging",
         "repo": "nim-ffi",
-        "rev": "c3d5e7a0ab89cbb296531c3c241b175685f09683",
+        "rev": "ca34fd1b5b43a86edd3b364e92d9a4ff0173fe33",
         "type": "github"
       }
     },
