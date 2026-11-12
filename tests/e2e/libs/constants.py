@@ -21,7 +21,17 @@ LEZ_SEQUENCER_PORT = 3040
 # timestamp in ms at bytes 8-16, 0 until block 50.
 LEZ_CLOCK_50_ACCOUNT = "4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWkX"
 LEZ_CLOCK_SHARD = "2hwaRW8sMnyKLLRbDRw8k68tiv9bnfq98oxcdtcp157Z"
+# The LEZ testnet's sequencer.
+LEZ_SEQUENCER_URL = "https://testnet.lez.logos.co/"
 
 RLN_EPOCH_SIZE_SEC = 600
 # delivery_module's RLN identifier, sha256("rln/logos-delivery/v0.0.1").
 RLN_IDENTIFIER = "5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977"
+RLN_VALID_MESSAGES = "logos_delivery_rln_valid_messages_total_total"
+
+FLEET_PRESET = "logos.test"
+# The `logos.test` preset's registry on the LEZ testnet (docs/pages/rln.md).
+FLEET_REGISTRY_ID = "logos:testnet:fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971"
+FLEET_CONTENT_TOPIC_PREFIX = "/fleet-test/1/"
+# Autosharding maps FLEET_CONTENT_TOPIC_PREFIX to shard 6.
+FLEET_PUBSUB_TOPIC = "/waku/2/rs/2/6"
