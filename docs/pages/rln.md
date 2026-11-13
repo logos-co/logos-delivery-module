@@ -69,11 +69,12 @@ funded payer on the v0.3.1 zone, with `liblogos_rln_module` ≥ 0.12.0 and
 - This module starts `liblogos_rln_module` itself; the library no longer
   does. A bridge that cannot come up is not fatal: the `rln*Request` events
   plus `rlnRespond` remain, but nothing starts the backend on that path.
-- `liblogos_rln_module` is an `optional_dependency`, so the host neither
-  loads it nor requires it: a node whose preset has RLN off runs without the
-  RLN stack installed at all. A node on an RLN-enabled preset loads it — and
-  its own dep, `liblogos_lez_rln_module` — before
-  `createNode`, or bring-up ends in `Failed`.
+- `liblogos_rln_module` is an `optional_dependency`, so the host loads it
+  with this module when it is installed and skips it when it is not: a node
+  whose preset has RLN off runs without the RLN stack installed at all. A node
+  on an RLN-enabled preset needs it — and its own dep,
+  `liblogos_lez_rln_module` — installed next to this module, or bring-up ends
+  in `Failed`.
 - Bring-up fires `start` from this module. If it fails, `rlnState` goes to
   `Failed` with the RLN module's error.
 - At startup the library also checks the node's membership with
