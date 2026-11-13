@@ -145,6 +145,102 @@ LOGOS_TEST(createNode_succeeds_with_logos_dev_preset_config) {
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_add_event_listener"));
 }
 
+// initialize
+
+// Sets env vars for a test body and unsets them afterwards.
+class ScopedEnv {
+public:
+    ScopedEnv(std::initializer_list<std::pair<const char*, std::string>> vars) {
+        for (const auto& [name, value] : vars) {
+            ::setenv(name, value.c_str(), 1);
+            names_.push_back(name);
+        }
+    }
+    ~ScopedEnv() {
+        for (const auto& name : names_) ::unsetenv(name.c_str());
+    }
+private:
+    std::vector<std::string> names_;
+};
+
+static nlohmann::json initializeAndCaptureConfig(LogosTestContext& t, bool expectSuccess = true) {
+    delivery_test_rln::resetRlnMockState();
+    delivery_test_rln::g_lastCreateConfigJson.clear();
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_EQ(impl.initialize().success, expectSuccess);
+    if (delivery_test_rln::g_lastCreateConfigJson.empty()) return nullptr;
+    return nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+}
+
+LOGOS_TEST(initialize_without_env_joins_logos_test_as_a_full_node) {
+    auto t = LogosTestContext("delivery_module");
+    ::unsetenv(kRlnPresetsEnvVar);
+
+    auto libCfg = initializeAndCaptureConfig(t);
+    LOGOS_ASSERT_EQ(libCfg["preset"].get<std::string>(), std::string("logos.test"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("entryLayer"));
+    LOGOS_ASSERT_TRUE(libCfg["messagingOverrides"].value("rln-disable-validation", false));
+}
+
+LOGOS_TEST(initialize_applies_node_env_vars_as_cli_named_fields) {
+    auto t = LogosTestContext("delivery_module");
+    ScopedEnv env({{"LOGOS_DELIVERY_NODE_NODEKEY", "abc"},
+                   {"LOGOS_DELIVERY_NODE_TCP_PORT", "60001"},
+                   {"LOGOS_DELIVERY_NODE_KAD_BOOTSTRAP_NODE", R"(["/dns4/a.example/tcp/60001"])"},
+                   {"LOGOS_DELIVERY_NODE_NAT", ""},
+                   {"LOGOS_DELIVERY_NODE_MODE", "Edge"},
+                   {"LOGOS_DELIVERY_NODE_PRESET", "logos.dev"}});
+
+    auto libCfg = initializeAndCaptureConfig(t);
+    LOGOS_ASSERT_EQ(libCfg["preset"].get<std::string>(), std::string("logos.dev"));
+    LOGOS_ASSERT_EQ(libCfg["mode"].get<std::string>(), std::string("Edge"));
+    const auto& overrides = libCfg["messagingOverrides"];
+    LOGOS_ASSERT_EQ(overrides["nodekey"].get<std::string>(), std::string("abc"));
+    LOGOS_ASSERT_EQ(overrides["tcp-port"].get<std::string>(), std::string("60001"));
+    LOGOS_ASSERT_TRUE(overrides["kad-bootstrap-node"].is_array());
+    LOGOS_ASSERT_EQ(overrides["kad-bootstrap-node"][0].get<std::string>(), std::string("/dns4/a.example/tcp/60001"));
+    LOGOS_ASSERT_FALSE(overrides.contains("nat"));
+}
+
+LOGOS_TEST(initialize_kernel_entry_layer_moves_preset_into_kernel_conf) {
+    auto t = LogosTestContext("delivery_module");
+    ScopedEnv env({{"LOGOS_DELIVERY_NODE_ENTRY_LAYER", "kernel"},
+                   {"LOGOS_DELIVERY_NODE_RELAY", "true"}});
+
+    auto libCfg = initializeAndCaptureConfig(t);
+    LOGOS_ASSERT_EQ(libCfg["entryLayer"].get<std::string>(), std::string("kernel"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("preset"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("messagingOverrides"));
+    LOGOS_ASSERT_EQ(libCfg["kernelConf"]["preset"].get<std::string>(), std::string("logos.test"));
+    LOGOS_ASSERT_EQ(libCfg["kernelConf"]["relay"].get<std::string>(), std::string("true"));
+}
+
+LOGOS_TEST(initialize_env_vars_override_the_config_file) {
+    auto t = LogosTestContext("delivery_module");
+    const auto path = std::filesystem::temp_directory_path()
+        / ("delivery-initialize-" + std::to_string(::getpid()) + ".json");
+    std::ofstream(path) << R"({"entryLayer":"kernel","kernelConf":{"clusterId":3,"storeMessageDbUrl":"postgres://fleet"}})";
+    ScopedEnv env({{"LOGOS_DELIVERY_CONFIG_FILE", path.string()},
+                   {"LOGOS_DELIVERY_NODE_STORE_MESSAGE_DB_URL", "postgres://host"}});
+
+    auto libCfg = initializeAndCaptureConfig(t);
+    std::filesystem::remove(path);
+    const auto& kernelConf = libCfg["kernelConf"];
+    LOGOS_ASSERT_EQ(kernelConf["clusterId"].get<int>(), 3);
+    LOGOS_ASSERT_FALSE(kernelConf.contains("storeMessageDbUrl"));
+    LOGOS_ASSERT_EQ(kernelConf["store-message-db-url"].get<std::string>(), std::string("postgres://host"));
+}
+
+LOGOS_TEST(initialize_fails_when_the_config_file_is_unreadable) {
+    auto t = LogosTestContext("delivery_module");
+    ScopedEnv env({{"LOGOS_DELIVERY_CONFIG_FILE", "/nonexistent/delivery.json"}});
+
+    auto libCfg = initializeAndCaptureConfig(t, /*expectSuccess=*/false);
+    LOGOS_ASSERT_TRUE(libCfg.is_null());
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_create"));
+}
+
 // start
 
 LOGOS_TEST(start_fails_without_createNode) {

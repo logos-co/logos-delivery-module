@@ -289,6 +289,45 @@ documented in the [API reference](api_reference.rst).
 The node's local state goes to the runtime's per-instance persistence
 directory unless `localStoragePath` names another.
 
+### Environment variables
+
+`initialize` creates the node with no config argument:
+
+```bash
+logosctl call delivery_module initialize
+```
+
+With nothing set it joins `logos.test` as a full node, like
+`{"preset": "logos.test"}`. Variables in the daemon's environment change that:
+
+| Variable | Effect |
+|---|---|
+| `LOGOS_DELIVERY_CONFIG_FILE` | JSON config file to start from instead of the default |
+| `LOGOS_DELIVERY_NODE_ENTRY_LAYER` | `entryLayer`; `kernel` moves `preset` into `kernelConf` |
+| `LOGOS_DELIVERY_NODE_MODE` | `mode` |
+| `LOGOS_DELIVERY_NODE_PRESET` | `preset` |
+| `LOGOS_DELIVERY_NODE_<NAME>` | the node field the CLI reads from the same variable, e.g. `_NAT` → `nat`, `_STORE_MESSAGE_DB_URL` → `store-message-db-url` |
+
+`<NAME>` fields go into `messagingOverrides` on the default shape and into
+`kernelConf` on a kernel node, and only that layer's fields are accepted:
+kernel-only settings such as `ext-multiaddr`, `mixkey` or `relay` need
+`LOGOS_DELIVERY_NODE_ENTRY_LAYER=kernel`. Variables win over the file. List fields take a JSON array
+(`LOGOS_DELIVERY_NODE_EXT_MULTIADDR='["/dns4/…/tcp/30303"]'`); empty
+variables are ignored. A fleet can bake its shared config into the image and
+give each host only its own settings:
+
+```yaml
+environment:
+  LOGOS_DELIVERY_CONFIG_FILE: /conf/fleet.json
+  LOGOS_DELIVERY_NODE_NODEKEY: ${NODEKEY}
+  LOGOS_DELIVERY_NODE_NAT: extip:203.0.113.7
+```
+
+Leave the fields the environment sets out of the file when its key is
+spelled differently from the variable's (`extMultiaddrs` vs
+`ext-multiaddr`); otherwise the node rejects the config for setting the field
+twice. `createNode` ignores these variables.
+
 ### Public address
 
 The node advertises only addresses peers can actually dial. It no longer
