@@ -40,6 +40,12 @@ public:
     /// The result of one verb. `records` is set by the lookups only: libp2p's
     /// peer records, `[{peerId, seqNo, addrs, services:[{id, data}]}]` with
     /// each service's `data` base64.
+    ///
+    /// `records` stays JSON because that is what libp2p_module returns: its
+    /// calls cross the module boundary as JSON (`StdLogosResult::value`).
+    /// One Outcome type lets the executor queue every verb alike; the lookups'
+    /// reply converts `records` to the node's typed `SdPeerRecords`
+    /// (`toPeerRecords`) only when it answers the reverse call.
     struct Outcome {
         bool ok = true;
         std::string error;
