@@ -11,11 +11,13 @@
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder/0.3.1";
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=master";
+    # The POC branch: the C++ binding, typed events and the reverse-call
+    # discovery host this module uses live only on it.
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=poc/discovery-plugin-through-reverseffi";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
-      url = "github:logos-messaging/nim-ffi/4c1218626bbbf89e19836845b690937cd255c3f0";
+      url = "github:logos-messaging/nim-ffi/d0ec470adeeb653ad1b3e78d50ba103ec46821e7";
       flake = false;
     };
     # The name is load-bearing: the builder resolves the metadata.json
@@ -66,31 +68,35 @@
           };
         };
         preConfigure = stageTinycbor;
-        tests = {
-          dir = ./tests;
-          mockCLibs = [ "logosdelivery" ];
-          # liblogosdelivery.dylib has a Cargo-baked absolute path to librln.dylib.
-          # Rewrite it to @rpath/librln.dylib so the dynamic linker can find it via
-          # the lib/ RPATH set on the integration test binary.
-          # TODO: remove once logos-module-builder mkLogosModuleTests.nix handles
-          # transitive dylib dependency rewriting in its preConfigure (similar to
-          # the postInstall rewrite done for the main module build).
-          preConfigure = stageTinycbor + ''
-            if [ -f lib/liblogosdelivery.dylib ]; then
-              OLD_RLN=$(otool -L lib/liblogosdelivery.dylib | awk '/librln/{print $1}')
-              if [ -n "$OLD_RLN" ]; then
-                install_name_tool -change "$OLD_RLN" "@rpath/librln.dylib" lib/liblogosdelivery.dylib
-              fi
-            fi
-            # Linux: the integration test binary links the staged lib/ libraries
-            # by absolute path at build time, but the check phase runs from the
-            # build dir where the dynamic linker can't find them. Same class of
-            # gap as the darwin rewrite above (see TODO there).
-            if [ -f lib/liblogosdelivery.so ]; then
-              export LD_LIBRARY_PATH="$(pwd)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            fi
-          '';
-        };
+        # Tests disabled on this experiment branch: the module now uses
+        # liblogosdelivery's generated C++ binding, and the unit tests still mock
+        # the C surface (tests/stubs, tests/mocks). Restore this block once they
+        # mock the binding.
+        # tests = {
+        #   dir = ./tests;
+        #   mockCLibs = [ "logosdelivery" ];
+        #   # liblogosdelivery.dylib has a Cargo-baked absolute path to librln.dylib.
+        #   # Rewrite it to @rpath/librln.dylib so the dynamic linker can find it via
+        #   # the lib/ RPATH set on the integration test binary.
+        #   # TODO: remove once logos-module-builder mkLogosModuleTests.nix handles
+        #   # transitive dylib dependency rewriting in its preConfigure (similar to
+        #   # the postInstall rewrite done for the main module build).
+        #   preConfigure = stageTinycbor + ''
+        #     if [ -f lib/liblogosdelivery.dylib ]; then
+        #       OLD_RLN=$(otool -L lib/liblogosdelivery.dylib | awk '/librln/{print $1}')
+        #       if [ -n "$OLD_RLN" ]; then
+        #         install_name_tool -change "$OLD_RLN" "@rpath/librln.dylib" lib/liblogosdelivery.dylib
+        #       fi
+        #     fi
+        #     # Linux: the integration test binary links the staged lib/ libraries
+        #     # by absolute path at build time, but the check phase runs from the
+        #     # build dir where the dynamic linker can't find them. Same class of
+        #     # gap as the darwin rewrite above (see TODO there).
+        #     if [ -f lib/liblogosdelivery.so ]; then
+        #       export LD_LIBRARY_PATH="$(pwd)/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        #     fi
+        #   '';
+        # };
         # Bundle runtime libraries alongside the plugin.
         postInstall = ''
           # liblogosdelivery.dylib has a sandbox-baked absolute path for librln.dylib

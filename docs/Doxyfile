@@ -178,8 +178,7 @@ FILE_PATTERNS          = *.c \
                          *.qsf \
                          *.ice
 RECURSIVE              = NO
-EXCLUDE                = src/delivery_module_plugin.cpp \
-                         src/api_call_handler.h
+EXCLUDE                = src/delivery_module_plugin.cpp
 EXCLUDE_SYMLINKS       = NO
 EXCLUDE_PATTERNS       =
 EXCLUDE_SYMBOLS        =

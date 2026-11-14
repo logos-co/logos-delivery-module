@@ -10,16 +10,13 @@
 #include <cctype>
 #include <thread>
 
-#include <nlohmann/json.hpp>
+#include <liblogosdelivery.hpp>
 
 // Generated at build time from metadata.json#optional_dependencies.
 #include "libp2p_module_api.h"
 #include "base64.h"
 
 namespace {
-
-// The node's per-verb wait; nim-brokers' lane may enforce a shorter one.
-constexpr uint32_t kRequestTimeoutMs = 15000;
 
 // Deadline for the first libp2p call, which is how an absent module is found.
 // The transport's own wait is 20s, as long as the node's budget for `start`,
@@ -93,79 +90,132 @@ bool isCallTimeout(const logos::CallError& err)
     return mentionsTimeout(err.code) || mentionsTimeout(err.message);
 }
 
-/// Counts an entry point in and out, for quiesce().
-struct InFlightGuard {
-    std::atomic<int>& n;
-    explicit InFlightGuard(std::atomic<int>& counter) : n(counter) { n.fetch_add(1); }
-    ~InFlightGuard() { n.fetch_sub(1); }
-    InFlightGuard(const InFlightGuard&) = delete;
-    InFlightGuard& operator=(const InFlightGuard&) = delete;
-};
+using Outcome = DeliveryServiceDiscoveryPlugin::Outcome;
 
-void writeErr(char* errBuf, size_t errBufLen, const std::string& msg)
+Outcome failed(std::string error)
 {
-    if (!errBuf || errBufLen == 0) {
-        return;
-    }
-    const size_t n = msg.size() < errBufLen - 1 ? msg.size() : errBufLen - 1;
-    std::memcpy(errBuf, msg.data(), n);
-    errBuf[n] = '\0';
+    Outcome out;
+    out.ok = false;
+    out.error = std::move(error);
+    return out;
 }
 
-/// Turns one typed reply into an LD_DISCO_* code. Transport failures
-/// (CallError) and libp2p's own refusals are reported apart.
-int settle(const char* method, const StdLogosResult& r, const logos::CallError& err,
-           char* errBuf, size_t errBufLen)
+/// Turns one typed reply into an Outcome. Transport failures (CallError) and
+/// libp2p's own refusals are reported apart.
+Outcome settle(const char* method, const StdLogosResult& r, const logos::CallError& err)
 {
     if (!err.ok()) {
         const std::string msg =
             std::string(method) + ": " + err.code + ": " + err.message;
         trace("%-22s TRANSPORT-ERR  %s", method, msg.c_str());
-        writeErr(errBuf, errBufLen, msg);
-        return LD_DISCO_ERROR;
+        return failed(msg);
     }
     if (!r.success) {
         const std::string msg =
             r.error.empty() ? std::string(method) + " failed" : r.error;
         trace("%-22s REFUSED        %s", method, msg.c_str());
-        writeErr(errBuf, errBufLen, msg);
-        return LD_DISCO_ERROR;
+        return failed(msg);
     }
-    return LD_DISCO_OK;
+    return {};
 }
 
-/// Hands a lookup's records to logos-delivery as JSON array text; libp2p's
-/// record shape is already the one it parses. Freed through freeString.
-bool emitJsonArray(const nlohmann::json& value, char** outJson,
-                   char* errBuf, size_t errBufLen)
+/// Peer ids of a lookup's records, shortened, for the trace.
+std::string tracePeers(const nlohmann::json& records)
 {
-    const std::string json = value.is_array() ? value.dump() : std::string("[]");
-    *outJson = strdup(json.c_str());
-    if (!*outJson) {
-        writeErr(errBuf, errBufLen, "out of memory copying lookup result");
-        return false;
+    std::string peers;
+    if (records.is_array()) {
+        for (const auto& rec : records) {
+            if (!rec.is_object() || !rec.contains("peerId") || !rec["peerId"].is_string()) continue;
+            const std::string id = rec["peerId"].get<std::string>();
+            if (!peers.empty()) peers += ",";
+            peers += id.size() > 12 ? id.substr(id.size() - 8) : id;
+        }
     }
-    return true;
+    return peers;
 }
 
-/// Runs one entry point's body. They are called from Nim over the C ABI, where
-/// an escaping exception terminates the process, so report it instead. The
-/// message is written without allocating, so reporting cannot throw again.
+/// Runs one verb. The executor is the only caller and an escaping exception
+/// would take its thread down, so report it as the verb's failure instead.
 template <typename Body>
-int guarded(const char* verb, char* errBuf, size_t errBufLen, Body&& body)
+Outcome guarded(const char* verb, Body&& body)
 {
-    const char* what = "unknown exception";
+    // The message is copied inside the handler: `what()` dies with the
+    // exception object when the handler ends.
+    std::string what = "unknown exception";
     try {
         return body();
     } catch (const std::exception& e) {
         what = e.what();
     } catch (...) {
     }
-    trace("%-22s EXCEPTION      %s", verb, what);
-    if (errBuf && errBufLen > 0) {
-        std::snprintf(errBuf, errBufLen, "%s: %s", verb, what);
+    trace("%-22s EXCEPTION      %s", verb, what.c_str());
+    return failed(std::string(verb) + ": " + what);
+}
+
+/// libp2p's lookup records as the node's typed reply. Records without a string
+/// peer id are skipped, as the node would drop them anyway; a service's base64
+/// `data` is decoded to its bytes.
+SdPeerRecords toPeerRecords(const nlohmann::json& records)
+{
+    SdPeerRecords out;
+    if (!records.is_array()) {
+        return out;
     }
-    return LD_DISCO_ERROR;
+    for (const auto& rec : records) {
+        if (!rec.is_object() || !rec.contains("peerId") || !rec["peerId"].is_string()) {
+            continue;
+        }
+        SdPeerRecord p{};
+        p.peerId = rec["peerId"].get<std::string>();
+        if (const auto s = rec.find("seqNo"); s != rec.end() && s->is_number_integer() &&
+                                              s->get<int64_t>() >= 0) {
+            p.seqNo = s->get<uint64_t>();
+        }
+        if (const auto a = rec.find("addrs"); a != rec.end() && a->is_array()) {
+            for (const auto& addr : *a) {
+                if (addr.is_string()) p.addrs.push_back(addr.get<std::string>());
+            }
+        }
+        if (const auto svcs = rec.find("services"); svcs != rec.end() && svcs->is_array()) {
+            for (const auto& svc : *svcs) {
+                if (!svc.is_object() || !svc.contains("id") || !svc["id"].is_string()) continue;
+                SdService s;
+                s.id = svc["id"].get<std::string>();
+                if (svc.contains("data") && svc["data"].is_string()) {
+                    s.data = delivery_base64::decode(svc["data"].get<std::string>());
+                }
+                p.services.push_back(std::move(s));
+            }
+        }
+        out.peers.push_back(std::move(p));
+    }
+    return out;
+}
+
+/// The reply of a verb whose success carries nothing.
+template <typename Token>
+std::function<void(const Outcome&)> voidReply(Token token)
+{
+    return [token](const Outcome& o) {
+        if (o.ok) {
+            token.reply();
+        } else {
+            token.fail(o.error);
+        }
+    };
+}
+
+/// The reply of a lookup: the records, typed.
+template <typename Token>
+std::function<void(const Outcome&)> recordsReply(Token token)
+{
+    return [token](const Outcome& o) {
+        if (o.ok) {
+            token.reply(toPeerRecords(o.records));
+        } else {
+            token.fail(o.error);
+        }
+    };
 }
 
 } // namespace
@@ -177,59 +227,158 @@ DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* lib
     , backendReady_(false)
     , nodeCreated_(false)
     , startIssued_(false)
-    , vtable_{}
 {
-    vtable_.abiVersion = LD_DISCO_ABI_VERSION;
-    vtable_.pluginCtx = this;
-    vtable_.requestTimeoutMs = kRequestTimeoutMs;
-    vtable_.start = &DeliveryServiceDiscoveryPlugin::cStart;
-    vtable_.stop = &DeliveryServiceDiscoveryPlugin::cStop;
-    vtable_.lookup = &DeliveryServiceDiscoveryPlugin::cLookup;
-    vtable_.randomLookup = &DeliveryServiceDiscoveryPlugin::cRandomLookup;
-    vtable_.freeString = &DeliveryServiceDiscoveryPlugin::cFreeString;
-    vtable_.startAdvertising = &DeliveryServiceDiscoveryPlugin::cStartAdvertising;
-    vtable_.stopAdvertising = &DeliveryServiceDiscoveryPlugin::cStopAdvertising;
-    vtable_.registerInterest = &DeliveryServiceDiscoveryPlugin::cRegisterInterest;
-    vtable_.unregisterInterest = &DeliveryServiceDiscoveryPlugin::cUnregisterInterest;
 }
 
-std::string DeliveryServiceDiscoveryPlugin::toServiceId(const char* key)
+DeliveryServiceDiscoveryPlugin::~DeliveryServiceDiscoveryPlugin()
 {
-    if (!key) {
-        return {};
+    // The owner quiesces first and leaks the object if that times out, so the
+    // executor is gone or never ran by now.
+    if (executor_.joinable()) {
+        quiesce(std::chrono::milliseconds(0));
+        if (executor_.joinable()) {
+            executor_.detach();
+        }
     }
-    const std::string k(key);
+}
+
+std::string DeliveryServiceDiscoveryPlugin::toServiceId(const std::string& key)
+{
     constexpr const char* kServicePrefix = "service:";
     constexpr size_t kServicePrefixLen = 8;
-    if (k.rfind(kServicePrefix, 0) == 0) {
-        return k.substr(kServicePrefixLen);
+    if (key.rfind(kServicePrefix, 0) == 0) {
+        return key.substr(kServicePrefixLen);
     }
-    return k;
+    return key;
+}
+
+// --- reverse-call plumbing ---------------------------------------------------
+
+std::string DeliveryServiceDiscoveryPlugin::registerOn(LogosDeliveryCtx& node)
+{
+    if (!executor_.joinable()) {
+        executor_ = std::thread([this] { runExecutor(); });
+    }
+    // On a nim-ffi reverse worker: queue and return. The arguments are the
+    // binding's decoded copies, so the queued call owns them.
+    const auto queue = [this](auto token, std::function<Outcome()> run, auto reply) {
+        if (!enqueue(Call{std::move(run), reply(token)})) {
+            token.fail("service discovery host is shutting down");
+        }
+    };
+    using L = LogosDeliveryCtx;
+    const bool ok =
+        node.setSdStartImpl([this, queue](L::SdStartCall c) {
+            queue(c, [this] { return start(); }, voidReply<L::SdStartCall>);
+        }) &&
+        node.setSdStopImpl([this, queue](L::SdStopCall c) {
+            queue(c, [this] { return stop(); }, voidReply<L::SdStopCall>);
+        }) &&
+        node.setSdLookupImpl([this, queue](L::SdLookupCall c, const SdLookupArgs& a) {
+            queue(c, [this, a] { return lookup(a.key, a.limit); }, recordsReply<L::SdLookupCall>);
+        }) &&
+        node.setSdRandomLookupImpl([this, queue](L::SdRandomLookupCall c) {
+            queue(c, [this] { return randomLookup(); }, recordsReply<L::SdRandomLookupCall>);
+        }) &&
+        node.setSdStartAdvertisingImpl([this, queue](L::SdStartAdvertisingCall c,
+                                           const SdStartAdvertisingArgs& a) {
+            queue(c, [this, a] { return startAdvertising(a.key, a.data, a.record); },
+                  voidReply<L::SdStartAdvertisingCall>);
+        }) &&
+        node.setSdStopAdvertisingImpl([this, queue](L::SdStopAdvertisingCall c, const std::string& key) {
+            queue(c, [this, key] { return stopAdvertising(key); },
+                  voidReply<L::SdStopAdvertisingCall>);
+        }) &&
+        node.setSdRegisterInterestImpl([this, queue](L::SdRegisterInterestCall c, const std::string& key) {
+            queue(c, [this, key] { return registerInterest(key); },
+                  voidReply<L::SdRegisterInterestCall>);
+        }) &&
+        node.setSdUnregisterInterestImpl([this, queue](L::SdUnregisterInterestCall c,
+                                             const std::string& key) {
+            queue(c, [this, key] { return unregisterInterest(key); },
+                  voidReply<L::SdUnregisterInterestCall>);
+        });
+    if (!ok) {
+        return "registering the sd_* reverse implementations was refused";
+    }
+    trace("reverse impls            REGISTERED  8 wires");
+    return {};
+}
+
+bool DeliveryServiceDiscoveryPlugin::enqueue(Call call)
+{
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (stopping_) {
+            return false;
+        }
+        queue_.push_back(std::move(call));
+    }
+    wake_.notify_one();
+    return true;
+}
+
+void DeliveryServiceDiscoveryPlugin::runExecutor()
+{
+    for (;;) {
+        Call call;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            wake_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
+            if (stopping_) {
+                break;
+            }
+            call = std::move(queue_.front());
+            queue_.pop_front();
+        }
+        call.reply(call.run());
+    }
+    // Whatever is still queued is answered, so the node is not left waiting
+    // for its deadline. After ctx_destroy the replies are refused, harmlessly.
+    std::deque<Call> rest;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        rest.swap(queue_);
+    }
+    for (const auto& call : rest) {
+        call.reply(failed("service discovery host is shutting down"));
+    }
+    executorExited_.store(true);
 }
 
 bool DeliveryServiceDiscoveryPlugin::quiesce(std::chrono::milliseconds timeout)
 {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_ = true;
+    }
+    wake_.notify_all();
+    if (!executor_.joinable()) {
+        return true;
+    }
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (inFlight_.load() > 0) {
+    while (!executorExited_.load()) {
         if (std::chrono::steady_clock::now() >= deadline) {
-            trace("quiesce                  TIMEOUT  %d call(s) still in flight",
-                  inFlight_.load());
+            trace("quiesce                  TIMEOUT  a verb is still inside libp2p");
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+    executor_.join();
     return true;
 }
 
-int DeliveryServiceDiscoveryPlugin::requireBackend(char* errBuf, size_t errBufLen)
+// --- libp2p backend ----------------------------------------------------------
+
+bool DeliveryServiceDiscoveryPlugin::requireBackend(Outcome& out)
 {
     const std::string failure = ensureBackend();
     if (failure.empty()) {
-        return LD_DISCO_OK;
+        return true;
     }
     trace("libp2p backend           UNAVAILABLE  %s", failure.c_str());
-    writeErr(errBuf, errBufLen, "libp2p backend unavailable: " + failure);
-    return LD_DISCO_ERROR;
+    out = failed("libp2p backend unavailable: " + failure);
+    return false;
 }
 
 std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
@@ -335,203 +484,155 @@ std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
     return diagnostics;
 }
 
-// --- vtable trampolines ------------------------------------------------------
+// --- the verbs ---------------------------------------------------------------
 
-#define LD_SELF(ctx) static_cast<DeliveryServiceDiscoveryPlugin*>(ctx)
-
-int DeliveryServiceDiscoveryPlugin::cStart(void* ctx, char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::start()
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("start", errBuf, errBufLen, [&]() -> int {
+    return guarded("start", [&]() -> Outcome {
         // Only brings libp2p up. Its discovery is shared by the whole process and
         // outlives this node, so the node's start/stop does not drive it.
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         trace("%-22s OK (backend already running)", "start");
-        return LD_DISCO_OK;
+        return out;
     });
 }
 
-int DeliveryServiceDiscoveryPlugin::cStop(void* ctx, char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::stop()
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("stop", errBuf, errBufLen, [&]() -> int {
-        // No-op: libp2p's discovery is shared (see cStart).
-        (void)ctx;
-        (void)errBuf;
-        (void)errBufLen;
+    return guarded("stop", [&]() -> Outcome {
+        // No-op: libp2p's discovery is shared (see start).
         trace("%-22s OK (no-op; libp2p discovery is shared)", "stop");
-        return LD_DISCO_OK;
+        return {};
     });
 }
 
-int DeliveryServiceDiscoveryPlugin::cLookup(void* ctx, const char* key, int64_t limit,
-                                            char** outJson, char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::lookup(const std::string& key, int64_t limit)
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("lookup", errBuf, errBufLen, [&]() -> int {
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+    return guarded("lookup", [&]() -> Outcome {
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         // libp2p's discoLookup takes (serviceId, serviceData) and has no result
         // cap, so `limit` has nowhere to go; the caller trims what it gets back.
         (void)limit;
         logos::CallError err;
-        const StdLogosResult r =
-            LD_SELF(ctx)->libp2p_->discoLookup(toServiceId(key), std::string(), &err);
-        const int rc = settle("discoLookup", r, err, errBuf, errBufLen);
-        if (rc != LD_DISCO_OK) {
-            return rc;
+        const StdLogosResult r = libp2p_->discoLookup(toServiceId(key), std::string(), &err);
+        out = settle("discoLookup", r, err);
+        if (!out.ok) {
+            return out;
         }
         // Peer ids, so a peer can be told from our own provider record.
-        std::string peers;
-        if (r.value.is_array()) {
-            for (const auto& rec : r.value) {
-                if (!rec.is_object() || !rec.contains("peerId") || !rec["peerId"].is_string()) continue;
-                const std::string id = rec["peerId"].get<std::string>();
-                if (!peers.empty()) peers += ",";
-                peers += id.size() > 12 ? id.substr(id.size() - 8) : id;
-            }
-        }
         trace("%-22s OK             key=%s records=%zu peers=[%s]", "discoLookup",
               toServiceId(key).c_str(), r.value.is_array() ? r.value.size() : 0,
-              peers.c_str());
-        return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
+              tracePeers(r.value).c_str());
+        out.records = r.value.is_array() ? r.value : nlohmann::json::array();
+        return out;
     });
 }
 
-int DeliveryServiceDiscoveryPlugin::cRandomLookup(void* ctx, char** outJson,
-                                                  char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::randomLookup()
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("randomLookup", errBuf, errBufLen, [&]() -> int {
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+    return guarded("randomLookup", [&]() -> Outcome {
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         logos::CallError err;
-        const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoRandomLookup(&err);
-        const int rc = settle("discoRandomLookup", r, err, errBuf, errBufLen);
-        if (rc != LD_DISCO_OK) {
-            return rc;
+        const StdLogosResult r = libp2p_->discoRandomLookup(&err);
+        out = settle("discoRandomLookup", r, err);
+        if (!out.ok) {
+            return out;
         }
         // Peer ids, to tell random-walk results from service lookups.
-        std::string rpeers;
-        if (r.value.is_array()) {
-            for (const auto& rec : r.value) {
-                if (!rec.is_object() || !rec.contains("peerId") || !rec["peerId"].is_string()) continue;
-                const std::string id = rec["peerId"].get<std::string>();
-                if (!rpeers.empty()) rpeers += ",";
-                rpeers += id.size() > 12 ? id.substr(id.size() - 8) : id;
-            }
-        }
         trace("%-22s OK             records=%zu peers=[%s]", "discoRandomLookup",
-              r.value.is_array() ? r.value.size() : 0, rpeers.c_str());
-        return emitJsonArray(r.value, outJson, errBuf, errBufLen) ? LD_DISCO_OK : LD_DISCO_ERROR;
+              r.value.is_array() ? r.value.size() : 0, tracePeers(r.value).c_str());
+        out.records = r.value.is_array() ? r.value : nlohmann::json::array();
+        return out;
     });
 }
 
-void DeliveryServiceDiscoveryPlugin::cFreeString(void* ctx, char* s)
+Outcome DeliveryServiceDiscoveryPlugin::startAdvertising(const std::string& key,
+                                                         const std::vector<uint8_t>& data,
+                                                         const std::vector<uint8_t>& record)
 {
-    (void)ctx;
-    free(s);
-}
-
-int DeliveryServiceDiscoveryPlugin::cStartAdvertising(void* ctx, const char* key,
-                                                      const uint8_t* data, size_t dataLen,
-                                                      const uint8_t* record, size_t recordLen,
-                                                      char* errBuf, size_t errBufLen)
-{
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("startAdvertising", errBuf, errBufLen, [&]() -> int {
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+    return guarded("startAdvertising", [&]() -> Outcome {
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         // `record` is the node's signed peer record (protobuf), base64-encoded for
         // libp2p's JSON transport. With a record, `data` is redundant but libp2p
         // rejects an empty serviceData and it may not be JSON-safe, so a marker
-        // goes instead. Either may be (NULL, 0).
-        const bool hasRecord = record && recordLen;
+        // goes instead. Either may be empty.
+        const bool hasRecord = !record.empty();
         const std::string advertisement =
-            hasRecord ? delivery_base64::encode(record, recordLen) : std::string();
+            hasRecord ? delivery_base64::encode(record) : std::string();
         const std::string serviceData =
             hasRecord ? std::string("xpr")
-            : data && dataLen ? std::string(reinterpret_cast<const char*>(data), dataLen)
-                              : std::string();
+                      : std::string(data.begin(), data.end());
         logos::CallError err;
-        const StdLogosResult r = LD_SELF(ctx)->libp2p_->discoStartAdvertising(
+        const StdLogosResult r = libp2p_->discoStartAdvertising(
             toServiceId(key), serviceData, advertisement, &err);
         // recordLen is the raw size, advertLen the base64 one sent.
         trace("%-22s ->  key=%s dataLen=%zu recordLen=%zu advertLen=%zu",
               "discoStartAdvertising", toServiceId(key).c_str(), serviceData.size(),
-              recordLen, advertisement.size());
-        const int rc = settle("discoStartAdvertising", r, err, errBuf, errBufLen);
-        if (rc == LD_DISCO_OK)
+              record.size(), advertisement.size());
+        out = settle("discoStartAdvertising", r, err);
+        if (out.ok)
             trace("%-22s OK             key=%s data=%s", "discoStartAdvertising",
                   toServiceId(key).c_str(), serviceData.c_str());
-        return rc;
+        return out;
     });
 }
 
-int DeliveryServiceDiscoveryPlugin::cStopAdvertising(void* ctx, const char* key,
-                                                     char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::stopAdvertising(const std::string& key)
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("stopAdvertising", errBuf, errBufLen, [&]() -> int {
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+    return guarded("stopAdvertising", [&]() -> Outcome {
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         logos::CallError err;
-        const StdLogosResult r =
-            LD_SELF(ctx)->libp2p_->discoStopAdvertising(toServiceId(key), &err);
-        const int rc = settle("discoStopAdvertising", r, err, errBuf, errBufLen);
-        if (rc == LD_DISCO_OK)
+        const StdLogosResult r = libp2p_->discoStopAdvertising(toServiceId(key), &err);
+        out = settle("discoStopAdvertising", r, err);
+        if (out.ok)
             trace("%-22s OK             key=%s", "discoStopAdvertising", toServiceId(key).c_str());
-        return rc;
+        return out;
     });
 }
 
-int DeliveryServiceDiscoveryPlugin::cRegisterInterest(void* ctx, const char* key,
-                                                      char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::registerInterest(const std::string& key)
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("registerInterest", errBuf, errBufLen, [&]() -> int {
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+    return guarded("registerInterest", [&]() -> Outcome {
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         logos::CallError err;
-        const StdLogosResult r =
-            LD_SELF(ctx)->libp2p_->discoRegisterInterest(toServiceId(key), &err);
-        const int rc = settle("discoRegisterInterest", r, err, errBuf, errBufLen);
-        if (rc == LD_DISCO_OK)
+        const StdLogosResult r = libp2p_->discoRegisterInterest(toServiceId(key), &err);
+        out = settle("discoRegisterInterest", r, err);
+        if (out.ok)
             trace("%-22s OK             key=%s", "discoRegisterInterest", toServiceId(key).c_str());
-        return rc;
+        return out;
     });
 }
 
-int DeliveryServiceDiscoveryPlugin::cUnregisterInterest(void* ctx, const char* key,
-                                                        char* errBuf, size_t errBufLen)
+Outcome DeliveryServiceDiscoveryPlugin::unregisterInterest(const std::string& key)
 {
-    const InFlightGuard inFlight(LD_SELF(ctx)->inFlight_);
-    return guarded("unregisterInterest", errBuf, errBufLen, [&]() -> int {
-        const int ready = LD_SELF(ctx)->requireBackend(errBuf, errBufLen);
-        if (ready != LD_DISCO_OK) {
-            return ready;
+    return guarded("unregisterInterest", [&]() -> Outcome {
+        Outcome out;
+        if (!requireBackend(out)) {
+            return out;
         }
         logos::CallError err;
-        const StdLogosResult r =
-            LD_SELF(ctx)->libp2p_->discoUnregisterInterest(toServiceId(key), &err);
-        const int rc = settle("discoUnregisterInterest", r, err, errBuf, errBufLen);
-        if (rc == LD_DISCO_OK)
+        const StdLogosResult r = libp2p_->discoUnregisterInterest(toServiceId(key), &err);
+        out = settle("discoUnregisterInterest", r, err);
+        if (out.ok)
             trace("%-22s OK             key=%s", "discoUnregisterInterest", toServiceId(key).c_str());
-        return rc;
+        return out;
     });
 }
-
-#undef LD_SELF

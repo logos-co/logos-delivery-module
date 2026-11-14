@@ -276,23 +276,6 @@ int logosdelivery_ctx_get_discovery_requirements(const void* /*ctx*/,
     return RET_OK;
 }
 
-int logosdelivery_ctx_set_service_discovery_plugin(const void* /*ctx*/,
-                                                   uint64_t /*pluginPtr*/,
-                                                   logosdelivery_reply onReply,
-                                                   void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_set_service_discovery_plugin");
-    replyOk("logosdelivery_ctx_set_service_discovery_plugin", onReply, userData);
-    return RET_OK;
-}
-
-int logosdelivery_ctx_clear_service_discovery_plugin(const void* /*ctx*/,
-                                                     logosdelivery_reply onReply,
-                                                     void* userData) {
-    LOGOS_CMOCK_RECORD("logosdelivery_ctx_clear_service_discovery_plugin");
-    replyOk("logosdelivery_ctx_clear_service_discovery_plugin", onReply, userData);
-    return RET_OK;
-}
-
 int logosdelivery_rln_response(uint64_t req_id, const char* result_json) {
     LOGOS_CMOCK_RECORD("logosdelivery_rln_response");
     delivery_test_rln::g_lastResponseReqId = req_id;
