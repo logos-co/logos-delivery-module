@@ -41128,11 +41128,11 @@
         "zerokit": "zerokit"
       },
       "locked": {
-        "lastModified": 1794566416,
-        "narHash": "sha256-s5B6saQcbWE3lhIGvic3jK+as/tJcSXrfYnyX1KQlC4=",
+        "lastModified": 1794583665,
+        "narHash": "sha256-vRRkxfHPWDmfoLlZoJvwKHG2U/JVxngaYA9E06kYpN8=",
         "ref": "poc/discovery-plugin-through-reverseffi",
-        "rev": "a8b1d8f0ad1302750d35464bac2dd1371b33fd90",
-        "revCount": 2781,
+        "rev": "008b231998f21a7725ba6023b5590f80fdcb0958",
+        "revCount": 2786,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
