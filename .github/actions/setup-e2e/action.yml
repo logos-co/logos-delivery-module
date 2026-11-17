@@ -21,7 +21,7 @@ runs:
   using: composite
   steps:
     - name: Setup Nix and Logos cache
-      uses: logos-co/setup-nix-cache-action@v1.2.2
+      uses: logos-co/setup-nix-cache-action@v1
       with:
         attic-token-ci: ${{ inputs.attic-token-ci }}
         attic-token-public: ${{ inputs.attic-token-public }}
