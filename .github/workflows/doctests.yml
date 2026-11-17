@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Nix and Logos cache
-        uses: logos-co/setup-nix-cache-action@v1
+        uses: logos-co/setup-nix-cache-action@v1.2.2
         with:
           attic-token-ci: ${{ secrets.ATTIC_TOKEN_CI }}
           attic-token-public: ${{ secrets.ATTIC_TOKEN_PUBLIC }}
@@ -136,7 +136,7 @@ jobs:
   windows:
     # Shared CI stages logosctl from the logos-logoscore-cli flake, as the Unix
     # doctests do.
-    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
+    uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@a060c2da64e2fc4a4c677362a712ea5473648dc8
     secrets: inherit
     with:
       # Stage the module's DLL closure and installable layout.
