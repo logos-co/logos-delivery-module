@@ -53,7 +53,7 @@ struct RlnPresetEntry {
  * field is rejected here rather than at node creation.
  *
  * Names are matched exactly, and must be ones the delivery library accepts —
- * `""`, `twn`, `logos.dev`, `logos.test`, `status.prod`. A variant spelling
+ * `""`, `twn`, `logos.dev`, `logos.test`, `status.prod`, `status.staging`. A variant spelling
  * such as `logostest` is an error rather than a match, so a typo cannot
  * silently leave a node without the rate limiting it asked for.
  *

@@ -13,7 +13,7 @@
     nix-bundle-lgx.url = "github:logos-co/nix-bundle-lgx";
     # The POC branch: the C++ binding, typed events and the reverse-call
     # discovery host this module uses live only on it.
-    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=poc/discovery-plugin-through-reverseffi";
+    logos-delivery.url = "git+https://github.com/logos-messaging/logos-delivery?ref=poc/discovery-plugin-through-reverseffi&submodules=1";
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {

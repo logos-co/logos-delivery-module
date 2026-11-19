@@ -15,7 +15,7 @@ namespace {
 const std::vector<std::string>& knownPresetNames()
 {
     static const std::vector<std::string> names = {"", "twn", "logos.dev", "logos.test",
-                                                   "status.prod"};
+                                                   "status.prod", "status.staging"};
     return names;
 }
 

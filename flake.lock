@@ -41129,15 +41129,17 @@
       },
       "locked": {
         "lastModified": 1794583665,
-        "narHash": "sha256-vRRkxfHPWDmfoLlZoJvwKHG2U/JVxngaYA9E06kYpN8=",
+        "narHash": "sha256-um/shOX10nFsqejAXzOqAred4UDAzd0BsfoXVRX/7hI=",
         "ref": "poc/discovery-plugin-through-reverseffi",
         "rev": "008b231998f21a7725ba6023b5590f80fdcb0958",
         "revCount": 2786,
+        "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       },
       "original": {
         "ref": "poc/discovery-plugin-through-reverseffi",
+        "submodules": true,
         "type": "git",
         "url": "https://github.com/logos-messaging/logos-delivery"
       }
