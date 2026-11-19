@@ -18,6 +18,7 @@ logos_test(
         test_delivery_module.cpp
     MOCK_C_SOURCES
         mocks/mock_liblogosdelivery.cpp
+        mocks/mock_reverse.cpp
     EXTRA_INCLUDES
         stubs/lib
 )
