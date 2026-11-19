@@ -114,7 +114,7 @@ to the protocol: the circuit path reduces them with `hash_to_field_le`
 (Keccak-256) however they were chosen.
 
 Keys are preset names spelled exactly as the delivery library spells them —
-`""`, `twn`, `logos.dev`, `logos.test`, `status.prod` — and matched exactly.
+`""`, `twn`, `logos.dev`, `logos.test`, `status.prod`, `status.staging` — and matched exactly.
 The empty name above is the preset-less config the library also accepts.
 
 A variant spelling is an error, not a miss: `logostest` in this file, or in a
