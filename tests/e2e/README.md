@@ -97,7 +97,7 @@ either. The wallet loses nothing in the blocks it skips, because it has no priva
 there.
 
 `rln_membership` is the testnet membership in `E2E_RLN_MEMBERSHIP_DIR`. That directory
-holds `liblogos_rln_module`'s keystore folder (`liblogos_rln_module/<instance>/`).
+holds `rln_module`'s keystore folder (`rln_module/<instance>/`).
 
 ## Fleet
 
@@ -146,8 +146,8 @@ the tests read adverts with `libp2p_module`'s `discoLookup`.
 - A host-side `logosctl` CLI on `PATH` (the client shells out to it): the image's own,
   copied out of `/opt/logosctl`, or a `logos-co/logos-logoscore-cli` release.
 - For `test_rln.py`:
-  - `liblogos_rln_module` and `liblogos_lez_rln_module` in `LOGOS_MODULES_DIR` (CI
-    installs them next to `delivery_module`).
+  - `rln_module`, `rln_lez_module`, `membership_allocation_client_module` and
+    `libp2p_module` in `LOGOS_MODULES_DIR` (CI installs them next to `delivery_module`).
   - `E2E_LEZ_SEQUENCER_IMAGE` env: the standalone LEZ sequencer image, pulled.
   - `E2E_LEZ_RLN_DIR` env: a logos-lez-rln checkout with its guest programs and tools
     built (see "Running locally — Linux").
@@ -265,8 +265,8 @@ the logosctl config dir that holds the membership:
 
 ```bash
 COPYFILE_DISABLE=1 tar czf rln-keystore.tar.gz --no-xattrs --exclude rln_keystore.lock \
-  -C <config-dir>/data liblogos_rln_module
-tar tzvf rln-keystore.tar.gz   # liblogos_rln_module/<instance>/rln_*: four files, no lock
+  -C <config-dir>/data rln_module
+tar tzvf rln-keystore.tar.gz   # rln_module/<instance>/rln_*: four files, no lock
 base64 < rln-keystore.tar.gz > rln-keystore.b64
 gh secret set RLN_KEYSTORE --repo logos-co/logos-delivery-module < rln-keystore.b64
 rm rln-keystore.tar.gz rln-keystore.b64

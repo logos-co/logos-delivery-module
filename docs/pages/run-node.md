@@ -10,6 +10,11 @@ CLI (`logosctl`, or `logoscore` in the Nix setup). You can run it three ways:
 - [Build with Nix](#without-docker-build-with-nix) — build from source on any
   platform.
 
+The Docker and prebuilt paths install the catalog packages
+`liblogos_rln_module` 0.12.0 and `liblogos_lez_rln_module` 5.1.0; the Nix path
+builds `rln_module`, `rln_lez_module` and
+`membership_allocation_client_module` from this flake.
+
 All three connect the node to the `logos.test` fleet by default. A node that
 other peers should be able to dial also needs its
 [public address](#public-address) set.
@@ -124,13 +129,18 @@ Verify with `logosctl daemon status`; stop with `logosctl daemon stop`.
 `createNode` brings the RLN modules up on the preset's registry; they create
 the node's own wallet and register a membership as soon as its payer account
 holds enough native LEZ — the node pays for itself, nothing is registered by
-hand. `start` passes only once that membership is active.
+hand. `start` passes only once that membership is active. A node that finds
+a membership allocator takes its membership from it; funding is the fallback
+(see [`rln.md`](./rln.md#a-deployment-with-a-membership-allocator)).
 
 With Docker, prefix each command with `docker exec logos-node`.
 
 ```bash
 # The account to fund (state "ready", "network":"testnet")
+# Docker and prebuilt binaries:
 logosctl call liblogos_lez_rln_module wallet_status
+# Nix build:
+logoscore call rln_lez_module wallet_status
 # → {... "payer":"<ACCOUNT>" ...}
 ```
 
@@ -144,7 +154,11 @@ Then wait for the membership (typically 1–3 minutes after the funds land):
 
 ```bash
 printf '%s' '5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977' > /tmp/rln-id.arg
+# Docker and prebuilt binaries:
 logosctl call liblogos_rln_module get_membership_state \
+  logos:testnet:fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971 @/tmp/rln-id.arg
+# Nix build:
+logoscore call rln_module get_membership_state \
   logos:testnet:fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971 @/tmp/rln-id.arg
 # "state":"unknown" with provisioning.step "awaiting_funding" → not funded yet
 # "state":"active"                                            → ready to start
@@ -167,17 +181,17 @@ directly on the host.
 
 Build the `logoscore` CLI (the headless runtime) and the `lgpm` package
 manager from their flakes, then build and install this module's `.lgx`.
-Both of its dependencies are optional. `libp2p_module` hosts external service
-discovery: a node configured for it (`plugin-kad-discovery`) fails to start
-without it, any other node runs without it. An RLN-enabled preset also needs
-`liblogos_rln_module` and `liblogos_lez_rln_module`. This flake
-re-exports their `.lgx`s from its own locked inputs, so they match the revs
-the module was built against:
+`libp2p_module` hosts external service discovery and carries the allocator
+path: a node configured for plugin discovery (`plugin-kad-discovery`) fails to
+start without it, and an RLN-enabled node needs it (`rln_module` depends on
+`rln_lez_module` and `membership_allocation_client_module`, and the client
+depends on `libp2p_module`); a node with neither runs without it. An
+RLN-enabled preset needs all four. This flake re-exports their `.lgx`s from
+its own inputs, so they match the revs the module was built against:
 
 ```bash
 git clone https://github.com/logos-co/logos-delivery-module.git
 cd logos-delivery-module
-git checkout v0.3.3
 
 # Runtime + package manager
 nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
@@ -186,17 +200,18 @@ nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
 # This module, built from the checkout
 nix build '.#lgx' -o delivery-lgx
 
-# libp2p, for external service discovery
+# libp2p, for external service discovery and the allocator path
 nix build '.#libp2p_module-lgx' -o libp2p-lgx
 
-# Its RLN dependency chain
-nix build '.#liblogos_rln_module-lgx' -o rln-lgx
-nix build '.#liblogos_lez_rln_module-lgx' -o lez-rln-lgx
+# The RLN chain: registry provider, allocator client, then the RLN module
+nix build '.#rln_lez_module-lgx' -o rln-lez-lgx
+nix build '.#membership_allocation_client_module-lgx' -o allocation-client-lgx
+nix build '.#rln_module-lgx' -o rln-lgx
 
 # Seed the modules dir with the bundled capability module, then install
 mkdir -p modules
 cp -RL ./logos/modules/. ./modules/
-for pkg in libp2p-lgx lez-rln-lgx rln-lgx delivery-lgx; do
+for pkg in libp2p-lgx rln-lez-lgx allocation-client-lgx rln-lgx delivery-lgx; do
   ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file "$pkg"/*.lgx
 done
 ```
@@ -223,6 +238,7 @@ logoscore -D -m ./modules > logs.txt &
 ```bash
 logoscore load-module delivery_module
 logoscore call delivery_module createNode @conf/logos-test.json
+# fund the node's RLN membership first (see above), then:
 logoscore call delivery_module start
 ```
 
@@ -328,13 +344,14 @@ RLN comes from the preset — there is nothing to configure. `logos.test` runs
 with it on (the LEZ testnet registry), so a `logos.test` node needs the RLN
 modules and an active RLN membership; see [`rln.md`](./rln.md#turning-rln-on).
 `logos.dev` runs with it off, so a `logos.dev` node needs no RLN modules;
-`module load` reports `liblogos_rln_module` as skipped and carries on.
+`module load` reports `rln_module` as skipped and carries on.
 [`networks.md`](./networks.md) tracks each network's RLN state.
 
 On a preset with RLN on, install the RLN modules next to this one before
 `createNode`, or bring-up ends in `Failed`:
 
-- Prebuilt binaries — they are in a separate catalog:
+- Prebuilt binaries — they are in a separate catalog, as
+  `liblogos_rln_module`, the package `delivery_module` 0.3.3 loads:
 
   ```bash
   logosctl catalog add https://github.com/logos-co/logos-rln-modules/releases/download/index/logos-repo.json
@@ -349,7 +366,9 @@ On a preset with RLN on, install the RLN modules next to this one before
   pointing at a catalog that carries the RLN modules.
 
 Follow bring-up with `rlnState`: `Disabled` → `Initializing` → `Ready` |
-`Failed`. See [`rln.md`](./rln.md) for the details.
+`Failed`, and `Stopped` after `stop`. `start` and `stop` return once
+dispatched. See [`rln.md`](./rln.md#turning-rln-on) for the details, and for
+when to call `start` on a node with Mix on.
 
 ### Plugin-hosted discovery
 
@@ -373,7 +392,11 @@ above). Without it `start` fails and the node is stopped. On Windows, where
 
 `LIBP2P_MODULE_CONFIG` (inline JSON or a file path) is optional. Set it only to
 override libp2p's own defaults, for example its listen addresses when other
-nodes must reach it: unset, it listens on an ephemeral loopback port.
+nodes must reach it: unset, it listens on an ephemeral loopback port. Its
+`bootstrapNodes` are merged with the deployment's DHT bootstrap peers on both
+the plugin-discovery path and the RLN allocator path (a peer the deployment
+already names wins), and the node is created with `mountKad` and
+`mountServiceDiscovery` on.
 
 How it works is described in [Architecture](./architecture.md#plugin-hosted-discovery).
 

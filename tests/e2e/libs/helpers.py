@@ -39,9 +39,12 @@ from libs.constants import (
 logger = logging.getLogger(__name__)
 
 MODULE = "delivery_module"
-RLN_MODULE = "liblogos_rln_module"
-LEZ_RLN_MODULE = "liblogos_lez_rln_module"
+RLN_MODULE = "rln_module"
+LEZ_RLN_MODULE = "rln_lez_module"
 LIBP2P_MODULE = "libp2p_module"
+ALLOCATION_CLIENT_MODULE = "membership_allocation_client_module"
+# What a node on an RLN preset needs in LOGOS_MODULES_DIR beside delivery_module.
+RLN_REQUIRED_MODULES = (RLN_MODULE, LEZ_RLN_MODULE, ALLOCATION_CLIENT_MODULE, LIBP2P_MODULE)
 
 SUBSCRIBE_GRACE_S = 0.5
 
@@ -52,7 +55,7 @@ NODE_STARTED_TIMEOUT_S = 30.0
 NODE_STOPPED_TIMEOUT_S = 30.0
 LEZ_SEQUENCER_ENV = "LEZ_RLN_SEQUENCER"
 LEZ_RPC_TIMEOUT_S = 5.0
-# liblogos_rln_module error classes that clear up by themselves, e.g. while the LEZ
+# rln_module error classes that clear up by themselves, e.g. while the LEZ
 # wallet syncs or the valid-root window fills.
 RLN_RETRY_CLASSES = ("not_ready", "transient")
 RLN_PROBE_SIGNAL = "0x" + b"valid-roots-probe".hex()
@@ -411,7 +414,7 @@ def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, time
 
 
 def _rln_call(node: DeliveryNode, method: str, *args: str) -> Any:
-    """Call a liblogos_rln_module method on the node's registry and the RLN
+    """Call an rln_module method on the node's registry and the RLN
     identifier, with the CLI's `str:` prefix on every argument so a digit-only
     timestamp stays a string."""
     texts = [f"str:{arg}" for arg in (node.registry_id, RLN_IDENTIFIER, *args)]
@@ -419,7 +422,7 @@ def _rln_call(node: DeliveryNode, method: str, *args: str) -> Any:
 
 
 def _rln_answer(node: DeliveryNode, method: str, *args: str) -> Optional[dict]:
-    """The value of a liblogos_rln_module result call, or None on an error class in
+    """The value of an rln_module result call, or None on an error class in
     RLN_RETRY_CLASSES. `error` arrives as JSON text, and `value` can too."""
     result = _rln_call(node, method, *args)
     if result.get("success"):

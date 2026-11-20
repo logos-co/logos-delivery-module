@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@ extern "C" {
 #include <logosdelivery_service_discovery.h>
 }
 
+class Libp2pBringUp;
 class Libp2pModule;
 
 /**
@@ -29,12 +31,11 @@ class DeliveryServiceDiscoveryPlugin
 {
 public:
     /**
-     * @param libp2p Borrowed from `modules().libp2p_module`; null without a
-     *        framework context.
-     * @param libp2pConfig JSON object for libp2p_module's createNode (see
-     *        discovery_config.h).
+     * @param bringUp The node's shared libp2p bring-up (libp2p_bring_up.h),
+     *        configured with this plugin's createNode config (see
+     *        discovery_config.h); null without a framework context.
      */
-    DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p, std::string libp2pConfig);
+    explicit DeliveryServiceDiscoveryPlugin(std::shared_ptr<Libp2pBringUp> bringUp);
 
     /// The vtable to hand to logosdelivery_install_service_discovery_plugin.
     const LdServiceDiscoveryPlugin* vtable() const { return &vtable_; }
@@ -51,7 +52,7 @@ public:
 
 private:
     /**
-     * @brief Brings libp2p up, once, on first use.
+     * @brief Brings libp2p up, once, on first use (the shared bring-up).
      *
      * Not done at registration: that runs in createNode on the Qt main thread,
      * where outbound calls are rejected. libp2p's createNode is the only place
@@ -73,11 +74,8 @@ private:
     /// Strips the "service:" prefix libp2p does not expect; other criteria
     /// kinds pass through unchanged.
     static std::string toServiceId(const char* key);
-    Libp2pModule* libp2p_;
-    std::string libp2pConfig_;
-    bool backendReady_;
-    bool nodeCreated_;
-    bool startIssued_; ///< libp2p start succeeded or timed out; never issue it again.
+    std::shared_ptr<Libp2pBringUp> bringUp_;
+    Libp2pModule* libp2p_; ///< The bring-up's client, for the disco verbs.
     std::atomic<int> inFlight_{0}; ///< Entry points executing; read by quiesce.
     LdServiceDiscoveryPlugin vtable_;
 
