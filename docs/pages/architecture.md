@@ -65,6 +65,11 @@ bootstrap peer is handed over. libp2p dials the set inside its `start`, whose
 call deadline is a fixed 10 s; a start that outlasts it carries on and is not
 issued again.
 
+The same libp2p node serves the RLN allocator path, with or without
+`pluginKadDiscovery`: it is always created with `mountServiceDiscovery` and
+`mountKad` on and the deployment's DHT bootstrap peers (the preset's and the
+configuration's `kadBootstrapNodes`) merged with `LIBP2P_MODULE_CONFIG`'s own.
+
 Set `LD_DISCO_TRACE` to a file path to log every call across the plugin
-boundary; logos-core discards a module's stderr, so that file is the only view
-into it.
+boundary, the libp2p bring-up lines and the RLN allocator notices;
+logos-core discards a module's stderr, so that file is the only view into it.

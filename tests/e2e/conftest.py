@@ -40,6 +40,7 @@ from libs.helpers import (
     LIBP2P_MODULE,
     RLN_MODULE,
     RLN_PRESETS_ENV,
+    RLN_REQUIRED_MODULES,
     RLN_PRESETS_FILE,
     DeliveryNode,
     current_epoch,
@@ -166,9 +167,9 @@ def _e2e_env() -> tuple[str, Path]:
 
 @pytest.fixture(scope="session")
 def _rln_modules(_e2e_env: tuple[str, Path]) -> None:
-    """Fails unless LOGOS_MODULES_DIR also holds the RLN modules."""
+    """Fails unless LOGOS_MODULES_DIR also holds the RLN modules and what they depend on."""
     _, modules_dir = _e2e_env
-    for module in (RLN_MODULE, LEZ_RLN_MODULE):
+    for module in RLN_REQUIRED_MODULES:
         if not (modules_dir / module / "manifest.json").is_file():
             pytest.fail(f"LOGOS_MODULES_DIR={modules_dir} doesn't contain {module}/manifest.json")
 

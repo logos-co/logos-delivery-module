@@ -1,6 +1,7 @@
 // Stub of the generated libp2p_module client for unit tests: the subset
-// service_discovery_plugin.cpp calls, as no-ops except createNode and start
-// (see the knobs below). Keep signatures in sync with the generated header.
+// libp2p_bring_up.cpp and service_discovery_plugin.cpp call, as no-ops except
+// where a knob below says otherwise. Keep signatures in sync with the
+// generated header.
 
 #pragma once
 #ifndef __libp2p_module_api_stub__
@@ -36,6 +37,9 @@ public:
     static inline bool lookupThrows = false;
     /// The config the last createNode was given.
     static inline std::string lastCreateNodeConfig;
+    /// When true, getNodeInfo answers success with a peer id -- a node that
+    /// exists and runs, as after a module reload.
+    static inline bool nodeInfoSucceeds = false;
 
     static void reset()
     {
@@ -47,6 +51,7 @@ public:
         lookupRecords = nullptr;
         lookupThrows = false;
         lastCreateNodeConfig.clear();
+        nodeInfoSucceeds = false;
     }
 
     StdLogosResult createNode(const std::string& config, logos::CallError* err = nullptr, int = 0)
@@ -72,7 +77,9 @@ public:
         return StdLogosResult{bringUpSucceeds, {}, ""};
     }
     StdLogosResult getNodeInfo(const std::string&, logos::CallError* = nullptr, int = 0)
-    { return StdLogosResult{}; }
+    {
+        return nodeInfoSucceeds ? StdLogosResult{true, "12D3KooWExisting", ""} : StdLogosResult{};
+    }
 
     StdLogosResult discoStart(logos::CallError* = nullptr, int = 0) { return StdLogosResult{}; }
     StdLogosResult discoStop(logos::CallError* = nullptr, int = 0) { return StdLogosResult{}; }

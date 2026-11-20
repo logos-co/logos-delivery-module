@@ -3,9 +3,11 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <deque>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -18,7 +20,9 @@
 #include "base64.h"
 
 #include "api_call_handler.h"
+#include "disco_trace.h"
 #include "discovery_config.h"
+#include "libp2p_bring_up.h"
 #include "service_discovery_plugin.h"
 #include "rln_bridge.h"
 #include "rln_presets.h"
@@ -138,51 +142,48 @@ void unregisterMixRlnBridge(RlnBridge* bridge)
 void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
                                         const char* errMsg, void* userData)
 {
-    auto* impl = static_cast<DeliveryModuleImpl*>(userData);
-    if (!impl) {
+    if (errCode == NIMFFI_RET_STALE_WARN) {
+        // A progress tick, not the reply: the ticket is freed on the reply.
+        return;
+    }
+    auto* ticket = static_cast<StartTicket*>(userData);
+    if (!ticket || !ticket->impl) {
         fprintf(stderr, "DeliveryModuleImpl::start_callback: Invalid userData\n");
         return;
     }
+    DeliveryModuleImpl* impl = ticket->impl;
     impl->nodeStarted(errCode == RET_OK, replyText(errCode, reply, errMsg),
                       currentTimestampNs());
-    if (errCode != RET_OK) {
-        impl->stopAfterFailedStart();
-    }
+    impl->startFinished(ticket, errCode != RET_OK);
 }
 
-void DeliveryModuleImpl::stopAfterFailedStart()
+void DeliveryModuleImpl::startFinished(StartTicket* ticket, bool failed)
 {
-    std::lock_guard<std::mutex> lock(failedStartStopMutex);
-    if (!failedStartStopArmed) {
-        return;
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    const uint64_t generation = ticket->generation;
+    // Only the terminal reply gets here (start_callback drops progress ticks).
+    const auto ticketIt = std::find_if(
+        startTickets.begin(), startTickets.end(),
+        [ticket](const std::unique_ptr<StartTicket>& held) { return held.get() == ticket; });
+    if (ticketIt != startTickets.end()) {
+        startTickets.erase(ticketIt);
     }
-    failedStartStopArmed = false;
-    // The same two halves as stop(): the node, then the RLN backend this
-    // module started for it.
-    failedStartStopThread = std::thread([this] {
-        if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
-            fprintf(stderr, "DeliveryModuleImpl: failed to stop the node after a failed start\n");
-            return;
+    if (failed) {
+        // The same two halves as stop(): the node, then the RLN backend this
+        // module started for it. On the worker, as the library's thread
+        // refuses re-entrant calls. start() is refused until it has run.
+        if (postLifecycleLocked(LifecycleKind::StopFailedStart, generation) != 0) {
+            ++failedStartCleanups;
         }
-        stopRlnBackend();
-    });
-}
-
-void DeliveryModuleImpl::joinFailedStartStop()
-{
-    {
-        std::lock_guard<std::mutex> lock(failedStartStopMutex);
-        failedStartStopArmed = false;
-    }
-    // Disarmed under the lock, so no thread can be assigned after this point.
-    if (failedStartStopThread.joinable()) {
-        failedStartStopThread.join();
     }
 }
 
 void DeliveryModuleImpl::stop_callback(int errCode, const char* const* reply,
                                        const char* errMsg, void* userData)
 {
+    if (errCode == NIMFFI_RET_STALE_WARN) {
+        return; // a progress tick, not the reply
+    }
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
         fprintf(stderr, "DeliveryModuleImpl::stop_callback: Invalid userData\n");
@@ -321,13 +322,16 @@ std::string DeliveryModuleImpl::bringUpRlnBridge()
         // dereference an unset pointer here.
         return "module context not ready";
     }
-    rlnBridge->init(&modules().liblogos_rln_module);
+    rlnBridge->init(&modules().rln_module);
     return rlnBridge->enable();
 }
 
 StdLogosResult DeliveryModuleImpl::rlnBridgeEnable()
 {
     const std::string err = bringUpRlnBridge();
+    // Also retries a failed bring-up. Posted after the enable above, so the
+    // worker's own enable does not run alongside it.
+    (void)postRlnUp();
     if (!err.empty()) {
         return {false, {}, err};
     }
@@ -378,17 +382,14 @@ void DeliveryModuleImpl::abortRln()
         std::lock_guard<std::mutex> lock(rlnStateMutex);
         rlnStateConfig = DeliveryRlnConfig{};
     }
+    clearRlnMembershipResults();
 }
 
 void DeliveryModuleImpl::releaseNode()
 {
-    // A stop issued after a failed start holds the context handle, and joins
-    // the bring-up thread itself: finish it first, so that join is not racing
-    // the one below.
-    joinFailedStartStop();
-    // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
-    // run while it is still in flight. A no-op when no thread was started.
-    joinRlnBringUp();
+    // Joins the worker first: it uses the context handle, rlnBridge and
+    // rlnConfig. It runs what was already posted but begins no bring-up.
+    stopLifecycleWorker();
 
     // Before ctx_destroy on purpose: clearing the RLN surface fails all
     // in-flight RLN requests, so no new RLN callback is dispatched into this
@@ -411,6 +412,11 @@ void DeliveryModuleImpl::releaseNode()
     // discovery worker, the only caller of the plugin, so no new call can
     // arrive once it returns.
     releaseServiceDiscoveryPlugin();
+    libp2pBringUp.reset();
+
+    // The node is gone, so no start reply can arrive for a ticket any more.
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    startTickets.clear();
 }
 
 StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
@@ -418,7 +424,7 @@ StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
     const bool rlnWasInstalled = rlnConfig->enabled;
     releaseNode();
     if (rlnWasInstalled) {
-        setRlnState("Disabled", {});
+        setRlnState(RlnState::Disabled, {});
     }
     return {false, {}, std::move(reason)};
 }
@@ -534,6 +540,21 @@ static std::string toLowerCopy(std::string s)
     return s;
 }
 
+// Without leading and trailing whitespace, as the library strips the values
+// it matches (entryLayer, mode).
+static std::string trimCopy(std::string s)
+{
+    const auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
+    s.erase(s.begin(), std::find_if_not(s.begin(), s.end(), isSpace));
+    s.erase(std::find_if_not(s.rbegin(), s.rend(), isSpace).base(), s.end());
+    return s;
+}
+
+// Whether the config names the kernel entry: `entryLayer` (key matched
+// without regard to case), its value trimmed and lower-cased as the library
+// reads it.
+static bool isKernelEntry(const nlohmann::json& cfgObj);
+
 // Case-insensitive key lookup, matching keys the same way as the upstream
 // conf parser. Returns the key as spelled in the config.
 static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
@@ -548,8 +569,8 @@ static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
     return std::nullopt;
 }
 
-// True when the config is the legacy flat shape: any top-level key besides the
-// ones the layered parser consumes marks a bare WakuNodeConf field.
+// True when the config is a bare WakuNodeConf: any top-level key besides the
+// ones the layered parser consumes is a WakuNodeConf field.
 static bool isFlatShape(const nlohmann::json& cfgObj)
 {
     for (const auto& entry : cfgObj.items()) {
@@ -563,63 +584,153 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
     return false;
 }
 
-// Locates the object that carries kernel/messaging settings for this config
-// shape: kernelConf when present, messagingOverrides for the layered shapes,
-// top level for the legacy flat shape.
-static nlohmann::json* configTarget(nlohmann::json& cfgObj)
+static bool isKernelEntry(const nlohmann::json& cfgObj)
 {
     const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
-    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
-        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
-        return &cfgObj[*kernelConfKey];
+    return entryLayerKey && cfgObj[*entryLayerKey].is_string()
+        && toLowerCopy(trimCopy(cfgObj[*entryLayerKey].get<std::string>())) == "kernel";
+}
+
+RlnMode configMode(const nlohmann::json& cfg)
+{
+    if (!cfg.is_object()) {
+        return RlnMode::Core;
     }
-    if (kernelEntry) {
-        return nullptr;
+    // The library reads no mode on the kernel entry.
+    if (isKernelEntry(cfg)) {
+        return RlnMode::Core;
     }
-    if (isFlatShape(cfgObj)) {
-        return &cfgObj;
+    const auto modeKey = findKey(cfg, {"mode"});
+    if (!modeKey || !cfg[*modeKey].is_string()) {
+        return RlnMode::Core;
     }
-    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
-    if (!overridesKey) {
-        return nullptr;
+    const std::string mode = toLowerCopy(trimCopy(cfg[*modeKey].get<std::string>()));
+    return mode == "edge" ? RlnMode::Edge : RlnMode::Core;
+}
+
+// Whether `target` turns Mix on, as logos-delivery v0.40.0 reads it:
+// `mix: true` (with `mixKey`) or an anonymityLevel of Preferred / Required
+// (with `level`). With logos-messaging/logos-delivery#4780 an absent level
+// turns Mix on too.
+static bool mixIsOn(const nlohmann::json& target, bool mixKey, bool level)
+{
+    if (!target.is_object()) {
+        return false;
     }
-    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
+    if (mixKey) {
+        if (const auto key = findKey(target, {"mix"});
+            key && target[*key].is_boolean() && target[*key].get<bool>()) {
+            return true;
+        }
+    }
+    if (level) {
+        if (const auto key = findKey(target, {"anonymitylevel", "anonymity-level"});
+            key && target[*key].is_string()) {
+            const std::string value = toLowerCopy(target[*key].get<std::string>());
+            return value == "preferred" || value == "required";
+        }
+    }
+    return false;
+}
+
+// Why the caller's mix-rln-registry-id is not a registry the backend serves
+// at Mix's epoch size and gap; empty when it is.
+static std::string callerMixRegistryError(const nlohmann::json& value, const RlnPresetEntry& preset)
+{
+    const std::string asked = value.is_string() ? value.get<std::string>() : value.dump();
+    if (preset.hasMix()) {
+        if (!value.is_string() || asked != preset.mixRegistryId) {
+            return "mix-rln-registry-id " + asked + " is not the preset's mix registry "
+                   + preset.mixRegistryId;
+        }
+        return {};
+    }
+    if (!value.is_string() || asked != preset.registryId) {
+        return "mix-rln-registry-id " + asked
+               + " is not a registry of the preset, which names no mix registry and"
+                 " whose relay registry is " + preset.registryId;
+    }
+    if (preset.epochSizeSec != kMixEpochSizeSec || preset.maxEpochGap != kMixMaxEpochGap) {
+        return "mix-rln-registry-id names the preset's relay registry, which Mix can"
+               " use only at epoch-size-sec " + std::to_string(kMixEpochSizeSec)
+               + " and max-epoch-gap " + std::to_string(kMixMaxEpochGap)
+               + "; the preset has epoch-size-sec " + std::to_string(preset.epochSizeSec)
+               + " and max-epoch-gap "
+               + (preset.maxEpochGap == 0 ? std::string("unset")
+                                          : std::to_string(preset.maxEpochGap));
+    }
+    return {};
 }
 
 // Defaults the node's storage directory to the host's per-instance path, so
 // side-by-side instances don't share upstream's cwd-relative "./data". Also
 // carries the preset's validation switch into the config as
 // rln-disable-validation: deployment policy, so it overrides any client key.
-// Each setting goes where the config shape accepts it: kernelConf when
-// present, messagingOverrides (created if needed) for the layered shapes,
-// top level for the legacy flat shape.
+// With a mix preset, sets each mix-rln-* key the caller left unset where the
+// target turns Mix on (mixIsOn). Each setting goes where the config shape
+// accepts it: kernelConf when present, messagingOverrides (created if needed)
+// for the layered shapes, top level for a bare WakuNodeConf. A
+// mix-rln-registry-id the caller wrote, in any of those objects, must pass
+// callerMixRegistryError. nullopt on failure, with the createNode error in
+// `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      bool disableRlnValidation)
+                                                      const RlnPresetEntry& preset,
+                                                      std::string& error)
 {
+    error.clear();
     nlohmann::json cfgObj;
     try {
         cfgObj = nlohmann::json::parse(cfg);
     } catch (const nlohmann::json::parse_error&) {
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
     if (!cfgObj.is_object()) {
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
-    if (!persistencePath.empty() || disableRlnValidation) {
+    // Checked only when this module starts the backend: a host-managed one
+    // serves registries the preset does not describe.
+    if (preset.enabled && preset.manageBackend) {
+        // Every object the library reads node keys from, whichever exist, and
+        // every spelling of the key findKey's lower-casing matches.
+        std::vector<const nlohmann::json*> layers{&cfgObj};
+        for (const char* layer : {"kernelconf", "messagingoverrides"}) {
+            if (const auto layerKey = findKey(cfgObj, {layer});
+                layerKey && cfgObj[*layerKey].is_object()) {
+                layers.push_back(&cfgObj[*layerKey]);
+            }
+        }
+        for (const nlohmann::json* layer : layers) {
+            for (const auto& item : layer->items()) {
+                const std::string key = toLowerCopy(item.key());
+                if (key != "mix-rln-registry-id" && key != "mixrlnregistryid") {
+                    continue;
+                }
+                error = callerMixRegistryError(item.value(), preset);
+                if (!error.empty()) {
+                    return std::nullopt;
+                }
+            }
+        }
+    }
+
+    const bool disableRlnValidation = preset.enabled && !preset.enableValidation;
+    const bool mixRegistry = preset.enabled && preset.hasMix();
+    if (!persistencePath.empty() || disableRlnValidation || mixRegistry) {
         nlohmann::json* target = &cfgObj;
-        const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-        const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-            && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
+        bool mixKey = true;
+        bool level = true;
+        const bool kernelEntry = isKernelEntry(cfgObj);
         if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
             kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
             target = &cfgObj[*kernelConfKey];
+            level = false;
         } else if (kernelEntry) {
             // Kernel entry without a kernelConf object: leave the config
             // untouched for the parser to reject.
@@ -631,6 +742,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                 overridesKey = "messagingOverrides";
             }
             target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
+            mixKey = false;
         }
         if (target && !persistencePath.empty()
             && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
@@ -638,6 +750,22 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         }
         if (target && disableRlnValidation) {
             (*target)["rln-disable-validation"] = true;
+        }
+        if (target && mixRegistry) {
+            const auto callerSet = [&](const char* dashed, const char* joined) {
+                return findKey(*target, {dashed, joined}).has_value();
+            };
+            if (mixIsOn(*target, mixKey, level)) {
+                if (!callerSet("mix-rln-registry-id", "mixrlnregistryid")) {
+                    (*target)["mix-rln-registry-id"] = preset.mixRegistryId;
+                }
+                if (!callerSet("mix-rln-identifier-hex", "mixrlnidentifierhex")) {
+                    (*target)["mix-rln-identifier-hex"] = preset.mixRlnIdentifier;
+                }
+                if (!callerSet("mix-rln-metadata-topic", "mixrlnmetadatatopic")) {
+                    (*target)["mix-rln-metadata-topic"] = preset.mixMetadataTopic;
+                }
+            }
         }
     }
 
@@ -657,12 +785,14 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
     std::string presetName;
+    RlnMode rlnMode = RlnMode::Core;
     {
         nlohmann::json cfgObj = nlohmann::json::parse(cfg, nullptr, /*allow_exceptions=*/false);
         if (cfgObj.is_object()) {
             if (auto k = findKey(cfgObj, {"preset"}); k && cfgObj[*k].is_string()) {
                 presetName = cfgObj[*k].get<std::string>();
             }
+            rlnMode = configMode(cfgObj);
         }
     }
 
@@ -670,32 +800,31 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // a deployment this node cannot reproduce, and coming up without RLN
     // would look like success.
     std::string presetError;
-    const RlnPresetEntry rlnPreset = resolveRlnPreset(presetName, presetError);
+    const RlnPresetEntry namedPreset = resolveRlnPreset(presetName, presetError);
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
+    // Everything below sees the preset resolved for this node's mode.
+    const RlnPresetEntry rlnPreset = namedPreset.forMode(rlnMode);
 
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(),
-                                               rlnPreset.enabled && !rlnPreset.enableValidation);
+    std::string cfgError;
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset, cfgError);
     if (!cfgWithDefaults) {
-        return {false, {}, "Invalid JSON config"};
+        return {false, {}, cfgError};
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
-    joinRlnBringUp();
-    rlnBridge->init(&modules().liblogos_rln_module);
+    rlnBridge->init(&modules().rln_module);
 
     if (rlnPreset.enabled) {
-        DeliveryRlnConfig fromPreset;
-        fromPreset.manageBackend = rlnPreset.manageBackend;
-        fromPreset.registryId = rlnPreset.registryId;
-        fromPreset.rlnIdentifier = rlnPreset.rlnIdentifier;
-        fromPreset.epochSizeSec = rlnPreset.epochSizeSec;
-        fromPreset.maxEpochGap = rlnPreset.maxEpochGap;
-        if (std::string failure = installRlnPlugin(fromPreset); !failure.empty()) {
+        {
+            std::lock_guard<std::mutex> lock(rlnStateMutex);
+            rlnStateMode = rlnMode;
+        }
+        if (std::string failure = installRlnPlugin(rlnPreset); !failure.empty()) {
             return {false, {}, failure};
         }
-        setRlnState("Initializing", {});
+        setRlnState(RlnState::Initializing, {});
     }
 
     // logosdelivery_ctx_create encodes the config and turns the context address
@@ -817,6 +946,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // Fail only when the node asked for a plugin and we cannot provide it. An
     // unanswered or unreadable reply installs none: a node that did ask then
     // fails its start, which logos-delivery enforces without a plugin.
+    bool requirementsKnown = false;
     if (!result.success) {
         fprintf(stderr, "DeliveryModuleImpl: no discovery requirements, no plugin installed: %s\n",
                 result.error.c_str());
@@ -825,15 +955,40 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
             ? result.value.get<std::string>()
             : result.value.dump();
         failure = delivery_discovery::fromRequirements(
-            requirements, delivery_discovery::libp2pEnvConfig(), discovery);
-        if (!failure.empty() && !discovery.requested) {
+            requirements, delivery_discovery::libp2pEnvConfig(), discovery,
+            rlnPreset.hasAllocator() ? rlnPreset.allocatorBootstrapNodes : std::vector<std::string>{});
+        requirementsKnown = failure.empty() || discovery.requested;
+        if (!requirementsKnown) {
             fprintf(stderr, "DeliveryModuleImpl: discovery requirements not understood, no plugin installed: %s\n",
                     failure.c_str());
             failure.clear();
         }
     }
+    // The allocator path does not depend on the node's answer: without one
+    // its libp2p node still mounts discovery and joins the preset's DHT peers.
+    if (!requirementsKnown && rlnPreset.hasAllocator()) {
+        const std::string bad = delivery_discovery::withoutRequirements(
+            delivery_discovery::libp2pEnvConfig(), discovery, rlnPreset.allocatorBootstrapNodes);
+        if (!bad.empty()) {
+            fprintf(stderr, "DeliveryModuleImpl: no libp2p config for the allocator path: %s\n",
+                    bad.c_str());
+        }
+    }
+    // libp2p is not contacted here: outbound calls fail on the Qt main thread.
+    // Without a framework (unit tests) there is no modules(); pass null. One
+    // libp2p node, mounted for service discovery and DHT-bootstrapped, serves
+    // plugin discovery and the allocator path.
+    {
+        Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
+        libp2pBringUp = std::make_shared<Libp2pBringUp>(
+            libp2p, discovery.libp2pConfig,
+            [](const std::string& line) {
+                fprintf(stderr, "DeliveryModuleImpl: %s\n", line.c_str());
+                disco_trace::traceLine(line);
+            });
+    }
     if (failure.empty() && discovery.enabled) {
-        failure = installServiceDiscoveryPlugin(discovery.libp2pConfig);
+        failure = installServiceDiscoveryPlugin();
     }
     if (!failure.empty()) {
         // A node configured for plugin discovery cannot start without a
@@ -842,30 +997,376 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return releaseAndFail("service discovery setup failed: " + failure);
     }
 
+    // Past every failure exit: from here on releaseNode() has a worker to join.
+    startLifecycleWorker();
     if (rlnPreset.enabled) {
-        rlnBringUpThread = std::thread([this] {
-            const std::string failure = startRlnBackend();
-            if (failure.empty()) {
-                setRlnState("Ready", {});
-            } else {
-                setRlnState("Failed", failure);
-            }
-        });
+        (void)postRlnUp();
     }
 
     return {true, {}};
 }
 
-std::string DeliveryModuleImpl::installServiceDiscoveryPlugin(const std::string& libp2pConfig)
+void DeliveryModuleImpl::startLifecycleWorker()
+{
+    if (lifecycleThread.joinable()) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        lifecycleQueue.clear();
+        lifecycleQuit = false;
+        lifecycleUpInFlight = false;
+        startIssued = 0;
+        startGeneration = 0;
+        failedStartCleanups = 0;
+        lifecycleAccepting = true;
+    }
+    lifecycleThread = std::thread([this] { runLifecycleWorker(); });
+}
+
+void DeliveryModuleImpl::stopLifecycleWorker()
+{
+    {
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        lifecycleAccepting = false;
+        lifecycleQuit = true;
+    }
+    lifecycleCv.notify_all();
+    if (lifecycleThread.joinable()) {
+        lifecycleThread.join();
+    }
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    lifecycleQueue.clear();
+    lifecycleQuit = false;
+    lifecycleUpInFlight = false;
+    startIssued = 0;
+    startGeneration = 0;
+    failedStartCleanups = 0;
+    rlnBackendRunning = false;
+    rlnReady = false;
+    membershipWatch = MembershipWatch{};
+}
+
+uint64_t DeliveryModuleImpl::postLifecycleLocked(LifecycleKind kind, uint64_t generation)
+{
+    if (!lifecycleAccepting) {
+        return 0;
+    }
+    if (kind != LifecycleKind::StopFailedStart) {
+        // A request equal to the last one posted adds nothing; an "up" is also
+        // satisfied by a bring-up still in flight when nothing follows it.
+        const bool sameAsLast = lifecycleQueue.empty()
+            ? (kind == LifecycleKind::RlnUp && lifecycleUpInFlight)
+            : lifecycleQueue.back().kind == kind;
+        if (sameAsLast) {
+            return 0;
+        }
+    }
+    const uint64_t id = ++lifecycleNextId;
+    lifecycleQueue.push_back(LifecycleRequest{kind, id, generation});
+    lifecycleCv.notify_one();
+    return id;
+}
+
+uint64_t DeliveryModuleImpl::postRlnUp()
+{
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    return postLifecycleLocked(LifecycleKind::RlnUp, 0);
+}
+
+void DeliveryModuleImpl::postRlnDown()
+{
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    (void)postLifecycleLocked(LifecycleKind::RlnDown, 0);
+}
+
+void DeliveryModuleImpl::runLifecycleWorker()
+{
+    for (;;) {
+        LifecycleRequest request{};
+        bool quitting = false;
+        bool readBackTick = false;
+        {
+            std::unique_lock<std::mutex> lock(lifecycleMutex);
+            const auto woken = [this] { return lifecycleQuit || !lifecycleQueue.empty(); };
+            if (membershipWatchDue()) {
+                // The same wait with a timeout: a request or quit still wakes
+                // it at once, and only a full quiet interval is a tick.
+                readBackTick = !lifecycleCv.wait_for(lock, membershipWatch.interval, woken);
+            } else {
+                lifecycleCv.wait(lock, woken);
+            }
+        }
+        if (readBackTick) {
+            // Off the mutex. A request or quit posted meanwhile waits for the
+            // read in flight (bounded by its timeout) and is taken next.
+            readRlnMemberships();
+            continue;
+        }
+        {
+            std::unique_lock<std::mutex> lock(lifecycleMutex);
+            if (lifecycleQueue.empty()) {
+                if (lifecycleQuit) {
+                    return; // quit, and everything posted before it is done
+                }
+                // start() took its request back between the wait and here.
+                continue;
+            }
+            request = lifecycleQueue.front();
+            lifecycleQueue.pop_front();
+            quitting = lifecycleQuit;
+            if (request.kind == LifecycleKind::StopFailedStart
+                && request.generation < startGeneration) {
+                // A later accepted start owns the node: this failure's
+                // cleanup is stale.
+                --failedStartCleanups;
+                continue;
+            }
+            lifecycleUpInFlight = request.kind == LifecycleKind::RlnUp && !quitting;
+        }
+
+        switch (request.kind) {
+        case LifecycleKind::RlnUp:
+            if (!quitting) {
+                bringRlnUp();
+            }
+            break;
+        case LifecycleKind::RlnDown:
+            stopRlnBackend();
+            break;
+        case LifecycleKind::StopFailedStart:
+            if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
+                fprintf(stderr, "DeliveryModuleImpl: failed to stop the node after a failed start\n");
+            }
+            // Whether or not the node stop was taken: a failed start ends in
+            // Stopped.
+            stopRlnBackend();
+            {
+                // Only now may start() be accepted again.
+                std::lock_guard<std::mutex> lock(lifecycleMutex);
+                --failedStartCleanups;
+            }
+            break;
+        }
+    }
+}
+
+void DeliveryModuleImpl::bringRlnUp()
+{
+    const bool attempt = rlnConfig->enabled && !rlnReady;
+    std::string failure;
+    if (attempt) {
+        resetMembershipReadBack();
+        setRlnState(RlnState::Initializing, {});
+        failure = startRlnBackend();
+        rlnReady = failure.empty();
+    }
+    {
+        // Before the verdict is published: a start() or rlnBridgeEnable()
+        // issued in reaction to it must be queued as a new attempt, not taken
+        // as satisfied by this one.
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        lifecycleUpInFlight = false;
+    }
+    if (!attempt) {
+        return;
+    }
+    if (rlnReady) {
+        setRlnState(RlnState::Ready, {});
+        startMembershipWatch();
+    } else {
+        setRlnState(RlnState::Failed, failure);
+    }
+}
+
+void DeliveryModuleImpl::resetMembershipReadBack()
+{
+    membershipWatch = MembershipWatch{};
+    clearRlnMembershipResults();
+}
+
+void DeliveryModuleImpl::startMembershipWatch()
+{
+    membershipWatch = MembershipWatch{};
+    membershipWatch.running = true;
+    membershipWatch.deadline = std::chrono::steady_clock::now() + kMembershipReadWindow;
+    membershipWatch.relayDone = !rlnConfig->needsRelayMembership();
+    // A shared registry has one membership, read with the relay's.
+    membershipWatch.mixDone = !rlnConfig->hasMix() || rlnConfig->sharesRegistry();
+}
+
+bool DeliveryModuleImpl::membershipWatchDue()
+{
+    if (!membershipWatch.running) {
+        return false;
+    }
+    if ((membershipWatch.relayDone && membershipWatch.mixDone)
+        || std::chrono::steady_clock::now() >= membershipWatch.deadline) {
+        membershipWatch.running = false;
+        return false;
+    }
+    return true;
+}
+
+bool DeliveryModuleImpl::lifecycleWorkPending()
+{
+    std::lock_guard<std::mutex> lock(lifecycleMutex);
+    return lifecycleQuit || !lifecycleQueue.empty();
+}
+
+void DeliveryModuleImpl::clearRlnMembershipResults()
+{
+    std::lock_guard<std::mutex> lock(rlnStateMutex);
+    rlnStateMembership = nullptr;
+    rlnStateMixMembership = nullptr;
+    rlnStateGrantedRate.reset();
+    rlnStateGrantedMixRate.reset();
+}
+
+RlnMembershipReading DeliveryModuleImpl::readRlnMembership(const std::string& registryId,
+                                                           const std::string& rlnIdentifier,
+                                                           std::string& lastFailure,
+                                                           bool& unanswered)
+{
+    nlohmann::json reply;
+    const std::string failure =
+        rlnBridge->readMembershipState(registryId, rlnIdentifier, reply, &unanswered);
+    if (failure.empty()) {
+        lastFailure.clear();
+        membershipWatch.interval = kMembershipReadInterval;
+        return readRlnMembershipReply(reply);
+    }
+    if (unanswered) {
+        membershipWatch.interval =
+            std::min(membershipWatch.interval * 2,
+                     std::chrono::seconds(kMembershipReadIntervalMax));
+    }
+    if (failure != lastFailure) {
+        fprintf(stderr, "DeliveryModuleImpl: registry %s membership not read (%s)\n",
+                registryId.c_str(), failure.c_str());
+        lastFailure = failure;
+    }
+    return {};
+}
+
+void DeliveryModuleImpl::readRlnMemberships()
+{
+    // The worker's reads of rlnConfig need no lock (see rlnConfigMutex).
+    const DeliveryRlnConfig& cfg = *rlnConfig;
+    const bool shared = cfg.sharesRegistry();
+
+    bool relayUnanswered = false;
+    if (!membershipWatch.relayDone) {
+        const RlnMembershipReading reading =
+            readRlnMembership(cfg.registryId, cfg.rlnIdentifier,
+                              membershipWatch.relayLastFailure, relayUnanswered);
+        if (!reading.membership.is_null()) {
+            {
+                std::lock_guard<std::mutex> lock(rlnStateMutex);
+                rlnStateMembership = reading.membership;
+                rlnStateGrantedRate = reading.grantedRate;
+                if (shared) {
+                    rlnStateMixMembership = reading.membership;
+                    rlnStateGrantedMixRate = reading.grantedRate;
+                }
+            }
+            if (reading.active) {
+                membershipWatch.relayDone = true;
+                membershipWatch.relayGranted = reading.grantedRate;
+            }
+        }
+    }
+    // One read timeout per round at most: the mix read is skipped after an
+    // unanswered relay read or when work is queued.
+    if (!membershipWatch.mixDone && !relayUnanswered && !lifecycleWorkPending()) {
+        bool mixUnanswered = false;
+        const RlnMembershipReading reading =
+            readRlnMembership(cfg.mixRegistryId, cfg.mixRlnIdentifier,
+                              membershipWatch.mixLastFailure, mixUnanswered);
+        if (!reading.membership.is_null()) {
+            {
+                std::lock_guard<std::mutex> lock(rlnStateMutex);
+                rlnStateMixMembership = reading.membership;
+                rlnStateGrantedMixRate = reading.grantedRate;
+            }
+            if (reading.active) {
+                membershipWatch.mixDone = true;
+                membershipWatch.mixGranted = reading.grantedRate;
+            }
+        }
+    }
+
+    // Still Ready: only the worker leaves it, and it is here.
+    const std::string capped = rlnCappedGrantMessage(
+        shared ? cfg.sharedRateLimit() : cfg.rateLimit, membershipWatch.relayGranted,
+        cfg.mixRateLimit, membershipWatch.mixGranted, shared);
+    if (!capped.empty()) {
+        setRlnState(RlnState::Ready, capped);
+    }
+}
+
+RlnMembershipReading readRlnMembershipReply(const nlohmann::json& reply)
+{
+    RlnMembershipReading reading;
+    if (!reply.is_object()) {
+        return reading;
+    }
+    const auto state = reply.find("state");
+    if (state == reply.end() || !state->is_string()) {
+        return reading;
+    }
+    reading.membership = nlohmann::json::object();
+    reading.membership["state"] = state->get<std::string>();
+    if (const auto provisioning = reply.find("provisioning");
+        provisioning != reply.end() && provisioning->is_object()) {
+        const auto step = provisioning->find("step");
+        if (step != provisioning->end() && step->is_string()) {
+            reading.membership["step"] = step->get<std::string>();
+        }
+    }
+    reading.active = state->get<std::string>() == "active";
+    if (reading.active) {
+        const auto rate = reply.find("rate_limit");
+        if (rate != reply.end() && rate->is_number_unsigned()) {
+            reading.grantedRate = rate->get<uint64_t>();
+        }
+    }
+    return reading;
+}
+
+std::string rlnCappedGrantMessage(uint64_t askedRate, std::optional<uint64_t> grantedRate,
+                                  uint64_t askedMixRate, std::optional<uint64_t> grantedMixRate,
+                                  bool shared)
+{
+    const bool relayDiffers = askedRate != 0 && grantedRate && *grantedRate != askedRate;
+    const bool mixDiffers =
+        !shared && askedMixRate != 0 && grantedMixRate && *grantedMixRate != askedMixRate;
+    const std::string relayName = shared ? "relay and mix membership" : "relay membership";
+    if (relayDiffers && mixDiffers) {
+        return relayName + " granted at rate " + std::to_string(*grantedRate)
+               + ", mix membership at rate " + std::to_string(*grantedMixRate)
+               + "; the preset asks " + std::to_string(askedRate) + " and "
+               + std::to_string(askedMixRate);
+    }
+    if (relayDiffers) {
+        return relayName + " granted at rate " + std::to_string(*grantedRate)
+               + "; the preset asks " + std::to_string(askedRate);
+    }
+    if (mixDiffers) {
+        return "mix membership granted at rate " + std::to_string(*grantedMixRate)
+               + "; the preset asks " + std::to_string(askedMixRate);
+    }
+    return {};
+}
+
+std::string DeliveryModuleImpl::installServiceDiscoveryPlugin()
 {
     if (!deliveryCtx) {
         return "context not initialized";
     }
 
-    // libp2p is not contacted here: outbound calls fail on the Qt main thread.
-    // Without a framework (unit tests) there is no modules(); pass null.
-    Libp2pModule* libp2p = isContextReady() ? &modules().libp2p_module : nullptr;
-    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2p, libp2pConfig);
+    // The shared bring-up was configured with the libp2p config at createNode.
+    discoPlugin = std::make_unique<DeliveryServiceDiscoveryPlugin>(libp2pBringUp);
 
     // The vtable is borrowed for the duration of the call and copied by the
     // node, but discoPlugin owns the object every entry point dispatches on,
@@ -896,17 +1397,52 @@ StdLogosResult DeliveryModuleImpl::start()
         return {false, {}, "Context not initialized"};
     }
 
-    joinFailedStartStop();
+    // A node started again needs RLN up again. Posted before the dispatch, so
+    // a failed start's cleanup queues after it.
+    StartTicket* ticket = nullptr;
+    uint64_t upRequest = 0;
     {
-        std::lock_guard<std::mutex> lock(failedStartStopMutex);
-        failedStartStopArmed = true;
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        if (failedStartCleanups > 0) {
+            // Starting now would race the stop of the half-started node, or
+            // start a node that was never stopped.
+            return {false, {},
+                    "the previous failed start is still being cleaned up; retry once "
+                    "rlnState/nodeStopped settles"};
+        }
+        startTickets.push_back(
+            std::make_unique<StartTicket>(StartTicket{this, ++startIssued}));
+        ticket = startTickets.back().get();
+        upRequest = postLifecycleLocked(LifecycleKind::RlnUp, 0);
     }
+    const uint64_t generation = ticket->generation; // the reply may free the ticket
 
     // Node start can block for a long time (relay reconnect backoff), so return
     // once dispatched. Completion arrives via nodeStarted.
-    if (logosdelivery_ctx_start_node(asCtx(deliveryCtxHandle), start_callback, this) != RET_OK) {
-        joinFailedStartStop();
+    if (logosdelivery_ctx_start_node(asCtx(deliveryCtxHandle), start_callback, ticket) != RET_OK) {
+        // Nothing was started and no reply will come: take back the ticket
+        // and, if the worker has not begun it, the bring-up.
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        const auto ticketIt = std::find_if(
+            startTickets.begin(), startTickets.end(),
+            [ticket](const std::unique_ptr<StartTicket>& held) { return held.get() == ticket; });
+        if (ticketIt != startTickets.end()) {
+            startTickets.erase(ticketIt);
+        }
+        if (upRequest != 0) {
+            const auto requestIt = std::find_if(
+                lifecycleQueue.begin(), lifecycleQueue.end(),
+                [upRequest](const LifecycleRequest& queued) { return queued.id == upRequest; });
+            if (requestIt != lifecycleQueue.end()) {
+                lifecycleQueue.erase(requestIt);
+            }
+        }
         return {false, {}, "failed to initiate start"};
+    }
+    {
+        // Accepted: from here on an older start's late failure is stale.
+        std::lock_guard<std::mutex> lock(lifecycleMutex);
+        startGeneration = std::max(startGeneration, generation);
     }
     return {true, {}};
 }
@@ -922,24 +1458,32 @@ StdLogosResult DeliveryModuleImpl::stop()
     if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
-    stopRlnBackend();
+    postRlnDown();
     return {true, {}};
 }
 
 void DeliveryModuleImpl::stopRlnBackend()
 {
-    std::lock_guard<std::mutex> lock(rlnBackendStopMutex);
-    // This module started the RLN backend, so it stops it too. Stopping one
-    // that is still starting would race the bring-up thread.
-    joinRlnBringUp();
-    const auto config = rlnConfigSnapshot();
-    if (config->enabled && config->manageBackend && rlnBridge->enabled()) {
+    if (!rlnConfig->enabled) {
+        return;
+    }
+    // This module stops the RLN backend it started; one the host manages is
+    // the host's to stop.
+    if (rlnConfig->manageBackend && rlnBridge->enabled() && rlnBackendRunning) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
                     failure.c_str());
         }
     }
+    // Either way the next start() brings it up again: the RLN module's start
+    // is idempotent for a backend that never stopped.
+    rlnBackendRunning = false;
+    rlnReady = false;
+    // No read-back of a stopped backend; what it found stays published until
+    // the next bring-up.
+    membershipWatch.running = false;
+    setRlnState(RlnState::Stopped, {});
 }
 
 StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const std::vector<uint8_t>& payload)
@@ -1255,28 +1799,82 @@ std::string DeliveryModuleImpl::collectOpenMetricsText()
 StdLogosResult DeliveryModuleImpl::rlnState()
 {
     std::lock_guard<std::mutex> lock(rlnStateMutex);
-    nlohmann::json out{{"state", rlnStateName}, {"message", rlnStateMessage}};
+    nlohmann::json out{{"state", rlnStateName(rlnStateValue)}, {"message", rlnStateMessage}};
     if (rlnStateConfig.enabled) {
         out["registryId"] = rlnStateConfig.registryId;
         out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
         out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
+        out["mode"] = rlnModeName(rlnStateMode);
+        // A shared registry has one rate, whichever key named it.
+        const bool shared = rlnStateConfig.sharesRegistry();
+        const uint64_t rateLimit =
+            shared ? rlnStateConfig.sharedRateLimit() : rlnStateConfig.rateLimit;
+        const uint64_t mixRateLimit =
+            shared ? rlnStateConfig.sharedRateLimit() : rlnStateConfig.mixRateLimit;
+        if (!rlnStateConfig.needsRelayMembership()) {
+            out["relayMembership"] = false;
+        } else if (rateLimit != 0) {
+            out["rateLimit"] = rateLimit;
+        }
+        if (rlnStateConfig.hasMix() && mixRateLimit != 0) {
+            out["mixRateLimit"] = mixRateLimit;
+        }
+        if (!rlnStateMembership.is_null()) {
+            out["membership"] = rlnStateMembership;
+        }
+        if (rlnStateGrantedRate) {
+            out["grantedRateLimit"] = *rlnStateGrantedRate;
+        }
+        if (!rlnStateMixMembership.is_null()) {
+            out["mixMembership"] = rlnStateMixMembership;
+        }
+        if (rlnStateGrantedMixRate) {
+            out["grantedMixRateLimit"] = *rlnStateGrantedMixRate;
+        }
+        if (rlnStateConfig.hasMix()) {
+            out["mixRegistryId"] = rlnStateConfig.mixRegistryId;
+            out["mixRlnIdentifier"] = rlnStateConfig.mixRlnIdentifier;
+            out["mixEpochSizeSec"] = rlnStateConfig.mixEpochSizeSec;
+            out["mixMaxEpochGap"] = rlnStateConfig.mixMaxEpochGap;
+        }
+        if (rlnStateConfig.hasAllocator()) {
+            out["allocatorDiscover"] = rlnStateConfig.allocatorDiscover;
+            if (!rlnStateConfig.allocatorPeerId.empty()) {
+                out["allocatorPeerId"] = rlnStateConfig.allocatorPeerId;
+                out["allocatorMultiaddr"] = rlnStateConfig.allocatorMultiaddr;
+            }
+            out["allocatorAuthType"] = rlnStateConfig.allocatorAuthType;
+        }
     }
     return {true, std::move(out)};
 }
 
-void DeliveryModuleImpl::setRlnState(const char* state, const std::string& message)
+const char* rlnStateName(RlnState state)
+{
+    switch (state) {
+    case RlnState::Disabled: return "Disabled";
+    case RlnState::Initializing: return "Initializing";
+    case RlnState::Ready: return "Ready";
+    case RlnState::Failed: return "Failed";
+    case RlnState::Stopped: return "Stopped";
+    }
+    return "Disabled";
+}
+
+void DeliveryModuleImpl::setRlnState(RlnState state, const std::string& message)
 {
     {
         std::lock_guard<std::mutex> lock(rlnStateMutex);
-        if (rlnStateName == state && rlnStateMessage == message) {
+        if (rlnStateValue == state && rlnStateMessage == message) {
             return;
         }
-        rlnStateName = state;
+        rlnStateValue = state;
         rlnStateMessage = message;
     }
-    fprintf(stderr, "DeliveryModuleImpl: rln %s%s%s\n", state,
+    const char* name = rlnStateName(state);
+    fprintf(stderr, "DeliveryModuleImpl: rln %s%s%s\n", name,
             message.empty() ? "" : ": ", message.c_str());
-    rlnStateChanged(state, message, currentTimestampNs());
+    rlnStateChanged(name, message, currentTimestampNs());
 }
 
 std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
@@ -1321,31 +1919,145 @@ std::string DeliveryModuleImpl::startRlnBackend()
         return "rln bridge unavailable (" + failure + "); answering falls to rlnRespond";
     }
 
-    // A host sharing the backend with Mix owns its configuration and lifetime.
-    if (!rlnConfig->manageBackend) return {};
+    // A host sharing the backend with other consumers owns its configuration
+    // and lifetime; this module then only checks that what it will prove with
+    // fits the chain.
+    if (!rlnConfig->manageBackend) {
+        return checkRlnRateBounds(*rlnConfig);
+    }
 
-    // The delivery library no longer starts the backend, so this module does:
-    // a node that mounts RLN over a stopped module would Ignore every inbound
-    // RLN message.
-    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig->registryId})}};
-    if (rlnConfig->epochSizeSec != 0) {
-        startCfg["epoch_size_sec"] = rlnConfig->epochSizeSec;
+    // The allocator client dials through libp2p_module. If that is not up,
+    // provisioning falls back to a funded registration: a notice, not a failure.
+    if (rlnConfig->hasAllocator()) {
+        const std::string failure = libp2pBringUp ? libp2pBringUp->ensure() : "no libp2p_module client";
+        if (!failure.empty()) {
+            char notice[768];
+            snprintf(notice, sizeof(notice),
+                     "libp2p_module not up (%s); no allocator can be "
+                     "dialled (discover=%s, configured=%s), so the RLN module's provisioning "
+                     "falls back to a funded registration",
+                     failure.c_str(), rlnConfig->allocatorDiscover ? "true" : "false",
+                     rlnConfig->allocatorPeerId.empty() ? "none" : rlnConfig->allocatorPeerId.c_str());
+            fprintf(stderr, "DeliveryModuleImpl: %s\n", notice);
+            disco_trace::traceLine(notice);
+        }
     }
-    if (rlnConfig->maxEpochGap != 0) {
-        startCfg["max_epoch_gap"] = rlnConfig->maxEpochGap;
-    }
-    const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
+
+    // A node that mounts RLN over a stopped backend Ignores every inbound RLN
+    // message. One start names every registry the node takes a membership on.
+    const std::string startFailure = rlnBridge->startBackend(rlnBackendStartConfig(*rlnConfig));
     if (!startFailure.empty()) {
         return "rln module start failed: " + startFailure;
+    }
+    rlnBackendRunning = true;
+    if (std::string refused = checkRlnRateBounds(*rlnConfig); !refused.empty()) {
+        // The module would keep provisioning, and refusing, in the background.
+        (void)rlnBridge->stopBackend();
+        rlnBackendRunning = false;
+        return refused;
     }
     return {};
 }
 
-void DeliveryModuleImpl::joinRlnBringUp()
+// A registry entry's `allocator` block: the provider when the preset names
+// one, else the payload, else neither (a `peer-` auth vector).
+static nlohmann::json allocatorBlock(const DeliveryRlnConfig& cfg)
 {
-    if (rlnBringUpThread.joinable()) {
-        rlnBringUpThread.join();
+    nlohmann::json block{{"discover", cfg.allocatorDiscover}, {"auth_type", cfg.allocatorAuthType}};
+    if (!cfg.allocatorPeerId.empty()) {
+        block["peer_id"] = cfg.allocatorPeerId;
+        block["multiaddr"] = cfg.allocatorMultiaddr;
     }
+    if (!cfg.allocatorAuthProvider.empty()) {
+        block["auth_provider"] = cfg.allocatorAuthProvider;
+    } else if (!cfg.allocatorAuthPayload.empty()) {
+        block["auth_payload"] = cfg.allocatorAuthPayload;
+    }
+    if (!cfg.allocatorAuthArgs.empty()) {
+        block["auth_args"] = cfg.allocatorAuthArgs;
+    }
+    return block;
+}
+
+std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg)
+{
+    // The top level carries the relay registry's epoch size, and its gap and
+    // rate when set: the module's defaults for a registry that sets none.
+    nlohmann::json startCfg{{"epoch_size_sec", cfg.epochSizeSec},
+                            {"registries", nlohmann::json::array()}};
+    if (cfg.maxEpochGap != 0) {
+        startCfg["max_epoch_gap"] = cfg.maxEpochGap;
+    }
+    // A registry relay and mix share is named once, by the relay entry, at
+    // the one rate the preset agreed on: a second entry with the same
+    // registry_id would overwrite the first in the module.
+    const bool shared = cfg.sharesRegistry();
+    if (cfg.needsRelayMembership()) {
+        nlohmann::json relay = cfg.hasAllocator()
+            ? nlohmann::json{{"registry_id", cfg.registryId}, {"allocator", allocatorBlock(cfg)}}
+            : nlohmann::json(cfg.registryId);
+        startCfg["registries"].push_back(std::move(relay));
+        const uint64_t rateLimit = shared ? cfg.sharedRateLimit() : cfg.rateLimit;
+        if (rateLimit != 0) {
+            startCfg["rate_limit"] = rateLimit;
+        }
+    }
+    if (cfg.hasMix() && !shared) {
+        // Its own epoch size and gap — what native Mix's proof plugin runs
+        // at — and its own rate; the relay defaults do not apply to it.
+        nlohmann::json mix{{"registry_id", cfg.mixRegistryId},
+                           {"epoch_size_sec", cfg.mixEpochSizeSec},
+                           {"max_epoch_gap", cfg.mixMaxEpochGap}};
+        if (cfg.mixRateLimit != 0) {
+            mix["rate_limit"] = cfg.mixRateLimit;
+        }
+        if (cfg.hasAllocator()) {
+            mix["allocator"] = allocatorBlock(cfg);
+        }
+        startCfg["registries"].push_back(std::move(mix));
+    }
+    return startCfg.dump();
+}
+
+std::string DeliveryModuleImpl::checkRlnRateBounds(const DeliveryRlnConfig& cfg)
+{
+    struct Named {
+        const char* what;
+        const std::string& registryId;
+        const std::string& rlnIdentifier;
+        uint64_t rate;
+    };
+    const Named named[] = {
+        {"rate-limit", cfg.registryId, cfg.rlnIdentifier,
+         cfg.needsRelayMembership() ? cfg.rateLimit : 0},
+        {"mix-rate-limit", cfg.mixRegistryId, cfg.mixRlnIdentifier, cfg.mixRateLimit},
+    };
+    for (const Named& n : named) {
+        if (n.rate == 0 || n.registryId.empty()) {
+            continue;
+        }
+        nlohmann::json params;
+        const std::string failure =
+            rlnBridge->readRegistryParameters(n.registryId, n.rlnIdentifier, params);
+        if (!failure.empty()) {
+            // Bounds that cannot be read now are not a refusal: the module
+            // checks them again before it registers.
+            fprintf(stderr, "DeliveryModuleImpl: registry %s bounds unavailable (%s)\n",
+                    n.registryId.c_str(), failure.c_str());
+            continue;
+        }
+        const auto bound = [&params](const char* key) -> uint64_t {
+            auto it = params.find(key);
+            return it != params.end() && it->is_number_unsigned() ? it->get<uint64_t>() : 0;
+        };
+        const uint64_t min = bound("min_rate_limit");
+        const uint64_t max = bound("max_rate_limit");
+        if ((min != 0 && n.rate < min) || (max != 0 && n.rate > max)) {
+            return "registry " + n.registryId + " admits rates " + std::to_string(min) + "..="
+                   + std::to_string(max) + "; preset " + n.what + " is " + std::to_string(n.rate);
+        }
+    }
+    return {};
 }
 
 StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)

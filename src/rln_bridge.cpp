@@ -1,7 +1,11 @@
 #include "rln_bridge.h"
-#include "liblogos_rln_module_api.h" // generated from metadata.json#optional_dependencies
+#include "rln_module_api.h" // generated from metadata.json#optional_dependencies
 
 #include <nlohmann/json.hpp>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 
 #include <liblogosdelivery_rln.h> // logosdelivery_rln_response
@@ -14,6 +18,7 @@ namespace {
 
 constexpr const char* kTransient = "transient";
 constexpr const char* kPermanent = "permanent";
+constexpr const char* kNotReady = "not_ready";
 constexpr const char* kTransportKind = "rln_bridge_transport";
 constexpr const char* kRefusalKind = "rln_bridge_dispatch";
 constexpr const char* kDecodeKind = "rln_bridge_decode";
@@ -53,7 +58,7 @@ RlnBridge::RlnBridge() = default;
 // no bridge state, which is what makes that safe rather than lucky.
 RlnBridge::~RlnBridge() = default;
 
-void RlnBridge::init(LiblogosRlnModule* rlnModule)
+void RlnBridge::init(RlnModule* rlnModule)
 {
     m_rlnModule = rlnModule;
 }
@@ -161,10 +166,9 @@ std::string RlnBridge::callFail(Op op, const logos::CallError& err)
 // reports a decode artifact to the library as if it were the module's error.
 std::string RlnBridge::resultReply(Op op, const StdLogosResult& r)
 {
-    // Residue of the heuristic this bridge used before refusals were typed:
-    // success=false with no error text. The client now folds every canonical
-    // refusal into the CallError and gives a non-object reply a message of its
-    // own, so what is left here is a module that answered nothing usable.
+    // The client folds every canonical refusal into the CallError and gives a
+    // non-object reply a message of its own, so success=false with no error
+    // text is a module that answered nothing usable.
     if (!r.success && r.error.empty()) {
         return transportFail(op, kPermanent, kDecodeKind,
                              std::string(opName(op)) + ": refusal with no message");
@@ -186,17 +190,18 @@ std::string RlnBridge::tstrReply(Op op, const std::string& value)
     return value;
 }
 
-// Permanent, not transient: enable() runs once at createNode, so a bridge that
-// is not serving now never will be for this node. Told that, the library can
-// fail the request instead of retrying it until its own budget runs out.
+// not_ready while a client is set: the lifecycle worker enables the bridge
+// after createNode returned, and the library retries. Permanent without a
+// client: nothing will ever enable this bridge.
 bool RlnBridge::rejectIfNotEnabled(Op op, uint64_t reqId) const
 {
     if (m_enabled.load(std::memory_order_acquire)) {
         return false;
     }
-    const char* why = m_rlnModule ? "rln bridge is not enabled"
+    const char* cls = m_rlnModule ? kNotReady : kPermanent;
+    const char* why = m_rlnModule ? "rln bridge is not enabled yet"
                                   : "rln-module client is not set for rln bridge";
-    respond(reqId, transportFail(op, kPermanent, kDisabledKind,
+    respond(reqId, transportFail(op, cls, kDisabledKind,
                                  std::string(opName(op)) + ": " + why));
     return true;
 }
@@ -237,6 +242,111 @@ std::string RlnBridge::stopBackend()
     logos::CallError err;
     const StdLogosResult r = m_rlnModule->stop(&err, timeoutMsFor(Op::Stop));
     return lifecycleResult(Op::Stop, r, err);
+}
+
+std::string RlnBridge::readRegistryParameters(const std::string& registryId,
+                                              const std::string& rlnIdentifier,
+                                              nlohmann::json& out)
+{
+    if (!m_enabled.load(std::memory_order_acquire)) {
+        return "rln bridge is not enabled";
+    }
+    // The async twin, waited on here: the completion runs on the client's
+    // thread, and the reply box is shared by value so a late completion after
+    // this frame is gone writes into a box nobody reads (see the capture rule
+    // on the op entry points below).
+    struct Reply {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        logos::AsyncResult<StdLogosResult> res;
+    };
+    auto reply = std::make_shared<Reply>();
+    const int timeoutMs = timeoutMsFor(Op::GetParameters);
+    m_rlnModule->get_registry_parametersAsyncResult(
+        registryId, rlnIdentifier,
+        [reply](logos::AsyncResult<StdLogosResult> r) {
+            {
+                std::lock_guard<std::mutex> lock(reply->m);
+                reply->res = std::move(r);
+                reply->done = true;
+            }
+            reply->cv.notify_all();
+        },
+        timeoutMs);
+    std::unique_lock<std::mutex> lock(reply->m);
+    if (!reply->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs + 1000),
+                            [&reply] { return reply->done; })) {
+        return std::string(opName(Op::GetParameters)) + ": no reply";
+    }
+    if (!reply->res.error.ok()) {
+        return std::string(opName(Op::GetParameters)) + ": " + reply->res.error.code + ": "
+               + reply->res.error.message;
+    }
+    if (!reply->res.value.success) {
+        return std::string(opName(Op::GetParameters)) + ": " + reply->res.value.error;
+    }
+    out = reply->res.value.value;
+    return {};
+}
+
+std::string RlnBridge::readMembershipState(const std::string& registryId,
+                                           const std::string& rlnIdentifier,
+                                           nlohmann::json& out, bool* unanswered)
+{
+    if (unanswered) {
+        *unanswered = false;
+    }
+    if (!m_enabled.load(std::memory_order_acquire)) {
+        return "rln bridge is not enabled";
+    }
+    // As readRegistryParameters: the async twin, waited on here, its reply box
+    // shared by value. Not timeoutMsFor(Op::GetState): that budget is the
+    // library's, and this read holds up the lifecycle worker.
+    struct Reply {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        logos::AsyncResult<std::string> res;
+    };
+    auto reply = std::make_shared<Reply>();
+    const int timeoutMs = kMembershipReadTimeoutMs;
+    m_rlnModule->get_membership_stateAsyncResult(
+        registryId, rlnIdentifier,
+        [reply](logos::AsyncResult<std::string> r) {
+            {
+                std::lock_guard<std::mutex> lock(reply->m);
+                reply->res = std::move(r);
+                reply->done = true;
+            }
+            reply->cv.notify_all();
+        },
+        timeoutMs);
+    const std::string op = opName(Op::GetState);
+    std::unique_lock<std::mutex> lock(reply->m);
+    if (!reply->cv.wait_for(lock, std::chrono::milliseconds(timeoutMs + 1000),
+                            [&reply] { return reply->done; })) {
+        if (unanswered) {
+            *unanswered = true;
+        }
+        return op + ": no reply";
+    }
+    if (!reply->res.error.ok()) {
+        if (unanswered) {
+            *unanswered = true;
+        }
+        return op + ": " + reply->res.error.code + ": " + reply->res.error.message;
+    }
+    // A tstr method: the value is the module's compact JSON reply.
+    json parsed = json::parse(reply->res.value, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_object()) {
+        return op + ": reply is not a JSON object";
+    }
+    if (const auto error = parsed.find("error"); error != parsed.end() && !error->is_null()) {
+        return op + ": " + error->dump();
+    }
+    out = std::move(parsed);
+    return {};
 }
 
 // The op entry points below carry no precondition: every one of them answers

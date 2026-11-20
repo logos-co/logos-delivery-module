@@ -1,30 +1,23 @@
 #include "service_discovery_plugin.h"
 
-#include <cstdarg>
 #include <cstdio>
 #include <exception>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
-#include <algorithm>
-#include <cctype>
 #include <thread>
 
 #include <nlohmann/json.hpp>
 
+#include "base64.h"
+#include "disco_trace.h"
+#include "libp2p_bring_up.h"
 // Generated at build time from metadata.json#optional_dependencies.
 #include "libp2p_module_api.h"
-#include "base64.h"
 
 namespace {
 
 // The node's per-verb wait; nim-brokers' lane may enforce a shorter one.
 constexpr uint32_t kRequestTimeoutMs = 15000;
-
-// Deadline for the first libp2p call, which is how an absent module is found.
-// The transport's own wait is 20s, as long as the node's budget for `start`,
-// which would cancel the verb before the reason arrived.
-constexpr int kFirstContactTimeoutMs = 5000;
 
 // Reaches the caller as the reason start() failed, so it says what to do.
 constexpr const char* kLibp2pUnavailable =
@@ -34,64 +27,7 @@ constexpr const char* kLibp2pUnavailable =
     "(e.g. discv5, without plugin-kad-discovery); on Windows internal "
     "discovery is the only option";
 
-// Opt-in trace of the plugin boundary to the file named by LD_DISCO_TRACE:
-// logos-core discards a module's own stdout/stderr, so there is no other view.
-FILE* traceFile()
-{
-    static FILE* f = [] () -> FILE* {
-        const char* path = getenv("LD_DISCO_TRACE");
-        if (!path || !*path) {
-            return nullptr;
-        }
-        FILE* h = fopen(path, "a");
-        if (h) {
-            setvbuf(h, nullptr, _IOLBF, 0); // line-buffered, so `tail -f` works
-        }
-        return h;
-    }();
-    return f;
-}
-
-void trace(const char* fmt, ...)
-{
-    FILE* f = traceFile();
-    if (!f) {
-        return;
-    }
-    char stamp[32] = "";
-    const std::time_t now = std::time(nullptr);
-    std::tm tm{};
-#ifdef _WIN32
-    // MinGW declares localtime_r only under _POSIX_C_SOURCE; localtime_s is
-    // the same call with the arguments swapped, returning 0 on success.
-    if (localtime_s(&tm, &now) == 0) {
-#else
-    if (localtime_r(&now, &tm)) {
-#endif
-        std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &tm);
-    }
-    fprintf(f, "[%s] ", stamp);
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(f, fmt, ap);
-    va_end(ap);
-    fputc('\n', f);
-}
-
-bool mentionsTimeout(const std::string& s)
-{
-    std::string lowered(s);
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return lowered.find("timeout") != std::string::npos;
-}
-
-/// Whether a transport error is a deadline expiring rather than a refusal.
-/// Matched on text: CallError has no typed code for it.
-bool isCallTimeout(const logos::CallError& err)
-{
-    return mentionsTimeout(err.code) || mentionsTimeout(err.message);
-}
+using disco_trace::trace;
 
 /// Counts an entry point in and out, for quiesce().
 struct InFlightGuard {
@@ -170,13 +106,9 @@ int guarded(const char* verb, char* errBuf, size_t errBufLen, Body&& body)
 
 } // namespace
 
-DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(Libp2pModule* libp2p,
-                                                               std::string libp2pConfig)
-    : libp2p_(libp2p)
-    , libp2pConfig_(std::move(libp2pConfig))
-    , backendReady_(false)
-    , nodeCreated_(false)
-    , startIssued_(false)
+DeliveryServiceDiscoveryPlugin::DeliveryServiceDiscoveryPlugin(std::shared_ptr<Libp2pBringUp> bringUp)
+    : bringUp_(std::move(bringUp))
+    , libp2p_(bringUp_ ? bringUp_->module() : nullptr)
     , vtable_{}
 {
     vtable_.abiVersion = LD_DISCO_ABI_VERSION;
@@ -234,105 +166,14 @@ int DeliveryServiceDiscoveryPlugin::requireBackend(char* errBuf, size_t errBufLe
 
 std::string DeliveryServiceDiscoveryPlugin::ensureBackend()
 {
-    if (backendReady_) {
-        return {};
-    }
-    if (!libp2p_) {
+    if (!bringUp_) {
         return "no libp2p_module client";
     }
-
-    std::string diagnostics;
-    trace("---- bringing up the libp2p backend ----");
-
-    // No readiness probe: libp2p's `status` is rejected even while the verbs
-    // below are served, so it says nothing. The config was validated at
-    // createNode (discovery_config.h).
-    nlohmann::json cfg = nlohmann::json::parse(libp2pConfig_, nullptr, false);
-    if (!cfg.is_object()) {
-        return "libp2p config is not a JSON object";
+    const std::string failure = bringUp_->ensure();
+    if (failure == Libp2pBringUp::kUnavailable) {
+        return kLibp2pUnavailable;
     }
-    // Every bootstrap peer goes to libp2p. Dialling several can outlast its
-    // 10s start deadline; that is a notice below, not a failure.
-    size_t bootstrapCount = 0;
-    if (const auto nodes = cfg.find("bootstrapNodes");
-        nodes != cfg.end() && nodes->is_array()) {
-        bootstrapCount = nodes->size();
-    }
-
-    if (nodeCreated_) {
-        // An earlier attempt built it; only `start` failed. A second
-        // createNode would be refused.
-        trace("libp2p createNode        ALREADY DONE  bootstrapNodes=%zu", bootstrapCount);
-    } else {
-        logos::CallError err;
-        const StdLogosResult r = libp2p_->createNode(cfg.dump(), &err, kFirstContactTimeoutMs);
-        if (err.code == "object_unavailable") {
-            // No module to talk to; the calls below would only time out too.
-            trace("libp2p createNode        UNAVAILABLE  %s", err.message.c_str());
-            return kLibp2pUnavailable;
-        }
-        trace("libp2p createNode        %s  bootstrapNodes=%zu",
-              (!err.ok() ? "TRANSPORT-ERR" : (r.success ? "OK" : "REFUSED")),
-              bootstrapCount);
-        nodeCreated_ = err.ok() && r.success;
-        if (!err.ok()) {
-            diagnostics += "createNode: " + err.code + ": " + err.message + "; ";
-        } else if (!r.success) {
-            // Fatal: a default libp2p node has no bootstrap peers.
-            diagnostics += "createNode: " + (r.error.empty() ? std::string("refused") : r.error) + "; ";
-        }
-    }
-
-    // libp2p's start() brings up a default node if createNode did not.
-    if (startIssued_) {
-        // A start that succeeded or is still running must not be issued
-        // again: nim-libp2p's double-start guard only trips once a start has
-        // finished, so a second one runs a second switch start beside the
-        // first -- two accept loops on one listener, and libp2p_module crashes
-        // on the next inbound connection.
-        trace("libp2p start             ALREADY ISSUED");
-    } else {
-        logos::CallError err;
-        const StdLogosResult r = libp2p_->start(&err);
-        // A notice, not a failure: the kademlia bootstrap inside start outlives
-        // the call deadline and keeps going. libp2p reports its own 10s deadline
-        // in the result ("Failed to start libp2p: timeout"), the transport its
-        // deadline as a CallError. If the start really failed, the verbs that
-        // follow say so.
-        const bool timedOut =
-            err.ok() ? (!r.success && mentionsTimeout(r.error)) : isCallTimeout(err);
-        if (timedOut) {
-            const std::string why = err.ok() ? r.error : err.code + ": " + err.message;
-            trace("libp2p start             NOTICE  %s (bring-up continues)", why.c_str());
-        } else if (!err.ok()) {
-            diagnostics += "start: " + err.code + ": " + err.message + "; ";
-        } else if (!r.success) {
-            diagnostics += "start: " + (r.error.empty() ? std::string("failed") : r.error) + "; ";
-        }
-        startIssued_ = timedOut || (err.ok() && r.success);
-    }
-
-    // No discoStart: the switch start already started service discovery.
-
-    // Trace libp2p's identity and listen addresses; nothing else reports them.
-    if (diagnostics.empty()) {
-        // libp2p's field names are capitalised.
-        for (const char* field : {"PeerId", "Multiaddrs"}) {
-            logos::CallError err;
-            const StdLogosResult r = libp2p_->getNodeInfo(field, &err);
-            if (!err.ok() || !r.success) {
-                continue;
-            }
-            const std::string v =
-                r.value.is_string() ? r.value.get<std::string>() : r.value.dump();
-            trace("libp2p %-18s %s", field, v.c_str());
-        }
-    }
-
-    trace("libp2p backend ready%s%s", diagnostics.empty() ? "" : " with: ",
-          diagnostics.c_str());
-    backendReady_ = diagnostics.empty();
-    return diagnostics;
+    return failure;
 }
 
 // --- vtable trampolines ------------------------------------------------------

@@ -1,30 +1,63 @@
 #pragma once
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+#include <nlohmann/json.hpp>
+
+#include "rln_presets.h"
 
 class DeliveryServiceDiscoveryPlugin;
+class Libp2pBringUp;
 class RlnBridge;
 
-// Everything the delivery library no longer knows about RLN. Resolved from
-// the createNode config's network preset (see src/rln_presets.h), never
-// carried in the config itself.
-struct DeliveryRlnConfig {
-    bool enabled = false;
-    bool manageBackend = true;
-    std::string registryId;
-    std::string rlnIdentifier;
-    uint64_t epochSizeSec = 0;
-    uint64_t maxEpochGap = 0;
+// Unit-test access to the membership read-back.
+struct DeliveryModuleReadBackTestAccess;
+
+// The RLN settings this plugin holds for the delivery library: the createNode
+// config's network preset, resolved (see src/rln_presets.h), never carried in
+// the config itself.
+using DeliveryRlnConfig = RlnPresetEntry;
+
+// The rln_module `start` config for a deployment: one entry per registry the
+// node takes a membership on, each at its own rate.
+std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg);
+
+// One rln_module `get_membership_state` reply as rlnState reports it.
+// `grantedRate` is taken only from an active membership: before that the
+// module reports the rate asked, not the one on chain.
+struct RlnMembershipReading {
+    nlohmann::json membership;
+    bool active{false};
+    std::optional<uint64_t> grantedRate;
 };
+RlnMembershipReading readRlnMembershipReply(const nlohmann::json& reply);
+
+// The capped-grant notice, or empty: an asked rate of 0 (the RLN module's
+// default) and a rate not granted yet are not compared.
+std::string rlnCappedGrantMessage(uint64_t askedRate, std::optional<uint64_t> grantedRate,
+                                  uint64_t askedMixRate, std::optional<uint64_t> grantedMixRate,
+                                  bool shared);
+
+// The config's `mode` as the library reads it (trimmed, any case): Core when
+// absent, unknown, or `entryLayer` is "kernel".
+RlnMode configMode(const nlohmann::json& cfg);
+
+// Where this node's RLN stands; see DeliveryModuleImpl::rlnState.
+enum class RlnState { Disabled, Initializing, Ready, Failed, Stopped };
+
+// The name rlnState() and rlnStateChanged publish for `state`.
+const char* rlnStateName(RlnState state);
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -41,7 +74,9 @@ struct DeliveryRlnConfig {
  *
  * @ref createNode is synchronous. @ref start and @ref stop return once the
  * request is dispatched; completion is reported via the `nodeStarted` /
- * `nodeStopped` events.
+ * `nodeStopped` events. Neither waits for the RLN backend: its bring-up and
+ * teardown run on the module's lifecycle worker and report through
+ * `rlnStateChanged`.
  *
  * Asynchronous events are emitted via typed `logos_events:` declarations.
  * The codegen generates method bodies that route through
@@ -137,7 +172,15 @@ public:
 
     /**
      * @brief Starts the delivery node.
+     *
+     * A start that fails (`nodeStarted` with `success` false) is cleaned up
+     * by the module: it stops the half-started node and takes RLN down. Until
+     * that has run, another start is refused, with nothing dispatched; retry
+     * once `nodeStopped` / the `Stopped` RLN state has been reported.
+     *
      * @return `true` once dispatched; completion is reported via `nodeStarted`.
+     *         `false` when the library refused the dispatch, or while a
+     *         previous failed start is still being cleaned up.
      */
     StdLogosResult start();
 
@@ -366,7 +409,7 @@ public:
      * @brief Enables the in-process RLN bridge.
      *
      * Once enabled, each `rln*Request` is answered inside this module: the
-     * bridge's worker threads call the co-loaded `liblogos_rln_module` and
+     * bridge's worker threads call the co-loaded `rln_module` and
      * pass its reply back unchanged. The events keep emitting for
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
@@ -389,15 +432,41 @@ public:
      * | `Initializing` | Plugin installed, backend still coming up |
      * | `Ready` | The in-process bridge answers requests |
      * | `Failed` | Bring-up failed; `message` carries the reason |
+     * | `Stopped` | The node was stopped (@ref stop, or a start that failed) and RLN went down with it |
+     *
+     * Every @ref start, and every @ref rlnBridgeEnable, issued while RLN is
+     * not `Ready` runs the bring-up again (`Initializing`, then `Ready` or
+     * `Failed`); one issued while a bring-up is in flight is answered by that
+     * bring-up. A start that fails ends in `Stopped`.
      *
      * `Ready` means the backend started and the bridge answers. It does not
      * promise the RLN module's valid-root window is warm — that is a
      * background refresh the module does not currently expose.
      *
-     * @return Value `{"state": "<state>", "message": "<detail>"}`, plus
-     *         `registryId`, `rlnIdentifier` and `epochSizeSec` once a preset
-     *         has enabled RLN — the resolved deployment, so a caller can name
-     *         or query it without a second copy of the preset table.
+     * Once a preset has enabled RLN the value also carries the resolved
+     * deployment, so a caller can name or query it without a second copy of
+     * the preset table:
+     *
+     * | Key | Description |
+     * |---|---|
+     * | `registryId`, `rlnIdentifier`, `epochSizeSec` | The relay registry and scope |
+     * | `mixRegistryId`, `mixRlnIdentifier`, `mixEpochSizeSec`, `mixMaxEpochGap` | The same for native Mix; only with a mix registry |
+     * | `mode` | `Core` or `Edge`, from the config's `mode` |
+     * | `rateLimit`, `mixRateLimit` | The rates asked, not granted; omitted when left to the RLN module's default |
+     * | `relayMembership` | `false` when the mode takes no Relay membership (then no `rateLimit`) |
+     * | `allocatorDiscover`, `allocatorAuthType`, `allocatorPeerId`, `allocatorMultiaddr` | The membership allocator; only with one, the peer only when named |
+     * | `membership`, `mixMembership` | `{"state": "<state>"}`, plus `"step"` while the RLN module reports one |
+     * | `grantedRateLimit`, `grantedMixRateLimit` | The on-chain rate of an active membership |
+     *
+     * The last two rows are read back after `Ready`, every 5 s (up to 60 s
+     * while the RLN module does not answer), until the membership is active
+     * or 10 minutes have passed; a new bring-up drops them. A registry relay
+     * and mix share is reported under both names. A grant at another rate
+     * than asked republishes `Ready` with the capped-grant notice as
+     * `message`.
+     *
+     * @return Value `{"state": "<state>", "message": "<detail>"}` plus the
+     *         keys above.
      * @see rlnStateChanged for the same transitions as an event.
      */
     StdLogosResult rlnState();
@@ -488,9 +557,10 @@ logos_events:
     /**
      * @brief Emitted on every RLN bring-up transition.
      *
-     * `state` is one of `Disabled`, `Initializing`, `Ready` or `Failed`, and
-     * `message` carries the reason on `Failed`. See @ref rlnState for what
-     * each one means and when they occur.
+     * `state` is one of `Disabled`, `Initializing`, `Ready`, `Failed` or
+     * `Stopped`; `message` carries the reason on `Failed` and the
+     * capped-grant notice on `Ready`. See @ref rlnState for what each one
+     * means and when they occur.
      */
     void rlnStateChanged(const std::string& state, const std::string& message, int64_t timestamp);
 
@@ -521,8 +591,8 @@ logos_events:
 private:
     // Wires the bridge to the co-loaded RLN module on first use — modules()
     // is only valid once the framework has handed the context over — then
-    // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
-    // path) funnel through here. Returns an error string, or empty.
+    // starts it. Both enable doors (rlnBridgeEnable, startRlnBackend) funnel
+    // through here. Returns an error string, or empty.
     std::string bringUpRlnBridge();
 
     /**
@@ -545,24 +615,131 @@ private:
      * @brief Brings the bridge up and starts the co-loaded RLN module.
      *
      * The other half of RLN configuration, split from @ref installRlnPlugin
-     * because this one reaches the chain: @ref createNode runs it on its own
-     * thread so node creation does not wait for a registry round trip.
+     * because this one reaches the chain: it runs on the lifecycle worker
+     * only, so node creation does not wait for a registry round trip.
      *
      * @return Empty on success, a description of the problem otherwise.
      */
     std::string startRlnBackend();
 
+    // After the backend is up: a registry whose preset names a rate the
+    // chain's bounds do not admit is reported now, as a reason, rather than
+    // later as a membership that never appears. Returns the reason, or empty
+    // when every named rate fits or the bounds could not be read.
+    std::string checkRlnRateBounds(const DeliveryRlnConfig& cfg);
+
     // Publishes an RLN state transition: stores it and emits
     // rlnStateChanged. A repeat of the current state is not re-emitted.
-    void setRlnState(const char* state, const std::string& message);
+    void setRlnState(RlnState state, const std::string& message);
 
-    // Joins a finished bring-up thread, if any. Call under createNodeMutex.
-    void joinRlnBringUp();
+    // The lifecycle worker: the one thread that brings the RLN backend up and
+    // down and stops a node whose start failed. start(), stop(),
+    // rlnBridgeEnable() and the start reply only post a request under
+    // lifecycleMutex and return; the worker runs them in the order posted.
+    // Outbound module calls are refused on the API thread and
+    // logosdelivery_ctx_stop_node on the library's. Started at the end of a
+    // successful createNode, joined only in releaseNode(); a quit still runs
+    // every request posted before it, except that it begins no bring-up.
+    enum class LifecycleKind {
+        RlnUp,           // bring the backend up unless the last Ready stands
+        RlnDown,         // stop()'s RLN half
+        StopFailedStart, // stop the half-started node, then RlnDown
+    };
+    struct LifecycleRequest {
+        LifecycleKind kind{LifecycleKind::RlnUp};
+        // Names the request so start() can take back one it posted.
+        uint64_t id{0};
+        // StopFailedStart: the start that failed. Dropped only when a later
+        // start had already been accepted (generation < startGeneration).
+        uint64_t generation{0};
+    };
+    void startLifecycleWorker();
+    // Posts quit and joins the worker. A no-op when none was started.
+    void stopLifecycleWorker();
+    void runLifecycleWorker();
+    // Queues a request; lifecycleMutex held. Returns its id, or 0 when it was
+    // not queued: no worker, or the request repeats the last one posted (an
+    // RlnUp also when the bring-up in flight is the last thing posted).
+    uint64_t postLifecycleLocked(LifecycleKind kind, uint64_t generation);
+    uint64_t postRlnUp();
+    void postRlnDown();
+    std::mutex lifecycleMutex;
+    std::condition_variable lifecycleCv;
+    // The fields below, down to startTickets, are guarded by lifecycleMutex.
+    std::deque<LifecycleRequest> lifecycleQueue;
+    // Whether a worker takes requests: between startLifecycleWorker and quit.
+    bool lifecycleAccepting{false};
+    bool lifecycleQuit{false};
+    // Whether the worker is inside a bring-up whose verdict is not out yet.
+    // Cleared before Ready/Failed is published, so a caller reacting to the
+    // event posts a new attempt.
+    bool lifecycleUpInFlight{false};
+    uint64_t lifecycleNextId{0};
+    uint64_t startIssued{0};
+    // The latest start whose dispatch the library accepted.
+    uint64_t startGeneration{0};
+    // StopFailedStart requests queued or being run. start() is refused while
+    // there is one: it would race the node stop, or start a node that was
+    // never stopped.
+    uint64_t failedStartCleanups{0};
+    // What a node start's reply gets as userData: which start it answers.
+    // Held from start() until its reply, or until releaseNode().
+    struct StartTicket {
+        DeliveryModuleImpl* impl{nullptr};
+        uint64_t generation{0};
+    };
+    std::vector<std::unique_ptr<StartTicket>> startTickets;
 
-    // stop()'s RLN half, also run by the stop after a failed start. Serialized
-    // because both may join the bring-up thread at once.
+    // Worker only.
+    void bringRlnUp();
+    // Worker only: the RLN half of a stop. Stops a backend this module
+    // started (never one the host manages) and publishes Stopped.
     void stopRlnBackend();
-    std::mutex rlnBackendStopMutex;
+    // Worker only. Whether this module's startBackend call succeeded and no
+    // stop followed.
+    bool rlnBackendRunning{false};
+    // Worker only. Whether the last bring-up ended Ready and no stop followed.
+    bool rlnReady{false};
+
+    // The membership read-back (worker only): read while Ready stands, until
+    // active or kMembershipReadWindow has passed; the interval doubles up to
+    // kMembershipReadIntervalMax while the module does not answer.
+    static constexpr std::chrono::seconds kMembershipReadInterval{5};
+    static constexpr std::chrono::seconds kMembershipReadIntervalMax{60};
+    static constexpr std::chrono::minutes kMembershipReadWindow{10};
+    struct MembershipWatch {
+        bool running{false};
+        std::chrono::steady_clock::time_point deadline{};
+        std::chrono::seconds interval{kMembershipReadInterval};
+        bool relayDone{true};
+        bool mixDone{true};
+        std::optional<uint64_t> relayGranted;
+        std::optional<uint64_t> mixGranted;
+        // The last read failure logged for each registry, so a module that
+        // stays unreachable is not logged every round.
+        std::string relayLastFailure;
+        std::string mixLastFailure;
+    };
+    MembershipWatch membershipWatch;
+    // A new bring-up attempt: ends the watch and drops what it published.
+    void resetMembershipReadBack();
+    void startMembershipWatch();
+    // Whether a read is still owed; ends the watch once the window is over.
+    bool membershipWatchDue();
+    // One round: reads what is owed, publishes it, republishes Ready on a
+    // capped grant. Holds the worker for one read timeout at most.
+    void readRlnMemberships();
+    // Reads one registry; returns what the reply said (membership null on a
+    // failed read). Adjusts the watch's interval and logs a failure that is
+    // not `lastFailure`. `unanswered`: the module did not answer.
+    RlnMembershipReading readRlnMembership(const std::string& registryId,
+                                           const std::string& rlnIdentifier,
+                                           std::string& lastFailure, bool& unanswered);
+    friend struct DeliveryModuleReadBackTestAccess;
+    bool lifecycleWorkPending();
+    // Drops the published read-back results (rlnStateMutex taken inside).
+    void clearRlnMembershipResults();
+    std::thread lifecycleThread;
 
     // Undoes installRlnPlugin: clears the library's RLN plugin and resets both
     // copies of the RLN config. A no-op unless this instance installed it.
@@ -578,32 +755,36 @@ private:
     // it had been installed.
     StdLogosResult releaseAndFail(std::string reason);
 
-    // Guards the published RLN state against the bring-up thread.
+    // Guards the published RLN state against the lifecycle worker.
     mutable std::mutex rlnStateMutex;
-    std::string rlnStateName{"Disabled"};
+    RlnState rlnStateValue{RlnState::Disabled};
     std::string rlnStateMessage;
     // The resolved deployment, published so a caller can query the same
     // registry this node answers for without resolving the preset itself.
     DeliveryRlnConfig rlnStateConfig;
-
-    // Runs startRlnBackend() for a node whose preset enables RLN.
-    std::thread rlnBringUpThread;
+    // The mode that config was resolved for (guarded by rlnStateMutex).
+    RlnMode rlnStateMode{RlnMode::Core};
+    // The read-back's results (guarded by rlnStateMutex): null / empty until
+    // a registry's first read, and again from the next bring-up.
+    nlohmann::json rlnStateMembership;
+    nlohmann::json rlnStateMixMembership;
+    std::optional<uint64_t> rlnStateGrantedRate;
+    std::optional<uint64_t> rlnStateGrantedMixRate;
 
     // In-process RLN responder (src/rln_bridge.h). Constructed empty; wired
     // and started by bringUpRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
 
-    // Everything the delivery library no longer knows about RLN (see
-    // DeliveryRlnConfig).
+    // The RLN settings held for the delivery library (see DeliveryRlnConfig).
     // Never null. Replaced, never mutated: a writer publishes a new snapshot.
     std::shared_ptr<const DeliveryRlnConfig> rlnConfig =
         std::make_shared<const DeliveryRlnConfig>();
     // Guards the rlnConfig pointer. Read by the RLN trampolines on a library
     // thread, written by installRlnPlugin and abortRln on ours -- and a callback
     // already executing is never joined, so a reader copies the pointer under
-    // the lock and keeps that snapshot alive for the rest of the call. Reads
-    // ordered against every writer by joinRlnBringUp (stop, and startRlnBackend
-    // on the bring-up thread) need no lock.
+    // the lock and keeps that snapshot alive for the rest of the call. The
+    // lifecycle worker's reads need no lock: installRlnPlugin runs before the
+    // worker starts, abortRln after it is joined.
     mutable std::mutex rlnConfigMutex;
 
     // Copies the rlnConfig pointer under rlnConfigMutex. For readers not
@@ -627,6 +808,11 @@ private:
     // the context is destroyed, which happens in this class's destructor.
     std::unique_ptr<DeliveryServiceDiscoveryPlugin> discoPlugin;
 
+    // This node's libp2p_module bring-up, shared by service discovery and the
+    // RLN allocator path (both need a started node, neither may start it
+    // twice). Created with the node, released with it.
+    std::shared_ptr<Libp2pBringUp> libp2pBringUp;
+
     /// Frees discoPlugin once no entry point is running, or leaks it rather
     /// than freeing it under an abandoned thread that is still inside it.
     void releaseServiceDiscoveryPlugin();
@@ -638,10 +824,9 @@ private:
      * @brief Installs the discovery vtable for a node configured with
      *        `pluginKadDiscovery`; runs in createNode, before start.
      *
-     * @param libp2pConfig JSON for libp2p's createNode (see discovery_config.h).
      * @return the failure reason, or empty on success.
      */
-    std::string installServiceDiscoveryPlugin(const std::string& libp2pConfig);
+    std::string installServiceDiscoveryPlugin();
 
     /**
      * @brief Global C callback used by liblogosdelivery to report async events.
@@ -653,7 +838,7 @@ private:
     static void event_callback(int callerRet, const char* msg, size_t len, void* userData);
 
     // Completion callbacks for start()/stop(); emit nodeStarted / nodeStopped.
-    // userData is the DeliveryModuleImpl*.
+    // userData is the start's StartTicket* / the DeliveryModuleImpl*.
     // Both take the generated reply shape -- `reply` points at the result on
     // success, `errMsg` carries the reason otherwise -- and ignore
     // RET_STALE_WARN, the non-terminal progress tick a long start/stop emits.
@@ -662,15 +847,10 @@ private:
     static void stop_callback(int errCode, const char* const* reply, const char* errMsg,
                               void* userData);
 
-    // A failed start leaves the node half up, so start_callback stops it
-    // again -- from our own thread, as the library's refuses re-entrant calls.
-    void stopAfterFailedStart();
-    // Disarms stopAfterFailedStart and joins a stop it already issued. start()
-    // calls it before arming a new one, releaseNode() before the context goes.
-    void joinFailedStartStop();
-    std::mutex failedStartStopMutex;
-    bool failedStartStopArmed{false};
-    std::thread failedStartStopThread;
+    // start_callback's tail: releases the ticket and, for a failed start,
+    // posts the stop of the half-up node (and of RLN) to the lifecycle worker
+    // -- the library's thread refuses re-entrant calls.
+    void startFinished(StartTicket* ticket, bool failed);
 
     // RLN plugin slots installed before createNode, one per ABI function
     // (liblogosdelivery_rln.h); each emits its rln*Request event. Fired by

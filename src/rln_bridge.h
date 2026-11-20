@@ -1,14 +1,14 @@
 #pragma once
 
 // In-process RLN responder: serves the delivery library's rln* callbacks by
-// calling the co-loaded liblogos_rln_module and feeding each reply into
+// calling the co-loaded rln_module and feeding each reply into
 // logosdelivery_rln_response. createNode enables it whenever the node config
 // runs lez RLN ("rln-lez"); the rln*Request events keep emitting
 // either way, for observability (docs/pages/rln.md).
 //
 // The delivery library's RLN plugin is implementation-agnostic: it never names
 // a registry or a membership and never starts the backend. This module holds
-// that knowledge — it starts and stops liblogos_rln_module itself and adds the
+// that knowledge — it starts and stops rln_module itself and adds the
 // registry id and rln identifier to every call it forwards.
 //
 // EVERY call rides the generated typed client. Request ops
@@ -23,8 +23,7 @@
 // There is no raw lp_* call here, and no client of our own: the typed client
 // belongs to modules() and already owns an lp client, creates it lazily, does
 // the capability flow, maps transport codes to CallError and frees the reply
-// strings. Hand-rolling that was worth it only while the generated client had
-// no per-call timeout, which is no longer true.
+// strings.
 //
 // Threading: init() is the second-phase constructor. It cannot run during
 // construction, because the module context is not ready yet. Instead it runs
@@ -45,9 +44,11 @@
 #include <cstdint>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 struct StdLogosResult;
 namespace logos { struct CallError; }
-class LiblogosRlnModule; // generated from metadata.json#optional_dependencies
+class RlnModule; // generated from metadata.json#optional_dependencies
 
 class RlnBridge {
 public:
@@ -57,9 +58,9 @@ public:
     RlnBridge& operator=(const RlnBridge&) = delete;
 
     // Second-phase constructor: stores the typed client. Safe to call more
-    // than once. `rlnModule` is borrowed from modules().liblogos_rln_module,
+    // than once. `rlnModule` is borrowed from modules().rln_module,
     // which outlives this object.
-    void init(LiblogosRlnModule* rlnModule);
+    void init(RlnModule* rlnModule);
 
     // Enable answering of RLN requests in-process.
     // Returns an error string or empty on success.
@@ -71,6 +72,20 @@ public:
     // return the module's reply text (empty on success, error text otherwise).
     std::string startBackend(std::string configJson);
     std::string stopBackend();
+
+    // Synchronous get_registry_parameters, for checkRlnRateBounds: fills
+    // `out` and returns empty, or returns the failure text.
+    std::string readRegistryParameters(const std::string& registryId,
+                                       const std::string& rlnIdentifier,
+                                       nlohmann::json& out);
+
+    // Synchronous get_membership_state, bounded by kMembershipReadTimeoutMs
+    // plus a grace: fills `out` and returns empty, or returns the failure
+    // text. `unanswered`: no reply in time, or a call error.
+    std::string readMembershipState(const std::string& registryId,
+                                    const std::string& rlnIdentifier,
+                                    nlohmann::json& out, bool* unanswered = nullptr);
+    static constexpr int kMembershipReadTimeoutMs = 10'000;
 
     // Op entry points (any thread; return immediately — the reply reaches the
     // library later via logosdelivery_rln_response). The registry and
@@ -135,5 +150,5 @@ private:
     std::atomic<bool> m_enabled{false};
     // Set in init(); owned by modules(). enable() refuses without it, so
     // m_enabled implies a client and the op paths test only m_enabled.
-    LiblogosRlnModule* m_rlnModule = nullptr;
+    RlnModule* m_rlnModule = nullptr;
 };

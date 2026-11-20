@@ -128,8 +128,8 @@ those references and never fetches them; building `#lib` brings
 them into the store.
 
 ```bash
-nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lgx' -o libp2p-lgx
-nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=33e3c7a7c57f5c190781d0910a520742a4822e5f#lib' --no-link
+nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=63275942f125c3fd77d4842e137bea2a8cded665#lgx' -o libp2p-lgx
+nix build 'git+https://github.com/logos-co/logos-libp2p-module?rev=63275942f125c3fd77d4842e137bea2a8cded665#lib' --no-link
 cp -f libp2p-lgx/*.lgx packages/
 
 ```
@@ -142,27 +142,31 @@ ls packages/
 
 ### 2.3 Build the RLN dependency chain
 
-`liblogos_rln_module` is an optional dependency of `delivery_module`:
+`rln_module` is an optional dependency of `delivery_module`:
 a node whose preset has RLN off loads without it. A node on an
 RLN-enabled preset needs the whole chain installed alongside it —
-`liblogos_rln_module` → `liblogos_lez_rln_module` — so
-this walkthrough installs it too.
+`rln_module` → `rln_lez_module` (the registry provider) and
+`membership_allocation_client_module` (the allocator client), which
+in turn needs the `libp2p_module` built above — so this walkthrough
+installs it too.
 
 Each is built at the rev this module's `flake.lock` pins for it, so
 the RLN modules you install are the ones the delivery module was
-built against. From a clone, this flake re-exports the same two
-packages — `nix build '.#liblogos_rln_module-lgx'`, and likewise for
-`liblogos_lez_rln_module` — which reads the pins
+built against. From a clone, this flake re-exports the same three
+packages — `nix build '.#rln_module-lgx'`, and likewise
+`.#rln_lez_module-lgx` and
+`.#membership_allocation_client_module-lgx` — which reads the pins
 straight out of the lock.
 
 ```bash
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-rln-module#lgx' -o rln-lgx
-nix build 'git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-lez-rln-module#lgx' -o lez-rln-lgx
-cp -f rln-lgx/*.lgx lez-rln-lgx/*.lgx packages/
+nix build 'github:logos-co/logos-rln-module/a8e72fc12bdac1d095960924b309aa0dbbfdc39b#lgx' -o rln-lgx
+nix build 'github:logos-co/logos-rln-lez-module/5a3b87dd0fecf22e97ce81603eba348d2bff69cc#lgx' -o rln-lez-lgx
+nix build 'github:logos-co/logos-membership-allocation-client-module/d8286f4072197952d4f7b575fbc2b4894074ec22#lgx' -o allocation-client-lgx
+cp -f rln-lgx/*.lgx rln-lez-lgx/*.lgx allocation-client-lgx/*.lgx packages/
 
 ```
 
-Two more `.lgx` packages, one per module in the chain:
+Three more `.lgx` packages, one per module in the chain:
 
 ```bash
 ls packages/
@@ -251,7 +255,7 @@ logosctl install --dir packages -y
 
 ### 3.5 Confirm the install
 
-List the session's packages and confirm all four landed:
+List the session's packages and confirm all five landed:
 
 ```bash
 logosctl package ls
