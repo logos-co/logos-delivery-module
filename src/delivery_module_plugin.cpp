@@ -699,9 +699,8 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 // for the layered shapes, top level for a bare WakuNodeConf. A
 // mix-rln-registry-id the caller wrote, in any of those objects, must pass
 // callerMixRegistryError. `mixOn` is whether the config turns Mix on. A
-// config that turns it on is refused when it would run Mix RLN without RLN,
-// or Mix without Mix RLN beside RLN. nullopt on failure, with the createNode
-// error in `error`.
+// config that turns it on is refused unless the preset runs RLN and the node
+// gets Mix RLN. nullopt on failure, with the createNode error in `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
                                                       const RlnPresetEntry& preset,
@@ -725,13 +724,11 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
-    // The caller's mix-rln-registry-id, in every object the library reads node
-    // keys from, whichever exist, and every spelling of the key findKey's
-    // lower-casing matches. Its value is checked only when this module starts
-    // the backend: a host-managed one serves registries the preset does not
-    // describe.
-    bool callerMixRln = false;
-    {
+    // Checked only when this module starts the backend: a host-managed one
+    // serves registries the preset does not describe.
+    if (preset.enabled && preset.manageBackend) {
+        // Every object the library reads node keys from, whichever exist, and
+        // every spelling of the key findKey's lower-casing matches.
         std::vector<const nlohmann::json*> layers{&cfgObj};
         for (const char* layer : {"kernelconf", "messagingoverrides"}) {
             if (const auto layerKey = findKey(cfgObj, {layer});
@@ -743,10 +740,6 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
             for (const auto& item : layer->items()) {
                 const std::string key = toLowerCopy(item.key());
                 if (key != "mix-rln-registry-id" && key != "mixrlnregistryid") {
-                    continue;
-                }
-                callerMixRln = true;
-                if (!(preset.enabled && preset.manageBackend)) {
                     continue;
                 }
                 error = callerMixRegistryError(item.value(), preset);
@@ -771,11 +764,10 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     nlohmann::json* target = nodeKeyTarget(cfgObj, mixKey, level);
     mixOn = target && mixIsOn(*target, mixKey, level);
 
-    // A node that runs Mix proves its hops with Mix RLN exactly when the
-    // deployment runs RLN: Mix RLN without RLN has no backend to prove on, and
-    // Mix without Mix RLN beside an RLN-protected relay is a hop nobody rates.
-    if (mixOn && !preset.enabled && callerMixRln) {
-        error = "mix-rln-registry-id asks for Mix RLN, but the preset runs no RLN";
+    // Mix is valid only with RLN, and then only with Mix RLN: a mix hop that
+    // nothing rates is open to anyone, with or without an RLN-protected relay.
+    if (mixOn && !preset.enabled) {
+        error = "this config turns Mix on, which needs RLN, but the preset runs no RLN";
         return std::nullopt;
     }
     // Only a key where this shape takes node keys gives the node Mix RLN: one

@@ -308,15 +308,14 @@ registry: the backend is started for the relay registry alone, and `rlnState`
 reports no mix field. A mode with `relay-membership: false` then leaves the
 node no membership at all, so such a config fails `createNode`.
 
-A node that runs Mix runs Mix RLN exactly when its deployment runs RLN;
-without Mix either is fine:
+Mix is valid only with RLN, and then only with Mix RLN; without Mix, RLN is
+the deployment's choice:
 
 | RLN (preset) | Mix | Mix RLN | |
 |---|---|---|---|
 | on or off | off | | accepted |
-| off | on | off | accepted |
-| off | on | on (`mix-rln-registry-id` in the config) | `createNode` fails: no backend to prove on |
-| on | on | off (no mix registry in the preset, no `mix-rln-registry-id` in the config) | `createNode` fails |
+| off | on | on or off | `createNode` fails: Mix needs RLN |
+| on | on | off (no mix registry in the preset, no `mix-rln-registry-id` where the config shape takes node keys) | `createNode` fails: Mix needs Mix RLN |
 | on | on | on | accepted |
 
 A `mix-rln-registry-id` set in the node

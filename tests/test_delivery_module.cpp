@@ -2280,9 +2280,9 @@ LOGOS_TEST(a_caller_supplied_mix_registry_may_be_a_relay_registry_at_mix_values)
     }
 }
 
-// A node that runs Mix runs Mix RLN exactly when its deployment runs RLN.
-// Without Mix either is fine.
-LOGOS_TEST(mix_runs_with_mix_rln_exactly_when_the_deployment_runs_rln) {
+// Mix is valid only with RLN and Mix RLN. Without Mix, RLN is the
+// deployment's choice.
+LOGOS_TEST(mix_runs_only_with_rln_and_mix_rln) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
@@ -2307,10 +2307,12 @@ LOGOS_TEST(mix_runs_with_mix_rln_exactly_when_the_deployment_runs_rln) {
         LOGOS_ASSERT_EQ(outcome(kRlnNodeCfg), std::string("ok"));
     }
 
-    // No RLN: Mix alone is valid, Mix RLN is not.
-    LOGOS_ASSERT_EQ(outcome(R"({"logLevel":"INFO","preset":"logos.dev","mix":true})"),
-                    std::string("ok"));
+    // No RLN: no Mix, with or without a Mix RLN key.
     for (const char* cfg : {
+             R"({"logLevel":"INFO","preset":"logos.dev","mix":true})",
+             R"({"logLevel":"INFO","preset":"logos.dev","anonymityLevel":"Preferred"})",
+             R"({"mode":"Edge","preset":"logos.dev","messagingOverrides":{"anonymityLevel":"Required"}})",
+             R"({"entryLayer":"kernel","preset":"logos.dev","kernelConf":{"logLevel":"INFO","mix":true}})",
              R"({"logLevel":"INFO","preset":"logos.dev","mix":true,"mix-rln-registry-id":"reg"})",
              R"({"logLevel":"INFO","preset":"logos.dev","anonymityLevel":"Required","mixRlnRegistryId":"reg"})",
              R"({"mode":"Core","preset":"logos.dev","messagingOverrides":{"anonymityLevel":"Preferred","mix-rln-registry-id":"reg"}})",
