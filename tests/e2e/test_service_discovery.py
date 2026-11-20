@@ -19,7 +19,6 @@ from libs.helpers import (
     container_ip,
     event_arg,
     event_payload,
-    event_request_id,
     is_connected,
     make_delivery_config,
     node_multiaddr,
@@ -37,7 +36,6 @@ CONNECTED_TIMEOUT_S = 60.0
 LOOKUP_TIMEOUT_S = 30.0
 RECEIVED_TIMEOUT_S = 20.0
 # logos-delivery gives up a send after its 60 s retry time window.
-SEND_ERROR_TIMEOUT_S = 90.0
 # Longer than a test runs: a node given it looks up only in its first 8 s.
 LONG_LOOKUP_INTERVAL_S = 600
 
@@ -172,9 +170,9 @@ def test_plugin_node_without_libp2p_module_fails_to_start(daemon_factory):
     assert event_arg(stopped, 0) is True
 
 
-def test_edge_node_finds_lightpush_node_but_send_fails(daemon_factory, delivery_node_factory):
+def test_edge_node_finds_lightpush_node_but_send_is_refused(daemon_factory, delivery_node_factory):
     """The Edge node's lookup adds the light push node to its peer store, but only the
-    relay connectivity loop dials found peers, so the Edge node's send fails."""
+    relay connectivity loop dials found peers, so the Edge node's send is refused."""
     libp2p_bootstrap = daemon_factory("libp2p-bootstrap")
     bootstrap = setup_libp2p_bootstrap(libp2p_bootstrap)
     # The light push node relays to it, so a push from the Edge node would succeed.
@@ -200,15 +198,11 @@ def test_edge_node_finds_lightpush_node_but_send_fails(daemon_factory, delivery_
         message="edge: lookup added no peer",
     )
 
-    with edge.watch() as events:
-        time.sleep(SUBSCRIBE_GRACE_S)
-        request_id = edge.send(CONTENT_TOPIC, "edge")
-        event = wait_for_event(events, "messageError", timeout=SEND_ERROR_TIMEOUT_S)
+    time.sleep(SUBSCRIBE_GRACE_S)
+    result = edge.send_result(CONTENT_TOPIC, "edge")
 
-    assert (event_request_id(event), event_arg(event, 2)) == (
-        request_id,
-        "Unable to send within retry time window",
-    )
+    assert result.get("success") is False, f"expected the send to be refused, got {result!r}"
+    assert result.get("error", "").endswith("(NotConnected)"), result.get("error")
 
 
 def test_restarted_node_reconnects_while_old_advert_is_served(daemon_factory, delivery_node_factory):

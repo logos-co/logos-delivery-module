@@ -3,7 +3,7 @@
 Unlike chat_module, delivery_module's public methods are SYNCHRONOUS: each
 returns a StdLogosResult `{success, value, error}` that `client.call` hands back
 directly — there are no per-call result events. Only message delivery is async,
-surfacing as the typed events messageReceived / messageQueued /
+surfacing as the typed events messageReceived /
 messagePropagated / messageSent / messageError / connectionStateChanged.
 """
 
@@ -180,6 +180,9 @@ class LogosDelivery:
 
     def send(self, content_topic: str, payload: str, *, timeout: Optional[float] = None):
         return call_ok(self.client, "send", content_topic, payload, timeout=timeout)
+
+    def send_result(self, content_topic: str, payload: str, *, timeout: Optional[float] = None) -> dict:
+        return call_result(self.client, "send", content_topic, payload, timeout=timeout)
 
     def get_available_configs(self, *, timeout: Optional[float] = None):
         return call_ok(self.client, "getAvailableConfigs", timeout=timeout)
@@ -535,10 +538,10 @@ def event_arg(event: dict, index: int) -> Any:
     return parse_event(event).get(f"arg{index}")
 
 
-def event_request_id(event: dict) -> Optional[str]:
-    """requestId of a messageSent/messagePropagated/messageError event (arg 0)."""
-    rid = event_arg(event, 0)
-    return str(rid) if rid is not None else None
+def event_message_hash(event: dict) -> Optional[str]:
+    """messageHash of a messageSent/messagePropagated/messageError event (arg 0)."""
+    msg_hash = event_arg(event, 0)
+    return str(msg_hash) if msg_hash is not None else None
 
 
 def event_content_topic(event: dict) -> Optional[str]:

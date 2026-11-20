@@ -34,7 +34,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_create_start_and_stop_node` | 1 | `load_module → createNode → start → stop` all succeed over RPC |
 | `test_createNode_twice_rejected` | 1 | second `createNode` returns `success=false` |
 | `test_query_and_subscribe_methods` | 1 | queries (`getAvailableConfigs`/`getAvailableNodeInfoIDs`/`getNodeInfo`) + `subscribe`/`unsubscribe` round-trip |
-| `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for its `requestId` |
+| `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for the hash `send` returned |
 | `test_bidirectional_propagation` | 2 | A→B and B→A both propagate |
 | `test_two_nodes_message_received` | 2 | receiver sees `messageReceived` (see below) |
 | `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
@@ -52,7 +52,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_plugin_node_finds_in_process_node` | 3 | a node hosting discovery on `libp2p_module` finds one running it in-process; messages pass both ways |
 | `test_in_process_node_finds_plugin_node` | 3 | the same, the in-process node finding the other |
 | `test_plugin_node_without_libp2p_module_fails_to_start` | 1 | without `libp2p_module` installed, `nodeStarted` reports it is not available, and the module stops the node |
-| `test_edge_node_finds_lightpush_node_but_send_fails` | 4 | an Edge node's lookup adds a light push node, which relays to a receiver, to its peer store, but only the relay connectivity loop dials found peers, so its send ends in `messageError` |
+| `test_edge_node_finds_lightpush_node_but_send_is_refused` | 4 | an Edge node's lookup adds a light push node, which relays to a receiver, to its peer store, but only the relay connectivity loop dials found peers, so `send` refuses its message with `NotConnected` |
 | `test_restarted_node_reconnects_while_old_advert_is_served` | 3 | A restarts; B reconnects to it and receives its message, and the bootstrap still returns the advert A signed before the restart |
 
 Outside the fleet tests, we assert `messagePropagated`, not `messageSent`: with relay-only /
@@ -63,12 +63,12 @@ no store peer, `messageSent` never fires (interop S06 vs S07).
 `delivery_module`'s public methods are **synchronous** — `client.call(...)` returns
 the `StdLogosResult` `{success, value, error}` directly; there are no per-call
 result events. Only message delivery is async, via the typed events
-`messageReceived` / `messageQueued` / `messagePropagated` / `messageSent` /
+`messageReceived` / `messagePropagated` / `messageSent` /
 `messageError` / `connectionStateChanged`.
 
 `logosctl watch` serializes a typed event as `{"event": <name>, "data": {"arg0":
 <1st arg>, "arg1": <2nd arg>, ...}}` — each codegen event arg lands at `argN` by
-position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTopic`
+position (so `messagePropagated.messageHash` = `arg0`, `messageReceived.contentTopic`
 = `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
 
 `messageReceived` carries the `contentTopic` (`arg1`) and the `vector<uint8_t>`

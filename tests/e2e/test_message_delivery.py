@@ -19,7 +19,7 @@ from libs.helpers import (
     DeliveryNode,
     event_content_topic,
     event_payload,
-    event_request_id,
+    event_message_hash,
     event_source,
     is_connected,
     make_delivery_config,
@@ -47,7 +47,7 @@ def _peered_nodes(delivery_node_factory) -> tuple[DeliveryNode, DeliveryNode]:
 
 
 def test_two_nodes_propagation(delivery_node_factory):
-    """Gate: node A publishes; A observes messagePropagated for its requestId.
+    """Gate: node A publishes; A observes messagePropagated for the hash send returned.
 
     A is the dialee (B dialed it via staticnodes), mirroring interop S06 where the
     sender is the node the peer connects to.
@@ -57,14 +57,14 @@ def test_two_nodes_propagation(delivery_node_factory):
 
     with node_a.watch("messagePropagated") as w:
         time.sleep(SUBSCRIBE_GRACE_S)
-        request_id = node_a.send(CONTENT_TOPIC, "hello-propagation")
-        assert request_id, "send returned an empty requestId"
+        msg_hash = node_a.send(CONTENT_TOPIC, "hello-propagation")
+        assert msg_hash, "send returned an empty message hash"
         event = wait_for_event(w, "messagePropagated", timeout=PROPAGATED_TIMEOUT_S)
 
     logger.info("messagePropagated payload: %r", parse_event(event))
-    rid = event_request_id(event)
-    if rid is not None:
-        assert rid == request_id, f"messagePropagated requestId {rid!r} != sent {request_id!r}"
+    got_hash = event_message_hash(event)
+    if got_hash is not None:
+        assert got_hash == msg_hash, f"messagePropagated hash {got_hash!r} != sent {msg_hash!r}"
 
 
 def test_bidirectional_propagation(delivery_node_factory):
@@ -76,12 +76,12 @@ def test_bidirectional_propagation(delivery_node_factory):
     for sender, content in ((node_a, "a-to-b"), (node_b, "b-to-a")):
         with sender.watch("messagePropagated") as w:
             time.sleep(SUBSCRIBE_GRACE_S)
-            request_id = sender.send(CONTENT_TOPIC, content)
-            assert request_id, f"send from {sender.label} returned an empty requestId"
+            msg_hash = sender.send(CONTENT_TOPIC, content)
+            assert msg_hash, f"send from {sender.label} returned an empty message hash"
             event = wait_for_event(w, "messagePropagated", timeout=PROPAGATED_TIMEOUT_S)
-        rid = event_request_id(event)
-        if rid is not None:
-            assert rid == request_id, f"{sender.label}: propagated requestId {rid!r} != sent {request_id!r}"
+        got_hash = event_message_hash(event)
+        if got_hash is not None:
+            assert got_hash == msg_hash, f"{sender.label}: propagated hash {got_hash!r} != sent {msg_hash!r}"
 
 
 def test_two_nodes_message_received(delivery_node_factory):
@@ -92,8 +92,8 @@ def test_two_nodes_message_received(delivery_node_factory):
 
     with node_a.watch("messageReceived") as w:
         time.sleep(SUBSCRIBE_GRACE_S)
-        request_id = node_b.send(CONTENT_TOPIC, "hello-receive")
-        assert request_id, "send returned an empty requestId"
+        msg_hash = node_b.send(CONTENT_TOPIC, "hello-receive")
+        assert msg_hash, "send returned an empty message hash"
         event = wait_for_event(w, "messageReceived", timeout=RECEIVED_TIMEOUT_S)
 
     logger.info("messageReceived payload: %r", parse_event(event))

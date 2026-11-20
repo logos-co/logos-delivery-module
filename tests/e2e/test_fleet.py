@@ -13,7 +13,7 @@ from libs.constants import (
 from libs.helpers import (
     event_content_topic,
     event_payload,
-    event_request_id,
+    event_message_hash,
     in_parallel,
     make_fleet_config,
     wait_for_connected,
@@ -85,11 +85,11 @@ def test_lightpushed_message_is_stored(fleet_node_factory, fleet_membership):
     sender = _sender(fleet_node_factory, fleet_membership, "lightpush-client", mode="Edge")
 
     with sender.watch() as events:
-        request_id = sender.send(content_topic, PAYLOAD)
+        msg_hash = sender.send(content_topic, PAYLOAD)
         # The preset turns reliability on, so `messageSent` waits for a store node to confirm the message.
         wait_for_event(
             events, "messageSent", timeout=SENT_TIMEOUT_S,
-            predicate=lambda e: event_request_id(e) == request_id,
+            predicate=lambda e: event_message_hash(e) == msg_hash,
         )
 
 

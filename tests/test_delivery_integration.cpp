@@ -462,7 +462,7 @@ LOGOS_TEST(integration_rln_start_chain_round_trip) {
 // Tests - send (as in simple.cpp interactive loop)
 // ---------------------------------------------------------------------------
 
-LOGOS_TEST(integration_send_returns_success_with_request_id) {
+LOGOS_TEST(integration_send_returns_success_with_message_hash) {
     ensureStarted();
 
     LOGOS_ASSERT_TRUE(g_impl->subscribe(kTestTopic).success);

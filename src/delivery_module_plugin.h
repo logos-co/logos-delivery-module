@@ -153,15 +153,17 @@ public:
      * Builds a JSON envelope expected by `logosdelivery_ctx_send`:
      * `{ "contentTopic": string, "payload": base64, "ephemeral": false }`.
      *
-     * Returns a requestId on success. Async results come via typed events:
-     * - `messageError` emitted if the module can't send the message
-     * - `messageQueued` emitted if the send waits for rate-limit budget
+     * Returns the `0x` hex message hash on success; it keys every event of the
+     * message. A refused send (e.g. not connected, rate-limited, queue full)
+     * returns an error, gets no event, and is not retried. Async results of an
+     * accepted send come via typed events:
+     * - `messageError` emitted if the message is not propagated or not stored
      * - `messagePropagated` emitted if the message has hit the network
      * - `messageSent` emitted after the message is validated by the network
      *
      * @param contentTopic Destination content topic.
      * @param payload Raw message bytes; base64-encoded before crossing the FFI boundary.
-     * @return Success with request id, or error details.
+     * @return Success with the message hash, or error details.
      */
     StdLogosResult send(const std::string& contentTopic, const std::vector<uint8_t>& payload);
 
@@ -418,28 +420,23 @@ public:
 
 logos_events:
     /**
-     * @brief Emitted when a send is held back because the epoch's rate-limit
-     *        budget is spent.
-     *
-     * Not a failure: the message stays queued and goes out once the budget
-     * refills, so @ref messagePropagated and @ref messageSent still follow.
-     * Emitted at most once per send, the first time the message is held back.
-     */
-    void messageQueued(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
-
-    /**
      * @brief Emitted when the network has validated a sent message.
      *
      * The success terminal state for @ref send, usually preceded by
      * @ref messagePropagated.
      */
-    void messageSent(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+    void messageSent(const std::string& messageHash, int64_t timestamp);
 
-    /** @brief Emitted when the module could not send a message; `error` carries the reason. */
-    void messageError(const std::string& requestId, const std::string& messageHash, const std::string& error, int64_t timestamp);
+    /**
+     * @brief Emitted when an accepted send fails; `error` carries the reason.
+     *
+     * `kind` is `"NotPropagated"` (no peer took the message) or `"NotStored"`
+     * (it propagated, but no store node confirmed it).
+     */
+    void messageError(const std::string& messageHash, const std::string& kind, const std::string& error, int64_t timestamp);
 
     /** @brief Emitted when a message has reached the network but is not yet validated. */
-    void messagePropagated(const std::string& requestId, const std::string& messageHash, int64_t timestamp);
+    void messagePropagated(const std::string& messageHash, int64_t timestamp);
 
     /**
      * @brief Emitted when a message arrives on a subscribed content topic.
