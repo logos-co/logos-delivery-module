@@ -2330,6 +2330,22 @@ LOGOS_TEST(mix_runs_with_mix_rln_exactly_when_the_deployment_runs_rln) {
             LOGOS_ASSERT_TRUE(refusedFor(cfg, "Mix needs Mix RLN"));
         }
     }
+    // The relay registry at Mix's values may serve Mix RLN, named by the
+    // caller: where the shape takes node keys. A key in another object is not
+    // the node's Mix RLN.
+    {
+        RlnPresetsFile presets(
+            R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":10,"max-epoch-gap":3}})");
+        LOGOS_ASSERT_EQ(
+            outcome(R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Required","mix-rln-registry-id":"reg"}})"),
+            std::string("ok"));
+        for (const char* cfg : {
+                 R"({"logLevel":"INFO","preset":"logos.test","mix":true,"messagingOverrides":{"mix-rln-registry-id":"reg"}})",
+                 R"({"entryLayer":"kernel","preset":"logos.test","mix-rln-registry-id":"reg","kernelConf":{"logLevel":"INFO","mix":true}})",
+             }) {
+            LOGOS_ASSERT_TRUE(refusedFor(cfg, "Mix needs Mix RLN"));
+        }
+    }
     // RLN with a mix registry: the preset supplies Mix RLN.
     {
         RlnPresetsFile presets(kRlnPresetTableWithMix);

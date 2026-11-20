@@ -778,7 +778,11 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         error = "mix-rln-registry-id asks for Mix RLN, but the preset runs no RLN";
         return std::nullopt;
     }
-    if (mixOn && preset.enabled && !preset.hasMix() && !callerMixRln) {
+    // Only a key where this shape takes node keys gives the node Mix RLN: one
+    // in an object the library does not read it from does not count.
+    const bool targetMixRln =
+        target && findKey(*target, {"mix-rln-registry-id", "mixrlnregistryid"}).has_value();
+    if (mixOn && preset.enabled && !preset.hasMix() && !targetMixRln) {
         error = "this config turns Mix on and the preset runs RLN, so Mix needs Mix RLN: the"
                 " preset names no mix-registry-id and the config no mix-rln-registry-id";
         return std::nullopt;
