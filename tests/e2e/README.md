@@ -34,7 +34,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_create_start_and_stop_node` | 1 | `load_module → createNode → start → stop` all succeed over RPC |
 | `test_createNode_twice_rejected` | 1 | second `createNode` returns `success=false` |
 | `test_query_and_subscribe_methods` | 1 | queries (`getAvailableConfigs`/`getAvailableNodeInfoIDs`/`getNodeInfo`) + `subscribe`/`unsubscribe` round-trip |
-| `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for its `requestId` |
+| `test_two_nodes_propagation` | 2 | **gate** — sender sees `messagePropagated` for the hash `send` returned |
 | `test_bidirectional_propagation` | 2 | A→B and B→A both propagate |
 | `test_two_nodes_message_received` | 2 | receiver sees `messageReceived` (see below) |
 | `test_validating_node_drops_message_without_proof` | 3 | a message sent without an RLN proof is received by the non-validating node and rejected by the validating one (see "RLN") |
@@ -63,12 +63,12 @@ no store peer, `messageSent` never fires (interop S06 vs S07).
 `delivery_module`'s public methods are **synchronous** — `client.call(...)` returns
 the `StdLogosResult` `{success, value, error}` directly; there are no per-call
 result events. Only message delivery is async, via the typed events
-`messageReceived` / `messageQueued` / `messagePropagated` / `messageSent` /
+`messageReceived` / `messagePropagated` / `messageSent` /
 `messageError` / `connectionStateChanged`.
 
 `logosctl watch` serializes a typed event as `{"event": <name>, "data": {"arg0":
 <1st arg>, "arg1": <2nd arg>, ...}}` — each codegen event arg lands at `argN` by
-position (so `messagePropagated.requestId` = `arg0`, `messageReceived.contentTopic`
+position (so `messagePropagated.messageHash` = `arg0`, `messageReceived.contentTopic`
 = `arg1`). `parse_event` / `event_arg` in `libs/helpers.py` read that.
 
 `messageReceived` carries the `contentTopic` (`arg1`) and the `vector<uint8_t>`

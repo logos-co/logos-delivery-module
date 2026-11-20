@@ -445,16 +445,16 @@ LOGOS_TEST(send_fails_without_createNode) {
     LOGOS_ASSERT_FALSE(result.success);
 }
 
-LOGOS_TEST(send_succeeds_and_returns_request_id) {
+LOGOS_TEST(send_succeeds_and_returns_message_hash) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_ctx_send").returns("req-id-abc123");
+    t.mockCFunction("logosdelivery_ctx_send").returns("0xabc123");
     std::vector<uint8_t> payload{'h','e','l','l','o',' ','w','o','r','l','d'};
     StdLogosResult result = impl->send("/test/1/delivery/proto", payload);
 
     LOGOS_ASSERT_TRUE(result.success);
-    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("req-id-abc123"));
+    LOGOS_ASSERT_EQ(result.value.get<std::string>(), std::string("0xabc123"));
     LOGOS_ASSERT(t.cFunctionCalled("logosdelivery_ctx_send"));
 
     delete impl;
@@ -464,7 +464,7 @@ LOGOS_TEST(send_calls_ffi_with_byte_array_payload) {
     auto t = LogosTestContext("delivery_module");
     auto* impl = createInitializedImpl(t);
 
-    t.mockCFunction("logosdelivery_ctx_send").returns("req-id-xyz");
+    t.mockCFunction("logosdelivery_ctx_send").returns("0xdef456");
     std::vector<uint8_t> payload{'t','e','s','t','-','p','a','y','l','o','a','d'};
     StdLogosResult result = impl->send("/test/1/delivery/proto", payload);
 

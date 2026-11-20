@@ -20,10 +20,9 @@ RlnStateEvent g_lastRlnState{};
 std::mutex g_rlnStateMutex;
 } // namespace delivery_test_events
 
-void DeliveryModuleImpl::messageQueued(const std::string&, const std::string&, int64_t) {}
-void DeliveryModuleImpl::messageSent(const std::string&, const std::string&, int64_t) {}
+void DeliveryModuleImpl::messageSent(const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageError(const std::string&, const std::string&, const std::string&, int64_t) {}
-void DeliveryModuleImpl::messagePropagated(const std::string&, const std::string&, int64_t) {}
+void DeliveryModuleImpl::messagePropagated(const std::string&, int64_t) {}
 void DeliveryModuleImpl::messageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, const std::string&, int64_t) {}
 void DeliveryModuleImpl::connectionStateChanged(const std::string&, int64_t) {}
 void DeliveryModuleImpl::channelMessageReceived(const std::string&, const std::string&, const std::vector<uint8_t>&, int64_t) {}

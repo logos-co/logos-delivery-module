@@ -4,7 +4,7 @@ import pytest
 
 from libs.constants import CONTENT_TOPIC, PUBSUB_TOPIC, RLN_VALID_MESSAGES
 from libs.helpers import (
-    event_request_id,
+    event_message_hash,
     is_connected,
     make_delivery_config,
     node_multiaddr,
@@ -118,9 +118,9 @@ def test_send_with_rln_off_propagates(delivery_node_factory):
     with sender.watch() as events:
         delivery_node_factory("receiver", make_delivery_config(static_peers=[node_multiaddr(sender)]))
         wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
-        request_id = sender.send(CONTENT_TOPIC, "rln-off")
+        msg_hash = sender.send(CONTENT_TOPIC, "rln-off")
         event = wait_for_event(events, "messagePropagated", timeout=PROPAGATED_TIMEOUT_S)
-    assert event_request_id(event) == request_id
+    assert event_message_hash(event) == msg_hash
 
 
 @pytest.mark.rln
@@ -129,6 +129,6 @@ def test_send_without_membership_reports_error(rln_node_factory, delivery_node_f
     with sender.watch() as events:
         delivery_node_factory("receiver", make_delivery_config(static_peers=[node_multiaddr(sender)]))
         wait_for_event(events, "connectionStateChanged", timeout=CONNECTED_TIMEOUT_S, predicate=is_connected)
-        request_id = sender.send(CONTENT_TOPIC, "no-membership")
+        msg_hash = sender.send(CONTENT_TOPIC, "no-membership")
         event = wait_for_event(events, "messageError", timeout=SEND_ERROR_TIMEOUT_S)
-    assert event_request_id(event) == request_id
+    assert event_message_hash(event) == msg_hash

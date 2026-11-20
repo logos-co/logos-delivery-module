@@ -19,7 +19,7 @@ from libs.helpers import (
     container_ip,
     event_arg,
     event_payload,
-    event_request_id,
+    event_message_hash,
     is_connected,
     make_delivery_config,
     node_multiaddr,
@@ -202,12 +202,13 @@ def test_edge_node_finds_lightpush_node_but_send_fails(daemon_factory, delivery_
 
     with edge.watch() as events:
         time.sleep(SUBSCRIBE_GRACE_S)
-        request_id = edge.send(CONTENT_TOPIC, "edge")
+        msg_hash = edge.send(CONTENT_TOPIC, "edge")
         event = wait_for_event(events, "messageError", timeout=SEND_ERROR_TIMEOUT_S)
 
-    assert (event_request_id(event), event_arg(event, 2)) == (
-        request_id,
-        "Unable to send within retry time window",
+    assert (event_message_hash(event), event_arg(event, 1), event_arg(event, 2)) == (
+        msg_hash,
+        "NotPropagated",
+        "Unable to send within the delivery window",
     )
 
 

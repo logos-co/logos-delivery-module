@@ -3,7 +3,7 @@
 Unlike chat_module, delivery_module's public methods are SYNCHRONOUS: each
 returns a StdLogosResult `{success, value, error}` that `client.call` hands back
 directly — there are no per-call result events. Only message delivery is async,
-surfacing as the typed events messageReceived / messageQueued /
+surfacing as the typed events messageReceived /
 messagePropagated / messageSent / messageError / connectionStateChanged.
 """
 
@@ -535,10 +535,10 @@ def event_arg(event: dict, index: int) -> Any:
     return parse_event(event).get(f"arg{index}")
 
 
-def event_request_id(event: dict) -> Optional[str]:
-    """requestId of a messageSent/messagePropagated/messageError event (arg 0)."""
-    rid = event_arg(event, 0)
-    return str(rid) if rid is not None else None
+def event_message_hash(event: dict) -> Optional[str]:
+    """messageHash of a messageSent/messagePropagated/messageError event (arg 0)."""
+    msg_hash = event_arg(event, 0)
+    return str(msg_hash) if msg_hash is not None else None
 
 
 def event_content_topic(event: dict) -> Optional[str]:

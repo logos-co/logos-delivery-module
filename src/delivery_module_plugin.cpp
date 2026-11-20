@@ -73,7 +73,6 @@ std::vector<uint8_t> decodeBase64Payload(const nlohmann::json& payloadValue) {
 // onTopicHealthChange, onConnectionChange and onReceivedMessage, which the
 // module does not surface.
 constexpr const char* kEventNames[] = {
-    "onMessageQueued",
     "onMessageSent",
     "onMessageError",
     "onMessagePropagated",
@@ -450,28 +449,20 @@ void DeliveryModuleImpl::event_callback(int callerRet, const char* msg, size_t l
             std::string eventType = jsonObj.value("eventType", "");
             int64_t timestamp = currentTimestampNs();
 
-            if (eventType == "message_queued") {
-                impl->messageQueued(
-                    jsonObj.value("requestId", ""),
-                    jsonObj.value("messageHash", ""),
-                    timestamp);
-
-            } else if (eventType == "message_sent") {
+            if (eventType == "message_sent") {
                 impl->messageSent(
-                    jsonObj.value("requestId", ""),
                     jsonObj.value("messageHash", ""),
                     timestamp);
 
             } else if (eventType == "message_error") {
                 impl->messageError(
-                    jsonObj.value("requestId", ""),
                     jsonObj.value("messageHash", ""),
+                    jsonObj.value("kind", ""),
                     jsonObj.value("error", ""),
                     timestamp);
 
             } else if (eventType == "message_propagated") {
                 impl->messagePropagated(
-                    jsonObj.value("requestId", ""),
                     jsonObj.value("messageHash", ""),
                     timestamp);
 
@@ -969,7 +960,7 @@ StdLogosResult DeliveryModuleImpl::send(const std::string& contentTopic, const s
     }
 
     if (outcome.success && outcome.value.is_string()) {
-        fprintf(stderr, "DeliveryModuleImpl: Send initiated for topic: %s, with success, requestId: %s\n",
+        fprintf(stderr, "DeliveryModuleImpl: Send initiated for topic: %s, with success, messageHash: %s\n",
                 contentTopic.c_str(), outcome.value.get<std::string>().c_str());
     }
     return outcome;
