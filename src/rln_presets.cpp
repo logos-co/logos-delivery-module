@@ -412,6 +412,16 @@ RlnPresetEntry RlnPresetEntry::forMode(RlnMode mode) const
     return out;
 }
 
+RlnPresetEntry RlnPresetEntry::withoutMix() const
+{
+    RlnPresetEntry out = *this;
+    out.mixRegistryId.clear();
+    out.mixRlnIdentifier.clear();
+    out.mixMetadataTopic.clear();
+    out.mixRateLimit = 0;
+    return out;
+}
+
 std::string parseRlnPresetTable(const std::string& json,
                                 std::map<std::string, RlnPresetEntry>& out)
 {

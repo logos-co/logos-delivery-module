@@ -117,6 +117,14 @@ struct RlnPresetEntry {
      */
     RlnPresetEntry forMode(RlnMode mode) const;
 
+    /**
+     * @brief The entry a node that does not run Mix is provisioned with: this
+     * one with no Mix registry, so the backend is started for the relay
+     * registry alone and the node takes no Mix membership. A registry relay
+     * and mix share is then asked at `rateLimit`, not at `mixRateLimit`.
+     */
+    RlnPresetEntry withoutMix() const;
+
     /** @brief Whether the deployment names a registry for native Mix. */
     bool hasMix() const { return !mixRegistryId.empty(); }
     /**

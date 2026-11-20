@@ -633,6 +633,33 @@ static bool mixIsOn(const nlohmann::json& target, bool mixKey, bool level)
     return false;
 }
 
+// The object a createNode config takes node keys in, by its shape: kernelConf
+// when present (where an anonymity level is not read: `level` false), the top
+// level of a bare WakuNodeConf, messagingOverrides for the layered shapes
+// (where `mix` is not a key: `mixKey` false). Null for a kernel entry without
+// a kernelConf, left for the parser to reject, and for a layered config
+// without a messagingOverrides object.
+static nlohmann::json* nodeKeyTarget(nlohmann::json& cfgObj, bool& mixKey, bool& level)
+{
+    mixKey = true;
+    level = true;
+    if (const auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
+        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
+        level = false;
+        return &cfgObj[*kernelConfKey];
+    }
+    if (isKernelEntry(cfgObj)) {
+        return nullptr;
+    }
+    if (!isFlatShape(cfgObj)) {
+        mixKey = false;
+        const auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
+        return overridesKey && cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey]
+                                                                 : nullptr;
+    }
+    return &cfgObj;
+}
+
 // Why the caller's mix-rln-registry-id is not a registry the backend serves
 // at Mix's epoch size and gap; empty when it is.
 static std::string callerMixRegistryError(const nlohmann::json& value, const RlnPresetEntry& preset)
@@ -671,14 +698,18 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 // accepts it: kernelConf when present, messagingOverrides (created if needed)
 // for the layered shapes, top level for a bare WakuNodeConf. A
 // mix-rln-registry-id the caller wrote, in any of those objects, must pass
-// callerMixRegistryError. nullopt on failure, with the createNode error in
-// `error`.
+// callerMixRegistryError. `mixOn` is whether the config turns Mix on. A
+// config that turns it on is refused when it would run Mix RLN without RLN,
+// or Mix without Mix RLN beside RLN. nullopt on failure, with the createNode
+// error in `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
                                                       const RlnPresetEntry& preset,
+                                                      bool& mixOn,
                                                       std::string& error)
 {
     error.clear();
+    mixOn = false;
     nlohmann::json cfgObj;
     try {
         cfgObj = nlohmann::json::parse(cfg);
@@ -694,11 +725,13 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
-    // Checked only when this module starts the backend: a host-managed one
-    // serves registries the preset does not describe.
-    if (preset.enabled && preset.manageBackend) {
-        // Every object the library reads node keys from, whichever exist, and
-        // every spelling of the key findKey's lower-casing matches.
+    // The caller's mix-rln-registry-id, in every object the library reads node
+    // keys from, whichever exist, and every spelling of the key findKey's
+    // lower-casing matches. Its value is checked only when this module starts
+    // the backend: a host-managed one serves registries the preset does not
+    // describe.
+    bool callerMixRln = false;
+    {
         std::vector<const nlohmann::json*> layers{&cfgObj};
         for (const char* layer : {"kernelconf", "messagingoverrides"}) {
             if (const auto layerKey = findKey(cfgObj, {layer});
@@ -712,6 +745,10 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                 if (key != "mix-rln-registry-id" && key != "mixrlnregistryid") {
                     continue;
                 }
+                callerMixRln = true;
+                if (!(preset.enabled && preset.manageBackend)) {
+                    continue;
+                }
                 error = callerMixRegistryError(item.value(), preset);
                 if (!error.empty()) {
                     return std::nullopt;
@@ -722,28 +759,32 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
 
     const bool disableRlnValidation = preset.enabled && !preset.enableValidation;
     const bool mixRegistry = preset.enabled && preset.hasMix();
-    if (!persistencePath.empty() || disableRlnValidation || mixRegistry) {
-        nlohmann::json* target = &cfgObj;
-        bool mixKey = true;
-        bool level = true;
-        const bool kernelEntry = isKernelEntry(cfgObj);
-        if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
-            kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
-            target = &cfgObj[*kernelConfKey];
-            level = false;
-        } else if (kernelEntry) {
-            // Kernel entry without a kernelConf object: leave the config
-            // untouched for the parser to reject.
-            target = nullptr;
-        } else if (!isFlatShape(cfgObj)) {
-            auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
-            if (!overridesKey) {
-                cfgObj["messagingOverrides"] = nlohmann::json::object();
-                overridesKey = "messagingOverrides";
-            }
-            target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
-            mixKey = false;
-        }
+    const bool writes = !persistencePath.empty() || disableRlnValidation || mixRegistry;
+    // A layered config takes node keys in messagingOverrides: made when there
+    // is something to write there.
+    if (writes && !isKernelEntry(cfgObj) && !isFlatShape(cfgObj)
+        && !findKey(cfgObj, {"kernelconf"}) && !findKey(cfgObj, {"messagingoverrides"})) {
+        cfgObj["messagingOverrides"] = nlohmann::json::object();
+    }
+    bool mixKey = true;
+    bool level = true;
+    nlohmann::json* target = nodeKeyTarget(cfgObj, mixKey, level);
+    mixOn = target && mixIsOn(*target, mixKey, level);
+
+    // A node that runs Mix proves its hops with Mix RLN exactly when the
+    // deployment runs RLN: Mix RLN without RLN has no backend to prove on, and
+    // Mix without Mix RLN beside an RLN-protected relay is a hop nobody rates.
+    if (mixOn && !preset.enabled && callerMixRln) {
+        error = "mix-rln-registry-id asks for Mix RLN, but the preset runs no RLN";
+        return std::nullopt;
+    }
+    if (mixOn && preset.enabled && !preset.hasMix() && !callerMixRln) {
+        error = "this config turns Mix on and the preset runs RLN, so Mix needs Mix RLN: the"
+                " preset names no mix-registry-id and the config no mix-rln-registry-id";
+        return std::nullopt;
+    }
+
+    if (writes) {
         if (target && !persistencePath.empty()
             && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
             (*target)["localStoragePath"] = persistencePath + "/data";
@@ -755,7 +796,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
             const auto callerSet = [&](const char* dashed, const char* joined) {
                 return findKey(*target, {dashed, joined}).has_value();
             };
-            if (mixIsOn(*target, mixKey, level)) {
+            if (mixOn) {
                 if (!callerSet("mix-rln-registry-id", "mixrlnregistryid")) {
                     (*target)["mix-rln-registry-id"] = preset.mixRegistryId;
                 }
@@ -804,15 +845,30 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
-    // Everything below sees the preset resolved for this node's mode.
-    const RlnPresetEntry rlnPreset = namedPreset.forMode(rlnMode);
+    const RlnPresetEntry modePreset = namedPreset.forMode(rlnMode);
 
     std::string cfgError;
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset, cfgError);
+    bool mixOn = false;
+    auto cfgWithDefaults =
+        applyConfigDefaults(cfg, instancePersistencePath(), modePreset, mixOn, cfgError);
     if (!cfgWithDefaults) {
         return {false, {}, cfgError};
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
+
+    // A node that does not run Mix takes no Mix membership: the library mounts
+    // no Mix RLN on it, so a membership on the mix registry would only cost
+    // the payer, or the allocator, a registration.
+    const bool dropMix = modePreset.enabled && modePreset.hasMix() && !mixOn;
+    if (dropMix && !modePreset.needsRelayMembership()) {
+        return {false, {},
+                "preset \"" + presetName + "\" gives a " + rlnModeName(rlnMode)
+                    + " node no Relay membership (relay-membership false) and this config does"
+                      " not turn Mix on: the node would hold no membership"};
+    }
+    // Everything below sees the preset resolved for this node's mode, and for
+    // whether it runs Mix.
+    const RlnPresetEntry rlnPreset = dropMix ? modePreset.withoutMix() : modePreset;
 
     rlnBridge->init(&modules().rln_module);
 

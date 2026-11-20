@@ -287,8 +287,8 @@ the rate that is set; message budgets are per scope. Any other entry with the
 two equal is refused, as is one whose two ids differ only in letter case: one
 registry is spelled identically in both keys.
 
-With a mix registry in the preset, this module starts the backend for both
-registries (one `start`), and a `createNode` config that turns Mix on
+With a mix registry in the preset, a `createNode` config that turns Mix on
+has this module start the backend for both registries (one `start`) and
 receives `mix-rln-registry-id`, `mix-rln-identifier-hex` and
 `mix-rln-metadata-topic` from the preset — an identifier or topic the config
 already carries is left as written. What turns Mix on depends on the config
@@ -303,12 +303,29 @@ shape takes node keys:
 
 An anonymity level above `None` is `anonymityLevel` (also spelled
 `anonymity-level`) `Preferred` or `Required`. A config that does not turn Mix
-on gets none of the keys. A `mix-rln-registry-id` set in the node
+on gets none of the keys, and the node takes no membership on the mix
+registry: the backend is started for the relay registry alone, and `rlnState`
+reports no mix field. A mode with `relay-membership: false` then leaves the
+node no membership at all, so such a config fails `createNode`.
+
+A node that runs Mix runs Mix RLN exactly when its deployment runs RLN;
+without Mix either is fine:
+
+| RLN (preset) | Mix | Mix RLN | |
+|---|---|---|---|
+| on or off | off | | accepted |
+| off | on | off | accepted |
+| off | on | on (`mix-rln-registry-id` in the config) | `createNode` fails: no backend to prove on |
+| on | on | off (no mix registry in the preset, no `mix-rln-registry-id` in the config) | `createNode` fails |
+| on | on | on | accepted |
+
+A `mix-rln-registry-id` set in the node
 config (top level, `kernelConf` or `messagingOverrides`, also spelled
 `mixRlnRegistryId`, whether or not `mix` is on) must equal the preset's mix
 registry or, when the preset has none, the relay registry at 10 / 3;
 anything else fails `createNode`. With `manage-backend: false` the key is not
-checked: the host named the registries in its own `start`. `rlnState` reports `mixRegistryId`, `mixRlnIdentifier`,
+checked: the host named the registries in its own `start`. For a node that
+runs Mix, `rlnState` reports `mixRegistryId`, `mixRlnIdentifier`,
 `mixEpochSizeSec` and `mixMaxEpochGap` beside the relay fields.
 
 A host that shares the backend with other consumers sets

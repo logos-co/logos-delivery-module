@@ -2076,10 +2076,91 @@ LOGOS_TEST(a_caller_supplied_mix_key_wins_and_a_relay_only_node_gets_none) {
         auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
         LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-registry-id"));
         LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-identifier-hex"));
-        // But the deployment is still reported.
-        LOGOS_ASSERT_EQ(impl.rlnState().value.value("mixRegistryId", ""), std::string("mixreg"));
+        // Nor does the node take a membership on the mix registry: its RLN
+        // state is that of a deployment without one.
+        const auto state = impl.rlnState().value;
+        LOGOS_ASSERT_EQ(state.value("registryId", ""), std::string("reg"));
+        LOGOS_ASSERT_EQ(state.value("rateLimit", 0), 100);
+        LOGOS_ASSERT_FALSE(state.contains("mixRegistryId"));
+        LOGOS_ASSERT_FALSE(state.contains("mixRateLimit"));
         (void)settledRlnState(impl);
     }
+}
+
+// A node is provisioned for the mix registry only when its config turns Mix
+// on, by the same rule that hands it the mix keys: a relay-only node of a mix
+// deployment costs its payer, or the allocator, no second registration.
+LOGOS_TEST(a_mix_registry_is_provisioned_only_for_a_node_that_runs_mix) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableWithMix);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    const auto mixRegistryOf = [](const char* cfg) -> std::string {
+        DeliveryModuleImpl impl;
+        if (const auto created = impl.createNode(cfg); !created.success) {
+            return "createNode failed: " + created.error;
+        }
+        const std::string registry = impl.rlnState().value.value("mixRegistryId", "");
+        (void)settledRlnState(impl);
+        delivery_test_rln::resetRlnMockState();
+        return registry;
+    };
+    // Mix on, in each config shape's own way.
+    for (const char* cfg : {
+             R"({"logLevel":"INFO","preset":"logos.test","mix":true})",
+             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"Required"})",
+             R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Preferred"}})",
+             R"({"entryLayer":"kernel","preset":"logos.test","kernelConf":{"logLevel":"INFO","mix":true}})",
+         }) {
+        LOGOS_ASSERT_EQ(mixRegistryOf(cfg), std::string("mixreg"));
+    }
+    // Mix off: absent, false, a level of None, or a key the shape does not read.
+    for (const char* cfg : {
+             R"({"logLevel":"INFO","preset":"logos.test"})",
+             R"({"logLevel":"INFO","preset":"logos.test","mix":false})",
+             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"None"})",
+             R"({"mode":"Core","preset":"logos.test"})",
+             R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"None"}})",
+             R"({"entryLayer":"kernel","preset":"logos.test","kernelConf":{"logLevel":"INFO","anonymityLevel":"Required"}})",
+         }) {
+        LOGOS_ASSERT_EQ(mixRegistryOf(cfg), std::string());
+    }
+}
+
+// The entry a relay-only node is provisioned with starts the backend for the
+// relay registry alone, with the deployment's allocator.
+LOGOS_TEST(an_entry_without_mix_starts_the_backend_for_the_relay_registry_alone) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableWithAllocator, table).empty());
+    const RlnPresetEntry entry = table["logos.test"];
+    LOGOS_ASSERT_TRUE(entry.hasMix());
+
+    const RlnPresetEntry relayOnly = entry.withoutMix();
+    LOGOS_ASSERT_FALSE(relayOnly.hasMix());
+    LOGOS_ASSERT_TRUE(relayOnly.needsRelayMembership());
+    LOGOS_ASSERT_TRUE(relayOnly.hasAllocator());
+    LOGOS_ASSERT_EQ(relayOnly.registryId, entry.registryId);
+    LOGOS_ASSERT_EQ(relayOnly.rateLimit, entry.rateLimit);
+
+    const auto start = nlohmann::json::parse(rlnBackendStartConfig(relayOnly));
+    LOGOS_ASSERT_EQ(start["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(start["registries"][0].value("registry_id", ""), entry.registryId);
+    LOGOS_ASSERT_TRUE(start["registries"][0].contains("allocator"));
+
+    // A registry relay and mix share: one membership either way, asked at the
+    // relay rate once the node does not run Mix.
+    RlnPresetEntry shared;
+    shared.enabled = true;
+    shared.registryId = "reg";
+    shared.mixRegistryId = "reg";
+    shared.epochSizeSec = 10;
+    shared.maxEpochGap = 3;
+    shared.mixRateLimit = 20;
+    LOGOS_ASSERT_EQ(nlohmann::json::parse(rlnBackendStartConfig(shared)).value("rate_limit", 0), 20);
+    const auto sharedStart = nlohmann::json::parse(rlnBackendStartConfig(shared.withoutMix()));
+    LOGOS_ASSERT_EQ(sharedStart["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_FALSE(sharedStart.contains("rate_limit"));
 }
 
 // The backend is started for the preset's registries only, so a mix registry
@@ -2190,11 +2271,70 @@ LOGOS_TEST(a_caller_supplied_mix_registry_may_be_a_relay_registry_at_mix_values)
     }
     delivery_test_rln::resetRlnMockState();
     {
-        // logos.dev runs no RLN: nothing to check the key against.
+        // logos.dev runs no RLN: nothing to check the key against, and no Mix
+        // is on to use it.
         DeliveryModuleImpl impl;
         LOGOS_ASSERT_TRUE(impl.createNode(
-            R"({"logLevel":"INFO","preset":"logos.dev","mix":true,"mix-rln-registry-id":"other"})")
+            R"({"logLevel":"INFO","preset":"logos.dev","mix-rln-registry-id":"other"})")
             .success);
+    }
+}
+
+// A node that runs Mix runs Mix RLN exactly when its deployment runs RLN.
+// Without Mix either is fine.
+LOGOS_TEST(mix_runs_with_mix_rln_exactly_when_the_deployment_runs_rln) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    const auto outcome = [](const char* cfg) -> std::string {
+        DeliveryModuleImpl impl;
+        const auto created = impl.createNode(cfg);
+        if (created.success && impl.rlnState().value.contains("registryId")) {
+            (void)settledRlnState(impl);
+        }
+        delivery_test_rln::resetRlnMockState();
+        return created.success ? std::string("ok") : created.error;
+    };
+    const auto refusedFor = [&outcome](const char* cfg, const char* why) {
+        return outcome(cfg).find(why) != std::string::npos;
+    };
+
+    // No Mix: valid with or without RLN.
+    LOGOS_ASSERT_EQ(outcome(R"({"logLevel":"INFO","preset":"logos.dev"})"), std::string("ok"));
+    {
+        RlnPresetsFile presets(kRlnPresetTable);
+        LOGOS_ASSERT_EQ(outcome(kRlnNodeCfg), std::string("ok"));
+    }
+
+    // No RLN: Mix alone is valid, Mix RLN is not.
+    LOGOS_ASSERT_EQ(outcome(R"({"logLevel":"INFO","preset":"logos.dev","mix":true})"),
+                    std::string("ok"));
+    for (const char* cfg : {
+             R"({"logLevel":"INFO","preset":"logos.dev","mix":true,"mix-rln-registry-id":"reg"})",
+             R"({"logLevel":"INFO","preset":"logos.dev","anonymityLevel":"Required","mixRlnRegistryId":"reg"})",
+             R"({"mode":"Core","preset":"logos.dev","messagingOverrides":{"anonymityLevel":"Preferred","mix-rln-registry-id":"reg"}})",
+         }) {
+        LOGOS_ASSERT_TRUE(refusedFor(cfg, "the preset runs no RLN"));
+    }
+
+    // RLN without a mix registry: Mix needs the caller's Mix RLN.
+    {
+        RlnPresetsFile presets(kRlnPresetTable);
+        for (const char* cfg : {
+                 R"({"logLevel":"INFO","preset":"logos.test","mix":true})",
+                 R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"Required"})",
+                 R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Preferred"}})",
+                 R"({"entryLayer":"kernel","preset":"logos.test","kernelConf":{"logLevel":"INFO","mix":true}})",
+             }) {
+            LOGOS_ASSERT_TRUE(refusedFor(cfg, "Mix needs Mix RLN"));
+        }
+    }
+    // RLN with a mix registry: the preset supplies Mix RLN.
+    {
+        RlnPresetsFile presets(kRlnPresetTableWithMix);
+        LOGOS_ASSERT_EQ(outcome(R"({"logLevel":"INFO","preset":"logos.test","mix":true})"),
+                        std::string("ok"));
     }
 }
 
@@ -2206,9 +2346,12 @@ LOGOS_TEST(createNode_resolves_the_preset_for_the_config_mode) {
     RlnPresetsFile presets(kRlnPresetTableWithModes);
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
+    // Both nodes run Mix: a node that does not is asked no mix rate.
     {
         DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"Edge","preset":"logos.test"})").success);
+        LOGOS_ASSERT_TRUE(impl.createNode(
+            R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Required"}})")
+            .success);
         const auto state = impl.rlnState().value;
         LOGOS_ASSERT_EQ(state.value("mode", ""), std::string("Edge"));
         LOGOS_ASSERT_EQ(state.value("rateLimit", 0), 100);
@@ -2223,7 +2366,9 @@ LOGOS_TEST(createNode_resolves_the_preset_for_the_config_mode) {
     delivery_test_rln::resetRlnMockState();
     {
         DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"Core","preset":"logos.test"})").success);
+        LOGOS_ASSERT_TRUE(impl.createNode(
+            R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Required"}})")
+            .success);
         const auto state = impl.rlnState().value;
         LOGOS_ASSERT_EQ(state.value("mode", ""), std::string("Core"));
         LOGOS_ASSERT_EQ(state.value("rateLimit", 0), 600);
@@ -2257,8 +2402,21 @@ LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
     {
         RlnPresetsFile presets(kRlnPresetTableEdgeWithoutRelay);
         {
+            // Without a Relay membership and without Mix the node would hold
+            // no membership at all: refused, naming the preset and the mode.
             DeliveryModuleImpl impl;
-            LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"Edge","preset":"logos.test"})").success);
+            const auto refused = impl.createNode(R"({"mode":"Edge","preset":"logos.test"})");
+            LOGOS_ASSERT_FALSE(refused.success);
+            LOGOS_ASSERT_TRUE(refused.error.find("\"logos.test\"") != std::string::npos);
+            LOGOS_ASSERT_TRUE(refused.error.find("Edge") != std::string::npos);
+            LOGOS_ASSERT_TRUE(refused.error.find("relay-membership") != std::string::npos);
+        }
+        delivery_test_rln::resetRlnMockState();
+        {
+            DeliveryModuleImpl impl;
+            LOGOS_ASSERT_TRUE(impl.createNode(
+                R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Required"}})")
+                .success);
             const auto state = impl.rlnState().value;
             LOGOS_ASSERT_EQ(state.value("mode", ""), std::string("Edge"));
             LOGOS_ASSERT_TRUE(state.contains("relayMembership"));
@@ -2270,7 +2428,9 @@ LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
         delivery_test_rln::resetRlnMockState();
         {
             DeliveryModuleImpl impl;
-            LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"Core","preset":"logos.test"})").success);
+            LOGOS_ASSERT_TRUE(impl.createNode(
+                R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Required"}})")
+                .success);
             const auto state = impl.rlnState().value;
             LOGOS_ASSERT_EQ(state.value("mode", ""), std::string("Core"));
             LOGOS_ASSERT_FALSE(state.contains("relayMembership"));
