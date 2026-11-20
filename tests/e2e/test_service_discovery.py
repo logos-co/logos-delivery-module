@@ -35,7 +35,6 @@ ADVERT_TIMEOUT_S = 30.0
 CONNECTED_TIMEOUT_S = 60.0
 LOOKUP_TIMEOUT_S = 30.0
 RECEIVED_TIMEOUT_S = 20.0
-# logos-delivery gives up a send after its 60 s retry time window.
 # Longer than a test runs: a node given it looks up only in its first 8 s.
 LONG_LOOKUP_INTERVAL_S = 600
 
@@ -198,11 +197,12 @@ def test_edge_node_finds_lightpush_node_but_send_is_refused(daemon_factory, deli
         message="edge: lookup added no peer",
     )
 
-    time.sleep(SUBSCRIBE_GRACE_S)
     result = edge.send_result(CONTENT_TOPIC, "edge")
 
-    assert result.get("success") is False, f"expected the send to be refused, got {result!r}"
-    assert result.get("error", "").endswith("(NotConnected)"), result.get("error")
+    assert (result.get("success"), result.get("error")) == (
+        False,
+        "Send failed: node has no connected peer (NotConnected)",
+    )
 
 
 def test_restarted_node_reconnects_while_old_advert_is_served(daemon_factory, delivery_node_factory):
