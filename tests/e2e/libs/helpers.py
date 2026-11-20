@@ -181,6 +181,9 @@ class LogosDelivery:
     def send(self, content_topic: str, payload: str, *, timeout: Optional[float] = None):
         return call_ok(self.client, "send", content_topic, payload, timeout=timeout)
 
+    def send_result(self, content_topic: str, payload: str, *, timeout: Optional[float] = None) -> dict:
+        return call_result(self.client, "send", content_topic, payload, timeout=timeout)
+
     def get_available_configs(self, *, timeout: Optional[float] = None):
         return call_ok(self.client, "getAvailableConfigs", timeout=timeout)
 

@@ -52,7 +52,7 @@ single shard, discv5 off. The single-node lifecycle tests use one daemon each.
 | `test_plugin_node_finds_in_process_node` | 3 | a node hosting discovery on `libp2p_module` finds one running it in-process; messages pass both ways |
 | `test_in_process_node_finds_plugin_node` | 3 | the same, the in-process node finding the other |
 | `test_plugin_node_without_libp2p_module_fails_to_start` | 1 | without `libp2p_module` installed, `nodeStarted` reports it is not available, and the module stops the node |
-| `test_edge_node_finds_lightpush_node_but_send_fails` | 4 | an Edge node's lookup adds a light push node, which relays to a receiver, to its peer store, but only the relay connectivity loop dials found peers, so its send ends in `messageError` |
+| `test_edge_node_finds_lightpush_node_but_send_is_refused` | 4 | an Edge node's lookup adds a light push node, which relays to a receiver, to its peer store, but only the relay connectivity loop dials found peers, so `send` refuses its message with `NotConnected` |
 | `test_restarted_node_reconnects_while_old_advert_is_served` | 3 | A restarts; B reconnects to it and receives its message, and the bootstrap still returns the advert A signed before the restart |
 
 Outside the fleet tests, we assert `messagePropagated`, not `messageSent`: with relay-only /
