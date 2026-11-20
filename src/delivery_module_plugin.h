@@ -63,6 +63,49 @@ public:
  */
 
     /**
+     * @brief Creates the node from defaults and environment variables; a
+     *        zero-argument alternative to @ref createNode.
+     *
+     * The base config is the JSON file named by `LOGOS_DELIVERY_CONFIG_FILE`,
+     * or `{"preset": "logos.test"}` when it is unset — a full-stack Core node
+     * on the Logos testnet. `LOGOS_DELIVERY_NODE_*` variables then override
+     * it, taking priority over the file:
+     * - `LOGOS_DELIVERY_NODE_ENTRY_LAYER`, `_MODE` and `_PRESET` set
+     *   `entryLayer`, `mode` and `preset`. `ENTRY_LAYER=kernel` turns the
+     *   default into a kernel-only node, moving `preset` into `kernelConf`.
+     * - Any other `LOGOS_DELIVERY_NODE_<NAME>` sets the field the CLI binary
+     *   reads from the same variable: `<NAME>` lowercased with `_` → `-`,
+     *   e.g. `LOGOS_DELIVERY_NODE_STORE_MESSAGE_DB_URL` → `store-message-db-url`.
+     *   It lands where the config shape accepts node fields — `kernelConf`,
+     *   `messagingOverrides`, or top level for the flat shape — so only that
+     *   layer's fields are accepted: `messagingOverrides` has no `ext-multiaddr`,
+     *   `mixkey` or protocol flags, which need `ENTRY_LAYER=kernel`. It replaces the
+     *   field if the config already spells it as that name or its camelCase
+     *   form. Where the two differ (`ext-multiaddr` vs `extMultiaddrs`), leave
+     *   the field out of the file, or the parser rejects it as set twice.
+     *
+     * Values are passed as strings and parsed like CLI arguments; list fields
+     * take a JSON array (`LOGOS_DELIVERY_NODE_EXT_MULTIADDR='["/dns4/…"]'`).
+     * Empty variables are ignored. The resulting config then goes through
+     * @ref createNode unchanged.
+     *
+     * **App developer** — no variables: joins `logos.test` as a full node.
+     *
+     * **Node operator** — the image bakes the fleet config, the host supplies
+     * only its own settings:
+     * @code{.sh}
+     * LOGOS_DELIVERY_CONFIG_FILE=/conf/fleet.json   # {"entryLayer": "kernel", "kernelConf": {…}}
+     * LOGOS_DELIVERY_NODE_NODEKEY=<hex>
+     * LOGOS_DELIVERY_NODE_NAT=extip:203.0.113.7
+     * LOGOS_DELIVERY_NODE_EXT_MULTIADDR='["/dns4/node-01.example/tcp/30303"]'
+     * @endcode
+     *
+     * @return As @ref createNode, or `false` with the reason when the config
+     *         file cannot be read or is not a JSON object.
+     */
+    StdLogosResult initialize();
+
+    /**
      * @brief Creates a liblogosdelivery node from a JSON configuration.
      *
      * The JSON passes through to logos-delivery verbatim; `parseLogosDeliveryConf`
