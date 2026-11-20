@@ -612,22 +612,46 @@ RlnMode configMode(const nlohmann::json& cfg)
 // `mix: true` (with `mixKey`) or an anonymityLevel of Preferred / Required
 // (with `level`). With logos-messaging/logos-delivery#4780 an absent level
 // turns Mix on too.
+//
+// The values are read as the library reads them, through confutils: a scalar
+// is taken as its text, a boolean is true for an empty string and for y, yes,
+// true, 1 and on, an enum by its name, and both ignore letter case and
+// underscores. A value the library cannot parse fails its own createNode.
 static bool mixIsOn(const nlohmann::json& target, bool mixKey, bool level)
 {
     if (!target.is_object()) {
         return false;
     }
+    // The text confutils parses, normalized as its parsers do; nullopt for a
+    // value that is no scalar, or is a JSON null (the key is then unset).
+    const auto normalized = [](const nlohmann::json& value) -> std::optional<std::string> {
+        std::string text;
+        if (value.is_string()) {
+            text = value.get<std::string>();
+        } else if (value.is_boolean()) {
+            text = value.get<bool>() ? "true" : "false";
+        } else if (value.is_number_integer()) {
+            text = std::to_string(value.get<int64_t>());
+        } else {
+            return std::nullopt;
+        }
+        text = toLowerCopy(text);
+        text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
+        return text;
+    };
     if (mixKey) {
-        if (const auto key = findKey(target, {"mix"});
-            key && target[*key].is_boolean() && target[*key].get<bool>()) {
-            return true;
+        if (const auto key = findKey(target, {"mix"})) {
+            const auto value = normalized(target[*key]);
+            if (value && (value->empty() || *value == "y" || *value == "yes" || *value == "true"
+                          || *value == "1" || *value == "on")) {
+                return true;
+            }
         }
     }
     if (level) {
-        if (const auto key = findKey(target, {"anonymitylevel", "anonymity-level"});
-            key && target[*key].is_string()) {
-            const std::string value = toLowerCopy(target[*key].get<std::string>());
-            return value == "preferred" || value == "required";
+        if (const auto key = findKey(target, {"anonymitylevel", "anonymity-level"})) {
+            const auto value = normalized(target[*key]);
+            return value && (*value == "preferred" || *value == "required");
         }
     }
     return false;
