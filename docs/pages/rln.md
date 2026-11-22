@@ -293,17 +293,22 @@ receives `mix-rln-registry-id`, `mix-rln-identifier-hex` and
 `mix-rln-metadata-topic` from the preset — an identifier or topic the config
 already carries is left as written. What turns Mix on depends on the config
 shape, by the library's own rule for mounting Mix, and the keys go where that
-shape takes node keys:
+shape takes node keys. An explicit `mix` decides in every shape. Without it,
+Core mode runs Mix whatever the level, and an Edge node runs it unless its
+anonymity level is `None` (an absent level is `Preferred`):
 
-| Shape | Mix is on with | Keys go to |
+| Shape | Mix is on without `mix` | Keys go to |
 |---|---|---|
-| flat (bare node keys at the top level) | `"mix": true`, or an anonymity level above `None` | the top level |
-| layered (`mode`, `preset`, `messagingOverrides`) | an anonymity level above `None` in `messagingOverrides` (`mix` is not a `messagingOverrides` key) | `messagingOverrides` |
-| kernel entry (`entryLayer: "kernel"`) | `"mix": true` in `kernelConf` (the kernel entry ignores the messaging layer, so a level does nothing) | `kernelConf` |
+| flat (bare node keys at the top level; the mode is Core unless `mode` says Edge) | Core: always. Edge: unless the level is `None` | the top level |
+| layered (`mode`, `preset`, `messagingOverrides`) | Core: always. Edge: unless the level in `messagingOverrides` is `None` | `messagingOverrides` |
+| kernel entry (`entryLayer: "kernel"`) | never: the kernel entry reads no mode and no level, only `"mix": true` in `kernelConf` | `kernelConf` |
 
 An anonymity level above `None` is `anonymityLevel` (also spelled
-`anonymity-level`) `Preferred` or `Required`. A config that does not turn Mix
-on gets none of the keys, and the node takes no membership on the mix
+`anonymity-level`) `Preferred` or `Required`. A config asks for Mix itself
+with `"mix": true` or such a level; Mix that is on only by default is turned
+off on a preset that gives the node no Mix RLN (no RLN, or no mix registry and
+no `mix-rln-registry-id`): this module writes `"mix": false` where the shape
+takes node keys. A config that does not turn Mix on gets none of the keys, and the node takes no membership on the mix
 registry: the backend is started for the relay registry alone, and `rlnState`
 reports no mix field. A mode with `relay-membership: false` then leaves the
 node no membership at all, so such a config fails `createNode`.
@@ -314,8 +319,9 @@ the deployment's choice:
 | RLN (preset) | Mix | Mix RLN | |
 |---|---|---|---|
 | on or off | off | | accepted |
-| off | on | on or off | `createNode` fails: Mix needs RLN |
-| on | on | off (no mix registry in the preset, no `mix-rln-registry-id` where the config shape takes node keys) | `createNode` fails: Mix needs Mix RLN |
+| on or off | on by default only | off | accepted: this module turns Mix off |
+| off | asked for | on or off | `createNode` fails: Mix needs RLN |
+| on | asked for | off (no mix registry in the preset, no `mix-rln-registry-id` where the config shape takes node keys) | `createNode` fails: Mix needs Mix RLN |
 | on | on | on | accepted |
 
 A `mix-rln-registry-id` set in the node

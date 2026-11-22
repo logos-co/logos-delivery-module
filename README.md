@@ -135,8 +135,11 @@ new release to the version dropdown means editing
 
 ## Native Mix with a shared RLN backend
 
-Enable native Mix (`"mix": true`) and set `anonymityLevel` to `Required` in
-`createNode` to route application `send()` calls through Mix. The mix proof
+A Core node runs native Mix by default, and so does an Edge node whose
+`anonymityLevel` is not `None` (the default is `Preferred`: Mix first, the
+plain path as fallback). Set `"mix": false` to turn it off, or
+`anonymityLevel` to `Required` to send through Mix only. Mix that is only on
+by default is turned off on a preset that gives the node no Mix RLN. The mix proof
 provider's registry, scope and metadata topic come from the deployment's
 preset (`mix-registry-id`, `mix-rate-limit`, `mix-metadata-topic` in the
 `LOGOS_DELIVERY_RLN_PRESETS` table — see [docs/pages/rln.md](docs/pages/rln.md)):

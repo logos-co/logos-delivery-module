@@ -608,64 +608,80 @@ RlnMode configMode(const nlohmann::json& cfg)
     return mode == "edge" ? RlnMode::Edge : RlnMode::Core;
 }
 
-// Whether `target` turns Mix on, as logos-delivery v0.40.0 reads it:
-// `mix: true` (with `mixKey`) or an anonymityLevel of Preferred / Required
-// (with `level`). With logos-messaging/logos-delivery#4780 an absent level
-// turns Mix on too.
+// How a config decides Mix, as logos-delivery reads it since
+// logos-messaging/logos-delivery#4780: an explicit `mix` decides; else the kernel entry runs no Mix; else Core mode runs Mix; else
+// (Edge) the anonymity level does (with `level`), and an absent level is
+// Preferred. `requested` is true when the config asks for Mix itself: `mix:
+// true`, or a level of Preferred / Required.
 //
 // The values are read as the library reads them, through confutils: a scalar
 // is taken as its text, a boolean is true for an empty string and for y, yes,
 // true, 1 and on, an enum by its name, and both ignore letter case and
 // underscores. A value the library cannot parse fails its own createNode.
-static bool mixIsOn(const nlohmann::json& target, bool mixKey, bool level)
+struct MixDecision {
+    bool on = false;
+    bool requested = false;
+};
+
+// The text confutils parses, normalized as its parsers do; nullopt for a
+// value that is no scalar, or is a JSON null (the key is then unset).
+static std::optional<std::string> confutilsText(const nlohmann::json& value)
 {
-    if (!target.is_object()) {
-        return false;
+    std::string text;
+    if (value.is_string()) {
+        text = value.get<std::string>();
+    } else if (value.is_boolean()) {
+        text = value.get<bool>() ? "true" : "false";
+    } else if (value.is_number_integer()) {
+        text = std::to_string(value.get<int64_t>());
+    } else {
+        return std::nullopt;
     }
-    // The text confutils parses, normalized as its parsers do; nullopt for a
-    // value that is no scalar, or is a JSON null (the key is then unset).
-    const auto normalized = [](const nlohmann::json& value) -> std::optional<std::string> {
-        std::string text;
-        if (value.is_string()) {
-            text = value.get<std::string>();
-        } else if (value.is_boolean()) {
-            text = value.get<bool>() ? "true" : "false";
-        } else if (value.is_number_integer()) {
-            text = std::to_string(value.get<int64_t>());
-        } else {
-            return std::nullopt;
-        }
-        text = toLowerCopy(text);
-        text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
-        return text;
-    };
-    if (mixKey) {
-        if (const auto key = findKey(target, {"mix"})) {
-            const auto value = normalized(target[*key]);
-            if (value && (value->empty() || *value == "y" || *value == "yes" || *value == "true"
-                          || *value == "1" || *value == "on")) {
-                return true;
+    text = toLowerCopy(text);
+    text.erase(std::remove(text.begin(), text.end(), '_'), text.end());
+    return text;
+}
+
+static MixDecision mixDecision(const nlohmann::json* target, bool level, bool kernelEntry,
+                               RlnMode mode)
+{
+    const bool object = target && target->is_object();
+    if (object) {
+        if (const auto key = findKey(*target, {"mix"})) {
+            if (const auto value = confutilsText((*target)[*key])) {
+                const bool on = value->empty() || *value == "y" || *value == "yes"
+                    || *value == "true" || *value == "1" || *value == "on";
+                return {on, on};
             }
         }
     }
-    if (level) {
-        if (const auto key = findKey(target, {"anonymitylevel", "anonymity-level"})) {
-            const auto value = normalized(target[*key]);
-            return value && (*value == "preferred" || *value == "required");
+    std::optional<std::string> levelValue;
+    if (object && level) {
+        if (const auto key = findKey(*target, {"anonymitylevel", "anonymity-level"})) {
+            levelValue = confutilsText((*target)[*key]);
         }
     }
-    return false;
+    const bool levelAsks =
+        levelValue && (*levelValue == "preferred" || *levelValue == "required");
+    if (kernelEntry) {
+        return {false, false};
+    }
+    if (mode == RlnMode::Core) {
+        return {true, levelAsks};
+    }
+    if (levelValue) {
+        return {levelAsks, levelAsks};
+    }
+    return {true, false};
 }
 
 // The object a createNode config takes node keys in, by its shape: kernelConf
 // when present (where an anonymity level is not read: `level` false), the top
-// level of a bare WakuNodeConf, messagingOverrides for the layered shapes
-// (where `mix` is not a key: `mixKey` false). Null for a kernel entry without
-// a kernelConf, left for the parser to reject, and for a layered config
-// without a messagingOverrides object.
-static nlohmann::json* nodeKeyTarget(nlohmann::json& cfgObj, bool& mixKey, bool& level)
+// level of a bare WakuNodeConf, messagingOverrides for the layered shapes.
+// Null for a kernel entry without a kernelConf, left for the parser to reject,
+// and for a layered config without a messagingOverrides object.
+static nlohmann::json* nodeKeyTarget(nlohmann::json& cfgObj, bool& level)
 {
-    mixKey = true;
     level = true;
     if (const auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
         kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
@@ -676,7 +692,6 @@ static nlohmann::json* nodeKeyTarget(nlohmann::json& cfgObj, bool& mixKey, bool&
         return nullptr;
     }
     if (!isFlatShape(cfgObj)) {
-        mixKey = false;
         const auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
         return overridesKey && cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey]
                                                                  : nullptr;
@@ -718,13 +733,13 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 // carries the preset's validation switch into the config as
 // rln-disable-validation: deployment policy, so it overrides any client key.
 // With a mix preset, sets each mix-rln-* key the caller left unset where the
-// target turns Mix on (mixIsOn). Each setting goes where the config shape
+// target turns Mix on (mixDecision). Each setting goes where the config shape
 // accepts it: kernelConf when present, messagingOverrides (created if needed)
 // for the layered shapes, top level for a bare WakuNodeConf. A
 // mix-rln-registry-id the caller wrote, in any of those objects, must pass
 // callerMixRegistryError. `mixOn` is whether the config turns Mix on. A
-// config that turns it on is refused unless the preset runs RLN and the node
-// gets Mix RLN. nullopt on failure, with the createNode error in `error`.
+// config that asks for Mix is refused unless the preset runs RLN and the node
+// gets Mix RLN; Mix that is only on by default is turned off instead. nullopt on failure, with the createNode error in `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
                                                       const RlnPresetEntry& preset,
@@ -783,10 +798,30 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         && !findKey(cfgObj, {"kernelconf"}) && !findKey(cfgObj, {"messagingoverrides"})) {
         cfgObj["messagingOverrides"] = nlohmann::json::object();
     }
-    bool mixKey = true;
     bool level = true;
-    nlohmann::json* target = nodeKeyTarget(cfgObj, mixKey, level);
-    mixOn = target && mixIsOn(*target, mixKey, level);
+    nlohmann::json* target = nodeKeyTarget(cfgObj, level);
+    const bool kernelEntry = isKernelEntry(cfgObj);
+    const MixDecision decision =
+        mixDecision(target, level, kernelEntry, configMode(cfgObj));
+    // Only a key where this shape takes node keys gives the node Mix RLN: one
+    // in an object the library does not read it from does not count.
+    const bool targetMixRln =
+        target && findKey(*target, {"mix-rln-registry-id", "mixrlnregistryid"}).has_value();
+    mixOn = decision.on;
+    // Mix is on by default only where the node gets Mix RLN. Elsewhere this
+    // module turns it off, as the caller did not ask for it: `mix: false`, which
+    // with no level also makes the level None.
+    if (decision.on && !decision.requested
+        && !(preset.enabled && (preset.hasMix() || targetMixRln))) {
+        if (!target && !kernelEntry && !isFlatShape(cfgObj)) {
+            cfgObj["messagingOverrides"] = nlohmann::json::object();
+            target = nodeKeyTarget(cfgObj, level);
+        }
+        if (target) {
+            (*target)["mix"] = false;
+        }
+        mixOn = false;
+    }
 
     // Mix is valid only with RLN, and then only with Mix RLN: a mix hop that
     // nothing rates is open to anyone, with or without an RLN-protected relay.
@@ -794,10 +829,6 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         error = "this config turns Mix on, which needs RLN, but the preset runs no RLN";
         return std::nullopt;
     }
-    // Only a key where this shape takes node keys gives the node Mix RLN: one
-    // in an object the library does not read it from does not count.
-    const bool targetMixRln =
-        target && findKey(*target, {"mix-rln-registry-id", "mixrlnregistryid"}).has_value();
     if (mixOn && preset.enabled && !preset.hasMix() && !targetMixRln) {
         error = "this config turns Mix on and the preset runs RLN, so Mix needs Mix RLN: the"
                 " preset names no mix-registry-id and the config no mix-rln-registry-id";
