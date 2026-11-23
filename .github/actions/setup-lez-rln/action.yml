@@ -1,13 +1,17 @@
 name: Set up logos-lez-rln
 description: >
   Builds logos-lez-rln's guest programs and its mint_payer, run_setup and fund_account
-  tools in E2E_LEZ_RLN_DIR, from the Actions cache when the pins are unchanged. Pulls
-  the LEZ sequencer image into E2E_LEZ_SEQUENCER_IMAGE.
+  tools in E2E_LEZ_RLN_DIR, from the Actions cache when the pins are unchanged. Loads
+  the LEZ sequencer image into E2E_LEZ_SEQUENCER_IMAGE from the Actions cache, the
+  registry, or a build from source, in that order.
 
 inputs:
   sequencer-image:
     description: The standalone LEZ sequencer.
     default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone:v0.3.2
+  sequencer-ref:
+    description: The logos-execution-zone tag that the sequencer image is built from when the registry is unreachable.
+    default: v0.3.2
   lez-rln-commit:
     description: The logos-lez-rln commit to build.
     default: 235ddaeee84eec385a2d4b68d69f702a29c14cf3
@@ -79,8 +83,44 @@ runs:
       shell: bash
       run: echo "E2E_LEZ_RLN_DIR=$RUNNER_TEMP/logos-lez-rln" >> "$GITHUB_ENV"
 
-    - name: Pull the LEZ sequencer image
+    - name: Restore the cached LEZ sequencer image
+      id: sequencer-image
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/lez-sequencer-image.tar
+        key: lez-sequencer-${{ runner.arch }}-${{ inputs.sequencer-image }}-${{ inputs.sequencer-ref }}
+
+    # Only the docker-driver builder sees the locally loaded risc0_base image.
+    - name: Load, pull or build the LEZ sequencer image
       shell: bash
+      env:
+        IMAGE: ${{ inputs.sequencer-image }}
+        REF: ${{ inputs.sequencer-ref }}
+        CACHE_HIT: ${{ steps.sequencer-image.outputs.cache-hit }}
       run: |
-        docker pull ${{ inputs.sequencer-image }}
-        echo "E2E_LEZ_SEQUENCER_IMAGE=${{ inputs.sequencer-image }}" >> "$GITHUB_ENV"
+        set -euo pipefail
+        tar="$RUNNER_TEMP/lez-sequencer-image.tar"
+        if [ "$CACHE_HIT" = "true" ]; then
+          docker load -i "$tar"
+        elif timeout 120 docker pull "$IMAGE"; then
+          docker save "$IMAGE" -o "$tar"
+        else
+          echo "::warning::could not pull $IMAGE; building it from logos-execution-zone $REF"
+          src="$RUNNER_TEMP/logos-execution-zone"
+          git clone --depth 1 --branch "$REF" https://github.com/logos-blockchain/logos-execution-zone.git "$src"
+          docker buildx build --builder default --load -t lez-risc0-base \
+            -f "$src/lez/docker/risc0-base.Dockerfile" "$src"
+          docker buildx build --builder default --load -t "$IMAGE" \
+            --build-context risc0_base=docker-image://lez-risc0-base \
+            --build-arg STANDALONE=true \
+            -f "$src/lez/sequencer/service/Dockerfile" "$src"
+          docker save "$IMAGE" -o "$tar"
+        fi
+        echo "E2E_LEZ_SEQUENCER_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+    - name: Save the LEZ sequencer image
+      if: steps.sequencer-image.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/lez-sequencer-image.tar
+        key: ${{ steps.sequencer-image.outputs.cache-primary-key }}
