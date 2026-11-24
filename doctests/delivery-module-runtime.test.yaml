@@ -173,7 +173,8 @@ sections:
         text: |
           Create `waku-config.json` — a `logos.dev` network configuration for the
           delivery node: cluster 2 with 8 auto-shards, relay/filter/lightpush
-          enabled, mix routing, and discv5 discovery.
+          enabled, and discv5 discovery. It runs no Mix: Mix needs RLN, and this
+          config runs none.
 
           > Extended Kademlia discovery (`enableKadDiscovery` +
           > `kadBootstrapNodes`) is intentionally omitted here. The node's
@@ -202,8 +203,6 @@ sections:
               "websocketPort": 8000,
               "websocketSecureSupport": false,
               "discv5Discovery": true,
-              "mix": true,
-              "mixkey": "fc2d71d52cdd37cb49cca3f6a8e6877f40bc999ed67ab5808bb3b9f685cf0f94",
               "nat": "extip:138.68.122.137",
               "extMultiaddrs": ["/dns4/delivery-01.do-ams3.logos.dev.status.im/tcp/30303"]
             }
