@@ -287,51 +287,114 @@ the rate that is set; message budgets are per scope. Any other entry with the
 two equal is refused, as is one whose two ids differ only in letter case: one
 registry is spelled identically in both keys.
 
-With a mix registry in the preset, a `createNode` config that turns Mix on
-has this module start the backend for both registries (one `start`) and
-receives `mix-rln-registry-id`, `mix-rln-identifier-hex` and
-`mix-rln-metadata-topic` from the preset — an identifier or topic the config
-already carries is left as written. What turns Mix on depends on the config
-shape, by the library's own rule for mounting Mix, and the keys go where that
-shape takes node keys. An explicit `mix` decides in every shape. Without it,
-the anonymity level decides in both modes. An absent level is `Preferred` on
-the `logos.dev` and `logos.test` presets and `None` on any other:
+#### Whether a node runs Mix
 
-| Shape | Mix is on without `mix` | Keys go to |
-|---|---|---|
-| flat (bare node keys at the top level; the mode is Core unless `mode` says Edge) | a level of `Preferred` or `Required`, or no level on `logos.dev` / `logos.test` | the top level |
-| layered (`mode`, `preset`, `messagingOverrides`) | a level in `messagingOverrides` of `Preferred` or `Required`, or no level on `logos.dev` / `logos.test` | `messagingOverrides` |
-| kernel entry (`entryLayer: "kernel"`) | never: the kernel entry reads no mode and no level, only `"mix": true` in `kernelConf` | `kernelConf` |
+`createNode` decides in two steps. Step 1 reads the config by the library's
+rule for mounting Mix. Step 2 checks the result against the preset's RLN.
 
-An anonymity level above `None` is `anonymityLevel` (also spelled
-`anonymity-level`) `Preferred` or `Required`. A config asks for Mix itself
-with `"mix": true` or such a level; Mix that only the preset turns on is turned
-off on a preset that gives the node no Mix RLN (no RLN, or no mix registry and
-no `mix-rln-registry-id`): this module writes `"mix": false` where the shape
-takes node keys. A config that does not turn Mix on gets none of the keys, and the node takes no membership on the mix
-registry: the backend is started for the relay registry alone, and `rlnState`
-reports no mix field. A mode with `relay-membership: false` then leaves the
-node no membership at all, so such a config fails `createNode`.
+The node keys (`mix`, the anonymity level, `mix-rln-*`) are read and written
+in one object, which depends on the config shape:
 
-Mix is valid only with RLN, and then only with Mix RLN; without Mix, RLN is
-the deployment's choice:
-
-| RLN (preset) | Mix | Mix RLN | |
+| Shape | Recognised by | Node keys live in | Level read |
 |---|---|---|---|
-| on or off | off | | accepted |
-| on or off | on by the preset only | off | accepted: this module turns Mix off |
-| off | asked for | on or off | `createNode` fails: Mix needs RLN |
-| on | asked for | off (no mix registry in the preset, no `mix-rln-registry-id` where the config shape takes node keys) | `createNode` fails: Mix needs Mix RLN |
-| on | on | on | accepted |
+| flat | bare node keys at the top level | the top level | yes |
+| layered | `mode`, `preset`, `messagingOverrides` | `messagingOverrides` | yes |
+| kernel entry | `entryLayer: "kernel"` | `kernelConf` | no |
 
-A `mix-rln-registry-id` set in the node
-config (top level, `kernelConf` or `messagingOverrides`, also spelled
-`mixRlnRegistryId`, whether or not `mix` is on) must equal the preset's mix
-registry or, when the preset has none, the relay registry at 10 / 3;
-anything else fails `createNode`. With `manage-backend: false` the key is not
-checked: the host named the registries in its own `start`. For a node that
-runs Mix, `rlnState` reports `mixRegistryId`, `mixRlnIdentifier`,
-`mixEpochSizeSec` and `mixMaxEpochGap` beside the relay fields.
+**Step 1: is Mix on, and did the config ask for it?**
+
+```text
+ ┌──────────────────────────────────────┐  yes  ┌────────────────────────────────────┐
+ │ `mix` set in the node-key object?    │──────▶│ Mix = that value         [asked]   │
+ └──────────────────┬───────────────────┘       └────────────────────────────────────┘
+                    │ no
+                    ▼
+ ┌──────────────────────────────────────┐  yes  ┌────────────────────────────────────┐
+ │ kernel entry?                        │──────▶│ Mix off                            │
+ └──────────────────┬───────────────────┘       └────────────────────────────────────┘
+                    │ no
+                    ▼
+ ┌──────────────────────────────────────┐  yes  ┌────────────────────────────────────┐
+ │ anonymity level set?                 │──────▶│ Preferred / Required: on [asked]   │
+ │ (`anonymityLevel`/`anonymity-level`) │       │ None: off                          │
+ └──────────────────┬───────────────────┘       └────────────────────────────────────┘
+                    │ no
+                    ▼
+ ┌──────────────────────────────────────┐  yes  ┌────────────────────────────────────┐
+ │ `preset` is logos.dev or logos.test? │──────▶│ Mix on                   [default] │
+ └──────────────────┬───────────────────┘       └────────────────────────────────────┘
+                    │ no
+                    ▼
+                 Mix off
+```
+
+`[asked]` means the config asks for Mix itself. `[default]` means only the
+preset turns it on. Values are read as the library reads them: any letter
+case, and `mix` is on for `true`, `yes`, `on`, `1` or an empty string.
+
+**Step 2: can the node get Mix RLN?**
+
+The node has Mix RLN when the preset runs RLN and either the preset names a
+`mix-registry-id`, or the node-key object carries a `mix-rln-registry-id`.
+
+```text
+                Mix on after step 1?
+                 │                  │
+                no                 yes
+                 │                  │
+                 ▼                  ▼
+          ┌────────────┐   ┌──────────────────────────┐  yes  ┌────────────────────────────┐
+          │ accepted,  │   │ node has Mix RLN?        │──────▶│ accepted, runs Mix         │
+          │ no Mix     │   └────────────┬─────────────┘       └────────────────────────────┘
+          └────────────┘                │ no
+                                        ▼
+                           ┌──────────────────────────┐ asked ┌────────────────────────────┐
+                           │ [asked] or [default]?    │──────▶│ createNode fails           │
+                           └────────────┬─────────────┘       └────────────────────────────┘
+                                        │ default
+                                        ▼
+                           ┌────────────────────────────────────────────┐
+                           │ accepted, no Mix: the module writes        │
+                           │ "mix": false into the node-key object      │
+                           └────────────────────────────────────────────┘
+```
+
+**What each outcome sets up**
+
+| Outcome | Module writes into the node-key object | RLN backend starts for | `rlnState` |
+|---|---|---|---|
+| runs Mix | `mix-rln-registry-id`, `mix-rln-identifier-hex`, `mix-rln-metadata-topic` from the preset, each only if the config left it unset | relay and mix registry, in one `start` | relay fields plus `mixRegistryId`, `mixRlnIdentifier`, `mixEpochSizeSec`, `mixMaxEpochGap` |
+| no Mix | nothing (`"mix": false` for a `[default]` that was turned off) | relay registry only | relay fields only |
+| fails: preset runs no RLN | — | — | — |
+| fails: RLN, but no Mix RLN | — | — | — |
+
+A mode with `relay-membership: false` and no Mix leaves the node no
+membership at all, so `createNode` fails.
+
+**The shipped presets today**
+
+None of the shipped presets has a mix registry, so none can run Mix without
+a preset file (`LOGOS_DELIVERY_RLN_PRESETS`) that adds one:
+
+| Preset | RLN | Mix registry | Node sets nothing | Node asks for Mix |
+|---|---|---|---|---|
+| `""`, `twn`, `status.*` | off | — | no Mix | fails |
+| `logos.dev` | off | — | `[default]` on, turned off | fails |
+| `logos.test` | on | — | `[default]` on, turned off | fails |
+
+**`mix-rln-registry-id` in the config**
+
+The key may appear in any node-key object (top level, `kernelConf`,
+`messagingOverrides`), also spelled `mixRlnRegistryId`, with or without Mix
+on. It must equal one of:
+
+| Preset has | Allowed value |
+|---|---|
+| a mix registry | that mix registry |
+| no mix registry | the relay registry, only when it runs epoch 10 s and gap 3 |
+
+Anything else fails `createNode`. With `manage-backend: false` the key is not
+checked: the host named the registries in its own `start`.
 
 A host that shares the backend with other consumers sets
 `manage-backend: false` and starts the RLN module itself, naming both
