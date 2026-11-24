@@ -53,6 +53,12 @@ std::string rlnCappedGrantMessage(uint64_t askedRate, std::optional<uint64_t> gr
 // absent, unknown, or `entryLayer` is "kernel".
 RlnMode configMode(const nlohmann::json& cfg);
 
+// Whether `preset` names a library preset whose NetworkPresetConf runs Mix, by
+// every name the library takes for it (cli_args toNetworkPresetConf). Without
+// a level a node on one of them is Preferred (PresetMixAnonymityLevel);
+// elsewhere it is None.
+bool libraryPresetRunsMix(const std::string& preset);
+
 // Where this node's RLN stands; see DeliveryModuleImpl::rlnState.
 enum class RlnState { Disabled, Initializing, Ready, Failed, Stopped };
 

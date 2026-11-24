@@ -294,18 +294,18 @@ receives `mix-rln-registry-id`, `mix-rln-identifier-hex` and
 already carries is left as written. What turns Mix on depends on the config
 shape, by the library's own rule for mounting Mix, and the keys go where that
 shape takes node keys. An explicit `mix` decides in every shape. Without it,
-Core mode runs Mix whatever the level, and an Edge node runs it unless its
-anonymity level is `None` (an absent level is `Preferred`):
+the anonymity level decides in both modes. An absent level is `Preferred` on
+the `logos.dev` and `logos.test` presets and `None` on any other:
 
 | Shape | Mix is on without `mix` | Keys go to |
 |---|---|---|
-| flat (bare node keys at the top level; the mode is Core unless `mode` says Edge) | Core: always. Edge: unless the level is `None` | the top level |
-| layered (`mode`, `preset`, `messagingOverrides`) | Core: always. Edge: unless the level in `messagingOverrides` is `None` | `messagingOverrides` |
+| flat (bare node keys at the top level; the mode is Core unless `mode` says Edge) | a level of `Preferred` or `Required`, or no level on `logos.dev` / `logos.test` | the top level |
+| layered (`mode`, `preset`, `messagingOverrides`) | a level in `messagingOverrides` of `Preferred` or `Required`, or no level on `logos.dev` / `logos.test` | `messagingOverrides` |
 | kernel entry (`entryLayer: "kernel"`) | never: the kernel entry reads no mode and no level, only `"mix": true` in `kernelConf` | `kernelConf` |
 
 An anonymity level above `None` is `anonymityLevel` (also spelled
 `anonymity-level`) `Preferred` or `Required`. A config asks for Mix itself
-with `"mix": true` or such a level; Mix that is on only by default is turned
+with `"mix": true` or such a level; Mix that only the preset turns on is turned
 off on a preset that gives the node no Mix RLN (no RLN, or no mix registry and
 no `mix-rln-registry-id`): this module writes `"mix": false` where the shape
 takes node keys. A config that does not turn Mix on gets none of the keys, and the node takes no membership on the mix
@@ -319,7 +319,7 @@ the deployment's choice:
 | RLN (preset) | Mix | Mix RLN | |
 |---|---|---|---|
 | on or off | off | | accepted |
-| on or off | on by default only | off | accepted: this module turns Mix off |
+| on or off | on by the preset only | off | accepted: this module turns Mix off |
 | off | asked for | on or off | `createNode` fails: Mix needs RLN |
 | on | asked for | off (no mix registry in the preset, no `mix-rln-registry-id` where the config shape takes node keys) | `createNode` fails: Mix needs Mix RLN |
 | on | on | on | accepted |

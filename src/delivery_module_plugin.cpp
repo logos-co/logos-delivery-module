@@ -609,10 +609,12 @@ RlnMode configMode(const nlohmann::json& cfg)
 }
 
 // How a config decides Mix, as logos-delivery reads it since
-// logos-messaging/logos-delivery#4780: an explicit `mix` decides; else the kernel entry runs no Mix; else Core mode runs Mix; else
-// (Edge) the anonymity level does (with `level`), and an absent level is
-// Preferred. `requested` is true when the config asks for Mix itself: `mix:
-// true`, or a level of Preferred / Required.
+// logos-messaging/logos-delivery#4821: an explicit `mix` decides; else the
+// kernel entry runs no Mix; else (with `level`) the anonymity level does; an
+// absent level is Preferred on a library preset that runs Mix (logos.dev,
+// logos.test) and None elsewhere, in both modes. `requested` is true when the
+// config asks for Mix itself: `mix: true`, or a level of Preferred / Required.
+// Mix that only a preset turns on is not requested.
 //
 // The values are read as the library reads them, through confutils: a scalar
 // is taken as its text, a boolean is true for an empty string and for y, yes,
@@ -622,6 +624,17 @@ struct MixDecision {
     bool on = false;
     bool requested = false;
 };
+
+// logos-delivery's CoreModeMix: whether Core mode turns Mix on by itself.
+// Unset in the library, so false here; flip both together.
+constexpr bool kCoreModeMix = false;
+
+bool libraryPresetRunsMix(const std::string& preset)
+{
+    const std::string name = toLowerCopy(trimCopy(preset));
+    return name == "logos.dev" || name == "logosdev" || name == "logos.test"
+        || name == "logostest";
+}
 
 // The text confutils parses, normalized as its parsers do; nullopt for a
 // value that is no scalar, or is a JSON null (the key is then unset).
@@ -643,7 +656,7 @@ static std::optional<std::string> confutilsText(const nlohmann::json& value)
 }
 
 static MixDecision mixDecision(const nlohmann::json* target, bool level, bool kernelEntry,
-                               RlnMode mode)
+                               RlnMode mode, bool presetRunsMix)
 {
     const bool object = target && target->is_object();
     if (object) {
@@ -666,13 +679,13 @@ static MixDecision mixDecision(const nlohmann::json* target, bool level, bool ke
     if (kernelEntry) {
         return {false, false};
     }
-    if (mode == RlnMode::Core) {
+    if (kCoreModeMix && mode == RlnMode::Core) {
         return {true, levelAsks};
     }
     if (levelValue) {
         return {levelAsks, levelAsks};
     }
-    return {true, false};
+    return {presetRunsMix, false};
 }
 
 // The object a createNode config takes node keys in, by its shape: kernelConf
@@ -801,8 +814,13 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     bool level = true;
     nlohmann::json* target = nodeKeyTarget(cfgObj, level);
     const bool kernelEntry = isKernelEntry(cfgObj);
+    bool presetRunsMix = false;
+    if (const auto presetKey = findKey(cfgObj, {"preset"});
+        presetKey && cfgObj[*presetKey].is_string()) {
+        presetRunsMix = libraryPresetRunsMix(cfgObj[*presetKey].get<std::string>());
+    }
     const MixDecision decision =
-        mixDecision(target, level, kernelEntry, configMode(cfgObj));
+        mixDecision(target, level, kernelEntry, configMode(cfgObj), presetRunsMix);
     // Only a key where this shape takes node keys gives the node Mix RLN: one
     // in an object the library does not read it from does not count.
     const bool targetMixRln =

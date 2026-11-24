@@ -1869,6 +1869,15 @@ LOGOS_TEST(a_peer_auth_vector_needs_no_payload) {
 
 // The node's mode is the config's top-level `mode`, read as the library reads
 // it; whatever the library would refuse or ignore is Core here.
+LOGOS_TEST(libraryPresetRunsMix_names_the_library_presets_that_run_mix) {
+    for (const char* name : {"logos.dev", "logosdev", "logos.test", "logostest", " Logos.Dev "}) {
+        LOGOS_ASSERT_TRUE(libraryPresetRunsMix(name));
+    }
+    for (const char* name : {"", "twn", "status.prod", "logos"}) {
+        LOGOS_ASSERT_FALSE(libraryPresetRunsMix(name));
+    }
+}
+
 LOGOS_TEST(configMode_reads_the_mode_as_the_library_does) {
     const auto mode = [](const char* cfg) { return configMode(nlohmann::json::parse(cfg)); };
     LOGOS_ASSERT_TRUE(mode(R"({"logLevel":"INFO"})") == RlnMode::Core);
@@ -2107,8 +2116,8 @@ LOGOS_TEST(a_mix_registry_is_provisioned_only_for_a_node_that_runs_mix) {
         delivery_test_rln::resetRlnMockState();
         return registry;
     };
-    // Mix on, in each config shape's own way, and by default: Core mode runs
-    // Mix whatever the level, and an Edge node without a level is Preferred.
+    // Mix on, in each config shape's own way, and by default: without a level a
+    // node on logos.test, a library preset that runs Mix, is Preferred.
     for (const char* cfg : {
              R"({"logLevel":"INFO","preset":"logos.test","mix":true})",
              R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"Required"})",
@@ -2116,16 +2125,16 @@ LOGOS_TEST(a_mix_registry_is_provisioned_only_for_a_node_that_runs_mix) {
              R"({"entryLayer":"kernel","preset":"logos.test","kernelConf":{"logLevel":"INFO","mix":true}})",
              R"({"logLevel":"INFO","preset":"logos.test"})",
              R"({"logLevel":"INFO","preset":"logos.test","mix":null})",
-             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"None"})",
              R"({"mode":"Core","preset":"logos.test"})",
-             R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"None"}})",
              R"({"mode":"Edge","preset":"logos.test"})",
          }) {
         LOGOS_ASSERT_EQ(mixRegistryOf(cfg), std::string("mixreg"));
     }
-    // Mix off: false, an Edge level of None, or the kernel entry without `mix`
-    // (it reads no mode and no level).
+    // Mix off: false, a level of None in either mode, or the kernel entry
+    // without `mix` (it reads no mode and no level).
     for (const char* cfg : {
+             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"None"})",
+             R"({"mode":"Core","preset":"logos.test","messagingOverrides":{"anonymityLevel":"None"}})",
              R"({"logLevel":"INFO","preset":"logos.test","mix":false})",
              R"({"logLevel":"INFO","preset":"logos.test","mix":"no"})",
              R"({"logLevel":"INFO","preset":"logos.test","mix":0})",
@@ -2539,8 +2548,8 @@ LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
     for (const char* cfg : {
              R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"Preferred"})",
              R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"Required"})",
-             // A flat config is Core: it runs Mix whatever the level.
-             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"None"})",
+             // No level: logos.test runs Mix, so the node is Preferred.
+             R"({"logLevel":"INFO","preset":"logos.test"})",
          }) {
         DeliveryModuleImpl impl;
         LOGOS_ASSERT_TRUE(impl.createNode(cfg).success);
@@ -2551,6 +2560,7 @@ LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
         delivery_test_rln::resetRlnMockState();
     }
     for (const char* cfg : {
+             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"None"})",
              R"({"logLevel":"INFO","preset":"logos.test","mix":false})",
          }) {
         DeliveryModuleImpl impl;
