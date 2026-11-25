@@ -18,14 +18,9 @@
 class DeliveryServiceDiscoveryPlugin;
 class RlnBridge;
 
-// The RLN settings this plugin holds for the delivery library: the createNode
-// config's network preset, resolved (see src/rln_presets.h), never carried in
-// the config itself.
-using DeliveryRlnConfig = RlnPresetEntry;
-
-// The rln_module `start` config for a deployment: one entry per registry the
-// node takes a membership on, each at its own rate.
-std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg);
+// The rln_module `start` config for a node of `mode` on `preset`: one entry
+// per registry the node takes a membership on, each at that mode's rate.
+std::string rlnBackendStartConfig(const RlnPresetEntry& preset, RlnMode mode);
 
 // The config's `mode` as the library reads it (trimmed, any case): Core when
 // absent, unknown, or `entryLayer` is "kernel".
@@ -544,7 +539,8 @@ private:
     std::string bringUpRlnBridge();
 
     /**
-     * @brief Installs the delivery library's RLN plugin for `cfg`.
+     * @brief Installs the delivery library's RLN plugin for a node of `mode`
+     * on `preset`.
      *
      * RLN is this module's business, not the delivery library's: the
      * library's plugin is implementation-agnostic — it carries no
@@ -557,7 +553,7 @@ private:
      *
      * @return Empty on success, a description of the problem otherwise.
      */
-    std::string installRlnPlugin(const DeliveryRlnConfig& cfg);
+    std::string installRlnPlugin(const RlnPresetEntry& preset, RlnMode mode);
 
     /**
      * @brief Brings the bridge up and starts the co-loaded RLN module.
@@ -568,7 +564,7 @@ private:
      *
      * @return Empty on success, a description of the problem otherwise.
      */
-    std::string startRlnBackend();
+    std::string startRlnBackend(RlnMode mode);
 
     // Publishes an RLN state transition: stores it and emits
     // rlnStateChanged. A repeat of the current state is not re-emitted.
@@ -600,10 +596,11 @@ private:
     mutable std::mutex rlnStateMutex;
     std::string rlnStateName{"Disabled"};
     std::string rlnStateMessage;
-    // The resolved deployment, published so a caller can query the same
-    // registry this node answers for without resolving the preset itself.
-    DeliveryRlnConfig rlnStateConfig;
-    // The mode that config was resolved for (guarded by rlnStateMutex).
+    // The node's preset, published so a caller can query the same registry
+    // this node answers for without resolving the preset itself.
+    RlnPresetEntry rlnStateConfig;
+    // The node's mode, which picks its rates in that preset (guarded by
+    // rlnStateMutex).
     RlnMode rlnStateMode{RlnMode::Core};
 
     // Runs startRlnBackend() for a node whose preset enables RLN.
@@ -613,10 +610,11 @@ private:
     // and started by bringUpRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
 
-    // The RLN settings held for the delivery library (see DeliveryRlnConfig).
+    // The RLN settings held for the delivery library, which carries none: the
+    // createNode config's network preset, resolved (see src/rln_presets.h).
     // Never null. Replaced, never mutated: a writer publishes a new snapshot.
-    std::shared_ptr<const DeliveryRlnConfig> rlnConfig =
-        std::make_shared<const DeliveryRlnConfig>();
+    std::shared_ptr<const RlnPresetEntry> rlnConfig =
+        std::make_shared<const RlnPresetEntry>();
     // Guards the rlnConfig pointer. Read by the RLN trampolines on a library
     // thread, written by installRlnPlugin and abortRln on ours -- and a callback
     // already executing is never joined, so a reader copies the pointer under
@@ -627,7 +625,7 @@ private:
 
     // Copies the rlnConfig pointer under rlnConfigMutex. For readers not
     // ordered against the writers -- the RLN trampolines.
-    std::shared_ptr<const DeliveryRlnConfig> rlnConfigSnapshot() const;
+    std::shared_ptr<const RlnPresetEntry> rlnConfigSnapshot() const;
 
     // Raw FFI context: what the event registry takes. Every other call goes
     // through the generated logosdelivery_ctx_* wrappers, which want the handle

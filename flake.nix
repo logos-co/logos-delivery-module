@@ -19,18 +19,17 @@
       flake = false;
     };
     # Names are load-bearing: the builder resolves metadata.json's
-    # optional_dependencies (and rln_module's own dependencies) as inputs of those names.
+    # optional_dependencies as inputs of those names.
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module?ref=refs/tags/v1.1.1";
-    rln_lez_module.url = "github:logos-co/logos-rln-lez-module/5a3b87dd0fecf22e97ce81603eba348d2bff69cc";
-    membership_allocation_client_module = {
-      url = "github:logos-co/logos-membership-allocation-client-module/ea9f179f1bfaab1b770600d4c6371b88fd02a029";
-      inputs.libp2p_module.follows = "libp2p_module";
-    };
     rln_module = {
       url = "github:logos-co/logos-rln-module/992fab9747aa84a3c72a36176470dccf226130f6";
-      inputs.rln_lez_module.follows = "rln_lez_module";
-      inputs.membership_allocation_client_module.follows = "membership_allocation_client_module";
+      inputs.membership_allocation_client_module.inputs.libp2p_module.follows = "libp2p_module";
     };
+    # rln_module's own dependencies, at the revs its lock pins (relock with
+    # `nix flake update rln_module`). Inputs of this flake only so that it
+    # can re-export their `.lgx`s.
+    rln_lez_module.follows = "rln_module/rln_lez_module";
+    membership_allocation_client_module.follows = "rln_module/membership_allocation_client_module";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:

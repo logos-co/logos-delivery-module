@@ -287,12 +287,9 @@ leaves out is inherited from the entry, and a mode the entry does not name
 runs the entry as written. Everything else — registries, epoch sizes,
 identifiers — is the deployment's and cannot be set in a mode.
 
-Each mode's keys are laid over the entry and the result is read as an entry
-of its own, so every rule on this page holds per mode. An unknown mode or a
-mode written twice (`edge` and `Edge`) fails the file as
+An unknown mode or a mode written twice (`edge` and `Edge`) fails the file as
 `preset "" modes: …`; a key a mode may not set, or one of the wrong type, as
-`preset "" mode edge: …`. The entry as written, without `modes`, has to be
-valid too.
+`preset "" mode edge: …`.
 
 `rlnState` reports what the node asks as a node of its mode: `mode` (`Core`
 or `Edge`), `rateLimit` and `mixRateLimit` (a rate left to the RLN module's

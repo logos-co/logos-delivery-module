@@ -4,7 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
-#include <memory>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -158,10 +158,9 @@ bool isHex32Bytes(const std::string& s)
     });
 }
 
-// Reads and validates one entry: a preset as written, or a preset with one
-// mode's keys laid over it. `who` opens every error: the preset, and the mode
-// when there is one. `modes` itself is parseModes' business. Returns the
-// error, empty when `entry` is usable.
+// Reads and validates one preset as written; `who` opens every error. Its
+// rates are both modes': `modes` is parseModes' business. Returns the error,
+// empty when `entry` is usable.
 std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnPresetEntry& entry)
 {
     EntryReader read{value, who, {}};
@@ -172,11 +171,11 @@ std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnP
     entry.rlnIdentifier = read.str("rln-identifier");
     entry.epochSizeSec = read.number("epoch-size-sec");
     entry.maxEpochGap = read.number("max-epoch-gap");
-    entry.rateLimit = read.number("rate-limit");
     entry.mixRegistryId = read.str("mix-registry-id");
     entry.mixRlnIdentifier = read.str("mix-rln-identifier");
-    entry.mixRateLimit = read.number("mix-rate-limit");
     entry.mixMetadataTopic = read.str("mix-metadata-topic");
+    const RlnRates rates{read.number("rate-limit"), read.number("mix-rate-limit")};
+    entry.rates = RlnModeRates{.core = rates, .edge = rates};
     if (!read.error.empty()) {
         return read.error;
     }
@@ -229,11 +228,9 @@ bool isModeKey(const std::string& key)
     return std::find(keys.begin(), keys.end(), key) != keys.end();
 }
 
-// Resolves a preset's `modes`: each mode's keys are laid over the entry as
-// written and the result is read and validated like any entry, so every rule
-// holds for what a node of that mode runs with. `entry` is the preset as
-// written, already parsed.
-std::string parseModes(const nlohmann::json& value, const std::string& name, RlnPresetEntry& entry)
+// Reads a preset's `modes` into `rates`, which holds the entry's own rates for
+// both modes: a key a mode sets, 0 included, replaces that mode's rate.
+std::string parseModes(const nlohmann::json& value, const std::string& name, RlnModeRates& rates)
 {
     const auto modesIt = value.find("modes");
     if (modesIt == value.end()) {
@@ -243,8 +240,7 @@ std::string parseModes(const nlohmann::json& value, const std::string& name, Rln
     if (!modesIt->is_object()) {
         return who + " modes must be an object";
     }
-    nlohmann::json base = value;
-    base.erase("modes");
+    std::set<RlnMode> written;
     for (const auto& item : modesIt->items()) {
         std::string modeName = item.key();
         for (char& c : modeName) {
@@ -253,28 +249,27 @@ std::string parseModes(const nlohmann::json& value, const std::string& name, Rln
         if (modeName != "core" && modeName != "edge") {
             return who + " modes: unknown mode \"" + item.key() + "\"";
         }
-        std::shared_ptr<const RlnPresetEntry>& slot =
-            modeName == "edge" ? entry.edgeMode : entry.coreMode;
+        const RlnMode mode = modeName == "edge" ? RlnMode::Edge : RlnMode::Core;
         // Two spellings of one mode ("edge" and "Edge").
-        if (slot) {
+        if (!written.insert(mode).second) {
             return who + " modes: mode " + modeName + " is written twice";
         }
         if (!item.value().is_object()) {
             return who + " mode " + modeName + " must be an object";
         }
         const std::string inMode = who + " mode " + modeName + ":";
-        nlohmann::json merged = base;
         for (const auto& key : item.value().items()) {
             if (!isModeKey(key.key())) {
                 return inMode + " " + key.key() + " cannot be set in a mode";
             }
-            merged[key.key()] = key.value();
         }
-        RlnPresetEntry resolved;
-        if (std::string failure = parseEntry(merged, inMode, resolved); !failure.empty()) {
-            return failure;
+        RlnRates& modeRates = rates.of(mode);
+        EntryReader read{item.value(), inMode, {}};
+        modeRates.rateLimit = read.number("rate-limit", modeRates.rateLimit);
+        modeRates.mixRateLimit = read.number("mix-rate-limit", modeRates.mixRateLimit);
+        if (!read.error.empty()) {
+            return read.error;
         }
-        slot = std::make_shared<const RlnPresetEntry>(std::move(resolved));
     }
     return {};
 }
@@ -284,16 +279,6 @@ std::string parseModes(const nlohmann::json& value, const std::string& name, Rln
 const char* rlnModeName(RlnMode mode)
 {
     return mode == RlnMode::Edge ? "Edge" : "Core";
-}
-
-RlnPresetEntry RlnPresetEntry::forMode(RlnMode mode) const
-{
-    const std::shared_ptr<const RlnPresetEntry>& resolved =
-        mode == RlnMode::Edge ? edgeMode : coreMode;
-    RlnPresetEntry out = resolved ? *resolved : *this;
-    out.coreMode.reset();
-    out.edgeMode.reset();
-    return out;
 }
 
 std::string parseRlnPresetTable(const std::string& json,
@@ -324,7 +309,7 @@ std::string parseRlnPresetTable(const std::string& json,
             !failure.empty()) {
             return failure;
         }
-        if (std::string failure = parseModes(value, name, entry); !failure.empty()) {
+        if (std::string failure = parseModes(value, name, entry.rates); !failure.empty()) {
             return failure;
         }
         parsed[name] = entry;

@@ -15,7 +15,14 @@ SPEC="doctests/delivery-module-runtime.test.yaml"
 
 status=0
 for input in libp2p_module rln_module rln_lez_module membership_allocation_client_module; do
-  node=$(jq -r --arg i "$input" '.nodes[.root].inputs[$i] // empty' flake.lock)
+  # An input that follows another's is locked as the path to it from the
+  # root, not as a node name.
+  node=$(jq -r --arg i "$input" '
+    . as $lock
+    | def node: if type == "array"
+        then reduce .[] as $name ($lock.root; $lock.nodes[.].inputs[$name] | node)
+        else . end;
+    .nodes[.root].inputs[$i] // empty | node' flake.lock)
   if [ -z "$node" ]; then
     echo "flake.lock has no top-level input $input (relock)" >&2
     status=1

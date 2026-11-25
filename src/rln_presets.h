@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -41,13 +40,34 @@ inline constexpr uint64_t kMixMaxEpochGap = 3;
 
 /**
  * @brief The node's mode, as the `createNode` config's `mode` names it. A
- * preset may give each mode its own rates (see
- * RlnPresetEntry::forMode).
+ * preset may give each mode its own rates (see RlnModeRates).
  */
 enum class RlnMode { Core, Edge };
 
 /** @brief `"Core"` or `"Edge"`. */
 const char* rlnModeName(RlnMode mode);
+
+/**
+ * @brief The rates a node's memberships are asked at. 0 leaves the RLN
+ * module's own default.
+ */
+struct RlnRates {
+    uint64_t rateLimit = 0;
+    uint64_t mixRateLimit = 0;
+};
+
+/**
+ * @brief A deployment's rates for each mode. A preset's own `rate-limit` and
+ * `mix-rate-limit` are both modes'; a key under `modes` replaces one for that
+ * mode.
+ */
+struct RlnModeRates {
+    RlnRates core;
+    RlnRates edge;
+
+    RlnRates& of(RlnMode mode) { return mode == RlnMode::Edge ? edge : core; }
+    const RlnRates& of(RlnMode mode) const { return mode == RlnMode::Edge ? edge : core; }
+};
 
 /**
  * @brief One deployment's RLN settings, selected by a `createNode` preset.
@@ -59,10 +79,9 @@ const char* rlnModeName(RlnMode mode);
  *
  * The `mix*` fields describe the registry native Mix proves on: another
  * registry than the relay one, always run at @ref kMixEpochSizeSec and
- * @ref kMixMaxEpochGap. A rate of 0 leaves the RLN module's own default. The
- * rates may differ by mode (@ref forMode). How a membership is obtained (an
- * allocator, a funded registration) is the RLN module's business and has no
- * key here.
+ * @ref kMixMaxEpochGap. The rates are the one thing that may differ by mode
+ * (@ref rates). How a membership is obtained (an allocator, a funded
+ * registration) is the RLN module's business and has no key here.
  */
 struct RlnPresetEntry {
     bool enabled = false;
@@ -72,24 +91,10 @@ struct RlnPresetEntry {
     std::string rlnIdentifier;
     uint64_t epochSizeSec = 0;
     uint64_t maxEpochGap = 0;
-    uint64_t rateLimit = 0;
     std::string mixRegistryId;
     std::string mixRlnIdentifier;
-    uint64_t mixRateLimit = 0;
     std::string mixMetadataTopic;
-    /**
-     * The entry resolved for each mode the preset names, with no modes of its
-     * own; null for a mode it does not name. Read through @ref forMode.
-     */
-    std::shared_ptr<const RlnPresetEntry> coreMode;
-    std::shared_ptr<const RlnPresetEntry> edgeMode;
-
-    /**
-     * @brief The entry a node of `mode` runs with: that mode's resolved
-     * entry, or this one when the preset names no such mode. The result
-     * carries no modes.
-     */
-    RlnPresetEntry forMode(RlnMode mode) const;
+    RlnModeRates rates;
 
     /** @brief Whether the deployment names a registry for native Mix. */
     bool hasMix() const { return !mixRegistryId.empty(); }
@@ -110,10 +115,9 @@ struct RlnPresetEntry {
  *
  * Optional key groups: `mix-*` (a registry for native Mix, which has to be
  * another registry than `registry-id`) and `modes` (`edge` / `core` objects
- * whose `rate-limit` and `mix-rate-limit` are laid over the entry; each
- * resolved entry is validated like the entry itself, and a mode written
- * twice, as `edge` and `Edge`, is an error). The file format is in
- * docs/pages/rln.md.
+ * whose `rate-limit` and `mix-rate-limit` replace the entry's for nodes of
+ * that mode; a mode written twice, as `edge` and `Edge`, is an error). The
+ * file format is in docs/pages/rln.md.
  *
  * Names are matched exactly, and must be ones the delivery library accepts —
  * `""`, `twn`, `logos.dev`, `logos.test`, `status.prod`, `status.staging`. A variant spelling

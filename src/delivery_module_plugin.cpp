@@ -360,7 +360,7 @@ DeliveryModuleImpl::~DeliveryModuleImpl()
     releaseNode();
 }
 
-std::shared_ptr<const DeliveryRlnConfig> DeliveryModuleImpl::rlnConfigSnapshot() const
+std::shared_ptr<const RlnPresetEntry> DeliveryModuleImpl::rlnConfigSnapshot() const
 {
     std::lock_guard<std::mutex> lock(rlnConfigMutex);
     return rlnConfig;
@@ -375,11 +375,11 @@ void DeliveryModuleImpl::abortRln()
     logosdelivery_rln_set_plugin(nullptr, nullptr);
     {
         std::lock_guard<std::mutex> lock(rlnConfigMutex);
-        rlnConfig = std::make_shared<const DeliveryRlnConfig>();
+        rlnConfig = std::make_shared<const RlnPresetEntry>();
     }
     {
         std::lock_guard<std::mutex> lock(rlnStateMutex);
-        rlnStateConfig = DeliveryRlnConfig{};
+        rlnStateConfig = RlnPresetEntry{};
     }
 }
 
@@ -778,12 +778,10 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // a deployment this node cannot reproduce, and coming up without RLN
     // would look like success.
     std::string presetError;
-    const RlnPresetEntry namedPreset = resolveRlnPreset(presetName, presetError);
+    const RlnPresetEntry rlnPreset = resolveRlnPreset(presetName, presetError);
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
-    // Everything below sees the preset resolved for this node's mode.
-    const RlnPresetEntry rlnPreset = namedPreset.forMode(rlnMode);
 
     std::string cfgError;
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset, cfgError);
@@ -795,11 +793,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     rlnBridge->init(&modules().rln_module);
 
     if (rlnPreset.enabled) {
-        {
-            std::lock_guard<std::mutex> lock(rlnStateMutex);
-            rlnStateMode = rlnMode;
-        }
-        if (std::string failure = installRlnPlugin(rlnPreset); !failure.empty()) {
+        if (std::string failure = installRlnPlugin(rlnPreset, rlnMode); !failure.empty()) {
             return {false, {}, failure};
         }
         setRlnState("Initializing", {});
@@ -950,8 +944,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     }
 
     if (rlnPreset.enabled) {
-        rlnBringUpThread = std::thread([this] {
-            const std::string failure = startRlnBackend();
+        rlnBringUpThread = std::thread([this, rlnMode] {
+            const std::string failure = startRlnBackend(rlnMode);
             if (failure.empty()) {
                 setRlnState("Ready", {});
             } else {
@@ -1369,12 +1363,13 @@ StdLogosResult DeliveryModuleImpl::rlnState()
         out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
         out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
         out["mode"] = rlnModeName(rlnStateMode);
-        if (rlnStateConfig.rateLimit != 0) {
-            out["rateLimit"] = rlnStateConfig.rateLimit;
+        const RlnRates& rates = rlnStateConfig.rates.of(rlnStateMode);
+        if (rates.rateLimit != 0) {
+            out["rateLimit"] = rates.rateLimit;
         }
         if (rlnStateConfig.hasMix()) {
-            if (rlnStateConfig.mixRateLimit != 0) {
-                out["mixRateLimit"] = rlnStateConfig.mixRateLimit;
+            if (rates.mixRateLimit != 0) {
+                out["mixRateLimit"] = rates.mixRateLimit;
             }
             out["mixRegistryId"] = rlnStateConfig.mixRegistryId;
             out["mixRlnIdentifier"] = rlnStateConfig.mixRlnIdentifier;
@@ -1400,7 +1395,7 @@ void DeliveryModuleImpl::setRlnState(const char* state, const std::string& messa
     rlnStateChanged(state, message, currentTimestampNs());
 }
 
-std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
+std::string DeliveryModuleImpl::installRlnPlugin(const RlnPresetEntry& preset, RlnMode mode)
 {
     // The setter is process-global: one delivery module instance per process.
     static const LogosDeliveryRlnPlugin rlnPlugin = {
@@ -1410,7 +1405,7 @@ std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
         .validate_proof = rln_validate_proof_callback,
     };
 
-    auto next = std::make_shared<DeliveryRlnConfig>(cfg);
+    auto next = std::make_shared<RlnPresetEntry>(preset);
     next->enabled = true;
     {
         std::lock_guard<std::mutex> lock(rlnConfigMutex);
@@ -1421,17 +1416,18 @@ std::string DeliveryModuleImpl::installRlnPlugin(const DeliveryRlnConfig& cfg)
     (void)logosdelivery_version();
     if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
         std::lock_guard<std::mutex> lock(rlnConfigMutex);
-        rlnConfig = std::make_shared<const DeliveryRlnConfig>();
+        rlnConfig = std::make_shared<const RlnPresetEntry>();
         return "failed to install the RLN plugin";
     }
     {
         std::lock_guard<std::mutex> lock(rlnStateMutex);
         rlnStateConfig = *rlnConfig;
+        rlnStateMode = mode;
     }
     return {};
 }
 
-std::string DeliveryModuleImpl::startRlnBackend()
+std::string DeliveryModuleImpl::startRlnBackend(RlnMode mode)
 {
     // The in-process bridge is one way to answer; the rln*Request events plus
     // rlnRespond are the other, so a bridge that cannot come up is not fatal.
@@ -1450,7 +1446,8 @@ std::string DeliveryModuleImpl::startRlnBackend()
 
     // A node that mounts RLN over a stopped backend Ignores every inbound RLN
     // message. One start names every registry the node takes a membership on.
-    const std::string startFailure = rlnBridge->startBackend(rlnBackendStartConfig(*rlnConfig));
+    const std::string startFailure =
+        rlnBridge->startBackend(rlnBackendStartConfig(*rlnConfig, mode));
     if (!startFailure.empty()) {
         return "rln module start failed: " + startFailure;
     }
@@ -1464,27 +1461,29 @@ void DeliveryModuleImpl::joinRlnBringUp()
     }
 }
 
-std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg)
+std::string rlnBackendStartConfig(const RlnPresetEntry& preset, RlnMode mode)
 {
+    const RlnRates& rates = preset.rates.of(mode);
     // Each registry is an entry of its own: rln_module reads a top-level gap
     // or rate as the default for every entry, so the relay registry's would
     // reach the mix one. The top-level epoch size is the one key it requires.
-    nlohmann::json relay{{"registry_id", cfg.registryId}, {"epoch_size_sec", cfg.epochSizeSec}};
-    if (cfg.maxEpochGap != 0) {
-        relay["max_epoch_gap"] = cfg.maxEpochGap;
+    nlohmann::json relay{{"registry_id", preset.registryId},
+                         {"epoch_size_sec", preset.epochSizeSec}};
+    if (preset.maxEpochGap != 0) {
+        relay["max_epoch_gap"] = preset.maxEpochGap;
     }
-    if (cfg.rateLimit != 0) {
-        relay["rate_limit"] = cfg.rateLimit;
+    if (rates.rateLimit != 0) {
+        relay["rate_limit"] = rates.rateLimit;
     }
-    nlohmann::json startCfg{{"epoch_size_sec", cfg.epochSizeSec},
+    nlohmann::json startCfg{{"epoch_size_sec", preset.epochSizeSec},
                             {"registries", nlohmann::json::array({std::move(relay)})}};
-    if (cfg.hasMix()) {
+    if (preset.hasMix()) {
         // The epoch size and gap native Mix's proof plugin runs at.
-        nlohmann::json mix{{"registry_id", cfg.mixRegistryId},
+        nlohmann::json mix{{"registry_id", preset.mixRegistryId},
                            {"epoch_size_sec", kMixEpochSizeSec},
                            {"max_epoch_gap", kMixMaxEpochGap}};
-        if (cfg.mixRateLimit != 0) {
-            mix["rate_limit"] = cfg.mixRateLimit;
+        if (rates.mixRateLimit != 0) {
+            mix["rate_limit"] = rates.mixRateLimit;
         }
         startCfg["registries"].push_back(std::move(mix));
     }

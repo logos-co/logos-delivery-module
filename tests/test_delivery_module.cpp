@@ -1100,10 +1100,10 @@ LOGOS_TEST(preset_table_parses_the_mix_registry_with_defaults) {
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableWithMix, table).empty());
     const RlnPresetEntry& e = table["logos.test"];
     LOGOS_ASSERT_TRUE(e.hasMix());
-    LOGOS_ASSERT_EQ(e.rateLimit, static_cast<uint64_t>(100));
+    LOGOS_ASSERT_EQ(e.rates.core.rateLimit, static_cast<uint64_t>(100));
     LOGOS_ASSERT_EQ(e.mixRegistryId, std::string("mixreg"));
     LOGOS_ASSERT_EQ(e.mixRlnIdentifier, std::string(kMixRlnIdentifierV1));
-    LOGOS_ASSERT_EQ(e.mixRateLimit, static_cast<uint64_t>(20));
+    LOGOS_ASSERT_EQ(e.rates.core.mixRateLimit, static_cast<uint64_t>(20));
     LOGOS_ASSERT_EQ(e.mixMetadataTopic, std::string("/mix/1/metadata/proto"));
 
     // The identifier is taken as written.
@@ -1117,7 +1117,7 @@ LOGOS_TEST(preset_table_parses_the_mix_registry_with_defaults) {
     // Without a mix registry nothing mix-related is in force.
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
     LOGOS_ASSERT_FALSE(table["logos.test"].hasMix());
-    LOGOS_ASSERT_EQ(table["logos.test"].rateLimit, static_cast<uint64_t>(0));
+    LOGOS_ASSERT_EQ(table["logos.test"].rates.core.rateLimit, static_cast<uint64_t>(0));
 }
 
 // A mix registry that cannot work is refused where it is written.
@@ -1211,68 +1211,66 @@ static constexpr const char* kRlnPresetTableWithModes = R"({
   }
 })";
 
-// A mode's keys replace the entry's and the rest is inherited; the mode name
-// is matched without regard to case.
+// A mode's keys replace the entry's rates for nodes of that mode, a key it
+// leaves out is the entry's; the mode name is matched without regard to case.
 LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
     std::map<std::string, RlnPresetEntry> table;
     LOGOS_ASSERT_EQ(parseRlnPresetTable(kRlnPresetTableWithModes, table), std::string());
-    const RlnPresetEntry& written = table["logos.test"];
-    // The entry as written: its own rates.
-    LOGOS_ASSERT_EQ(written.rateLimit, static_cast<uint64_t>(100));
-    LOGOS_ASSERT_EQ(written.mixRateLimit, static_cast<uint64_t>(20));
+    {
+        const RlnPresetEntry& entry = table["logos.test"];
+        LOGOS_ASSERT_TRUE(entry.enabled);
+        LOGOS_ASSERT_EQ(entry.registryId, std::string("reg"));
+        LOGOS_ASSERT_EQ(entry.mixRegistryId, std::string("mixreg"));
+        LOGOS_ASSERT_EQ(entry.mixMetadataTopic, std::string("/mix/1/metadata/proto"));
+        LOGOS_ASSERT_EQ(entry.epochSizeSec, static_cast<uint64_t>(600));
 
-    const RlnPresetEntry edge = written.forMode(RlnMode::Edge);
-    LOGOS_ASSERT_TRUE(edge.enabled);
-    LOGOS_ASSERT_EQ(edge.registryId, std::string("reg"));
-    LOGOS_ASSERT_EQ(edge.mixRegistryId, std::string("mixreg"));
-    LOGOS_ASSERT_EQ(edge.mixMetadataTopic, std::string("/mix/1/metadata/proto"));
-    LOGOS_ASSERT_EQ(edge.epochSizeSec, static_cast<uint64_t>(600));
-    LOGOS_ASSERT_EQ(edge.rateLimit, static_cast<uint64_t>(100));
-    LOGOS_ASSERT_EQ(edge.mixRateLimit, static_cast<uint64_t>(20));
-    // The resolved entry carries no modes of its own.
-    LOGOS_ASSERT_TRUE(edge.coreMode == nullptr);
-    LOGOS_ASSERT_TRUE(edge.edgeMode == nullptr);
+        // An empty mode: the entry's rates.
+        const RlnRates& edge = entry.rates.of(RlnMode::Edge);
+        LOGOS_ASSERT_EQ(edge.rateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(edge.mixRateLimit, static_cast<uint64_t>(20));
 
-    const RlnPresetEntry core = written.forMode(RlnMode::Core);
-    LOGOS_ASSERT_EQ(core.registryId, std::string("reg"));
-    LOGOS_ASSERT_EQ(core.rateLimit, static_cast<uint64_t>(600));
-    LOGOS_ASSERT_EQ(core.mixRateLimit, static_cast<uint64_t>(100));
-    LOGOS_ASSERT_TRUE(core.coreMode == nullptr);
-    LOGOS_ASSERT_TRUE(core.edgeMode == nullptr);
+        const RlnRates& core = entry.rates.of(RlnMode::Core);
+        LOGOS_ASSERT_EQ(core.rateLimit, static_cast<uint64_t>(600));
+        LOGOS_ASSERT_EQ(core.mixRateLimit, static_cast<uint64_t>(100));
+    }
 
-    // One mode named: the other runs the entry as written.
+    // One mode named: the other runs at the entry's rates.
     LOGOS_ASSERT_EQ(parseRlnPresetTable(
         R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,"rate-limit":100,
             "mix-registry-id":"mixreg","mix-metadata-topic":"/t",
             "modes":{"EDGE":{"mix-rate-limit":20}}}})",
         table), std::string());
-    const RlnPresetEntry onlyEdge = table["logos.test"].forMode(RlnMode::Edge);
-    LOGOS_ASSERT_EQ(onlyEdge.mixRateLimit, static_cast<uint64_t>(20));
-    LOGOS_ASSERT_EQ(onlyEdge.rateLimit, static_cast<uint64_t>(100));
-    const RlnPresetEntry otherCore = table["logos.test"].forMode(RlnMode::Core);
-    LOGOS_ASSERT_EQ(otherCore.mixRateLimit, static_cast<uint64_t>(0));
-    LOGOS_ASSERT_EQ(otherCore.rateLimit, static_cast<uint64_t>(100));
-    LOGOS_ASSERT_TRUE(otherCore.edgeMode == nullptr);
+    {
+        const RlnModeRates& rates = table["logos.test"].rates;
+        LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(20));
+        LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(0));
+        LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(100));
+    }
 
-    // Without `modes` every mode runs the entry as written.
+    // A mode's 0 replaces the entry's rate too: the RLN module's default.
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(
+        R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,"rate-limit":100,
+            "modes":{"edge":{"rate-limit":0}}}})",
+        table), std::string());
+    LOGOS_ASSERT_EQ(table["logos.test"].rates.edge.rateLimit, static_cast<uint64_t>(0));
+    LOGOS_ASSERT_EQ(table["logos.test"].rates.core.rateLimit, static_cast<uint64_t>(100));
+
+    // Without `modes` both modes run at the entry's rates.
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTableWithMix, table).empty());
-    const RlnPresetEntry& plain = table["logos.test"];
-    LOGOS_ASSERT_TRUE(plain.coreMode == nullptr);
-    LOGOS_ASSERT_TRUE(plain.edgeMode == nullptr);
-    for (RlnMode mode : {RlnMode::Core, RlnMode::Edge}) {
-        const RlnPresetEntry resolved = plain.forMode(mode);
-        LOGOS_ASSERT_EQ(rlnBackendStartConfig(resolved), rlnBackendStartConfig(plain));
-        LOGOS_ASSERT_EQ(resolved.rlnIdentifier, plain.rlnIdentifier);
-        LOGOS_ASSERT_EQ(resolved.mixRlnIdentifier, plain.mixRlnIdentifier);
-        LOGOS_ASSERT_EQ(resolved.mixMetadataTopic, plain.mixMetadataTopic);
-        LOGOS_ASSERT_EQ(resolved.enableValidation, plain.enableValidation);
-        LOGOS_ASSERT_EQ(resolved.manageBackend, plain.manageBackend);
+    {
+        const RlnPresetEntry& plain = table["logos.test"];
+        LOGOS_ASSERT_EQ(plain.rates.edge.rateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(plain.rates.edge.mixRateLimit, static_cast<uint64_t>(20));
+        LOGOS_ASSERT_EQ(rlnBackendStartConfig(plain, RlnMode::Edge),
+                        rlnBackendStartConfig(plain, RlnMode::Core));
     }
     std::string err;
     ::unsetenv(kRlnPresetsEnvVar);
     const RlnPresetEntry builtin = resolveRlnPreset("logos.test", err);
     LOGOS_ASSERT_TRUE(err.empty());
-    LOGOS_ASSERT_EQ(rlnBackendStartConfig(builtin.forMode(RlnMode::Edge)), rlnBackendStartConfig(builtin));
+    LOGOS_ASSERT_EQ(rlnBackendStartConfig(builtin, RlnMode::Edge),
+                    rlnBackendStartConfig(builtin, RlnMode::Core));
     LOGOS_ASSERT_EQ(std::string(rlnModeName(RlnMode::Core)), std::string("Core"));
     LOGOS_ASSERT_EQ(std::string(rlnModeName(RlnMode::Edge)), std::string("Edge"));
 }
@@ -1329,15 +1327,14 @@ LOGOS_TEST(configMode_reads_the_mode_as_the_library_does) {
 // gap and rate: a top-level gap or rate would be every entry's default.
 // Pinned as JSON because the RLN module parses exactly this shape.
 LOGOS_TEST(the_backend_start_config_names_both_registries) {
-    DeliveryRlnConfig cfg;
+    RlnPresetEntry cfg;
     cfg.enabled = true;
     cfg.registryId = "reg";
     cfg.epochSizeSec = 600;
-    cfg.rateLimit = 100;
     cfg.mixRegistryId = "mixreg";
-    cfg.mixRateLimit = 20;
+    cfg.rates.core = RlnRates{.rateLimit = 100, .mixRateLimit = 20};
 
-    auto start = nlohmann::json::parse(rlnBackendStartConfig(cfg));
+    auto start = nlohmann::json::parse(rlnBackendStartConfig(cfg, RlnMode::Core));
     LOGOS_ASSERT_EQ(start.value("epoch_size_sec", 0), 600);
     LOGOS_ASSERT_FALSE(start.contains("rate_limit"));
     LOGOS_ASSERT_FALSE(start.contains("max_epoch_gap"));
@@ -1351,20 +1348,24 @@ LOGOS_TEST(the_backend_start_config_names_both_registries) {
 
     // A relay rate with no mix rate: the mix entry carries none, and nothing
     // at the top level gives it the relay's.
-    cfg.rateLimit = 600;
-    cfg.mixRateLimit = 0;
-    auto relayRateOnly = nlohmann::json::parse(rlnBackendStartConfig(cfg));
+    cfg.rates.core = RlnRates{.rateLimit = 600, .mixRateLimit = 0};
+    auto relayRateOnly = nlohmann::json::parse(rlnBackendStartConfig(cfg, RlnMode::Core));
     LOGOS_ASSERT_FALSE(relayRateOnly.contains("rate_limit"));
     LOGOS_ASSERT_EQ(relayRateOnly["registries"][0].value("rate_limit", 0), 600);
     LOGOS_ASSERT_FALSE(relayRateOnly["registries"][1].contains("rate_limit"));
 
+    // The rates are the mode's: Edge, which has none here, asks none.
+    auto edge = nlohmann::json::parse(rlnBackendStartConfig(cfg, RlnMode::Edge));
+    LOGOS_ASSERT_FALSE(edge["registries"][0].contains("rate_limit"));
+    LOGOS_ASSERT_FALSE(edge["registries"][1].contains("rate_limit"));
+
     // Relay only, with a gap and no rate.
-    DeliveryRlnConfig relay;
+    RlnPresetEntry relay;
     relay.enabled = true;
     relay.registryId = "reg";
     relay.epochSizeSec = 600;
     relay.maxEpochGap = 2;
-    auto only = nlohmann::json::parse(rlnBackendStartConfig(relay));
+    auto only = nlohmann::json::parse(rlnBackendStartConfig(relay, RlnMode::Core));
     LOGOS_ASSERT_FALSE(only.contains("max_epoch_gap"));
     LOGOS_ASSERT_EQ(only["registries"].size(), static_cast<size_t>(1));
     const nlohmann::json expectedOnly{
