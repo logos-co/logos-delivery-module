@@ -1,14 +1,20 @@
 # Run a delivery node
 
-Runs a delivery node (a Logos Core daemon + `delivery_module` 0.3.3, for Logos
+Runs a delivery node (a Logos Core daemon + `delivery_module`, for Logos
 Testnet v0.3). There is no GUI or HTTP API — interaction is via the daemon's
-CLI (`logosctl`, or `logoscore` in the Nix setup). You can run it three ways:
+CLI, `logosctl`. You can run it three ways:
 
 - [With Docker](#with-docker) — quickest; everything runs in a container.
 - [Prebuilt binaries](#without-docker-prebuilt-binaries) — download release
   binaries, nothing to build (Linux and macOS).
-- [Build with Nix](#without-docker-build-with-nix) — build from source on any
-  platform.
+- [Build with Nix](#without-docker-build-with-nix) — build this checkout from
+  source (Linux and macOS).
+
+The Docker and prebuilt paths run the released `delivery_module` 0.3.3 with
+the catalog's RLN packages, `liblogos_rln_module` 0.12.0 and
+`liblogos_lez_rln_module` 5.1.0. The Nix path builds this checkout, which
+loads `rln_module`, `rln_lez_module` and `membership_allocation_client_module`
+instead.
 
 All three connect the node to the `logos.test` fleet by default. A node that
 other peers should be able to dial also needs its
@@ -29,9 +35,8 @@ docker compose up -d --build
 ```
 
 The image is built from [logos-docker](https://github.com/logos-co/logos-docker):
-the `logosctl` daemon with `delivery_module` 0.3.3 and the RLN modules
-(`liblogos_rln_module` 0.12.0, `liblogos_lez_rln_module` 5.1.0) from the Logos
-catalog.
+the `logosctl` daemon with the released `delivery_module` and its RLN packages
+from the Logos catalog.
 
 ### Boot the node
 
@@ -42,8 +47,9 @@ docker exec logos-node logosctl module load delivery_module
 docker exec logos-node logosctl call delivery_module createNode @/conf/logos-test.json
 ```
 
-`logos.test` runs RLN, so the node needs a membership before it can start —
-[fund it](#fund-the-nodes-rln-membership), then:
+`logos.test` runs RLN: the node starts without a membership, but cannot send
+until it holds one — see [Fund the node's RLN membership](#fund-the-nodes-rln-membership).
+Start it:
 
 ```bash
 docker exec logos-node logosctl call delivery_module start
@@ -85,10 +91,12 @@ and follow its install steps to put `logosctl` on your `PATH`.
 logosctl daemon start --detach
 
 # Fetch delivery_module and the RLN modules logos.test needs from the Logos
-# catalog and install them (liblogos_lez_rln_module comes in as a dependency)
+# catalog and install them. The RLN module names its registry provider without
+# a version, so that one goes in first.
 logosctl catalog refresh
 logosctl package install delivery_module --version 0.3.3 --yes
-logosctl package install liblogos_rln_module --version 0.12.0 --yes
+logosctl install liblogos_lez_rln_module --version 5.1.0 -y
+logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
 
 # logos.test node config (layered createNode shape — see Configuration below)
 cat > logos-test.json <<'JSON'
@@ -105,7 +113,6 @@ JSON
 
 logosctl module load delivery_module
 logosctl call delivery_module createNode @logos-test.json
-# fund the node's RLN membership first (see below), then:
 logosctl call delivery_module start
 ```
 
@@ -124,13 +131,22 @@ Verify with `logosctl daemon status`; stop with `logosctl daemon stop`.
 `createNode` brings the RLN modules up on the preset's registry; they create
 the node's own wallet and register a membership as soon as its payer account
 holds enough native LEZ — the node pays for itself, nothing is registered by
-hand. `start` passes only once that membership is active.
+hand. The node starts without a membership; it cannot send until the
+membership is active. A build of this checkout first asks a membership
+allocator of the registry's network and pays only when none grants (see
+[`rln.md`](./rln.md#how-a-membership-is-obtained)).
 
-With Docker, prefix each command with `docker exec logos-node`.
+With Docker, run the commands below inside the container
+(`docker exec -it logos-node sh`).
 
 ```bash
+# The RLN modules' names: the released 0.3.3 packages (Docker, prebuilt binaries)
+RLN=liblogos_rln_module LEZ=liblogos_lez_rln_module
+# ... or a build of this checkout
+RLN=rln_module LEZ=rln_lez_module
+
 # The account to fund (state "ready", "network":"testnet")
-logosctl call liblogos_lez_rln_module wallet_status
+logosctl call $LEZ wallet_status
 # → {... "payer":"<ACCOUNT>" ...}
 ```
 
@@ -144,10 +160,10 @@ Then wait for the membership (typically 1–3 minutes after the funds land):
 
 ```bash
 printf '%s' '5e269b6a19fce081f5808b13442dcbc3522197638dd38df5a28bc4e55236b977' > /tmp/rln-id.arg
-logosctl call liblogos_rln_module get_membership_state \
+logosctl call $RLN get_membership_state \
   logos:testnet:fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971 @/tmp/rln-id.arg
 # "state":"unknown" with provisioning.step "awaiting_funding" → not funded yet
-# "state":"active"                                            → ready to start
+# "state":"active"                                            → the node can send
 ```
 
 The wallet (and the key to its funds) lives in the node's data — the
@@ -155,8 +171,7 @@ The wallet (and the key to its funds) lives in the node's data — the
 
 ## Without Docker: build with Nix
 
-Build the runtime and this module with Nix, then run the `logoscore` daemon
-directly on the host.
+Build `logosctl` and this module with Nix, then run the daemon on the host.
 
 ### Prerequisites
 
@@ -165,82 +180,77 @@ directly on the host.
 
 ### Build the runtime and module
 
-Build the `logoscore` CLI (the headless runtime) and the `lgpm` package
-manager from their flakes, then build and install this module's `.lgx`.
-Both of its dependencies are optional. `libp2p_module` hosts external service
-discovery: a node configured for it (`plugin-kad-discovery`) fails to start
-without it, any other node runs without it. An RLN-enabled preset also needs
-`liblogos_rln_module` and `liblogos_lez_rln_module`. This flake
-re-exports their `.lgx`s from its own locked inputs, so they match the revs
-the module was built against:
+Build `logosctl` from its flake, then this module's `.lgx` and the modules it
+loads. `libp2p_module` hosts [plugin discovery](#plugin-hosted-discovery) and
+nothing else: a node that does not use it runs without it. An RLN-enabled
+preset needs `rln_module` and what it depends on, `rln_lez_module` and
+`membership_allocation_client_module`. This flake re-exports their `.lgx`s
+from its own inputs, so they match the revs the module was built against:
 
 ```bash
 git clone https://github.com/logos-co/logos-delivery-module.git
 cd logos-delivery-module
-git checkout v0.3.3
 
-# Runtime + package manager
-nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
-nix build 'github:logos-co/logos-package-manager#cli' -o lgpm
+# The CLI: daemon, client and package manager in one binary
+nix build 'github:logos-co/logos-logoscore-cli#ctl' --out-link ./logos
 
 # This module, built from the checkout
 nix build '.#lgx' -o delivery-lgx
 
-# libp2p, for external service discovery
+# libp2p, for plugin discovery
 nix build '.#libp2p_module-lgx' -o libp2p-lgx
 
-# Its RLN dependency chain
-nix build '.#liblogos_rln_module-lgx' -o rln-lgx
-nix build '.#liblogos_lez_rln_module-lgx' -o lez-rln-lgx
+# The RLN chain: registry provider, allocator client, then the RLN module
+nix build '.#rln_lez_module-lgx' -o rln-lez-lgx
+nix build '.#membership_allocation_client_module-lgx' -o allocation-client-lgx
+nix build '.#rln_module-lgx' -o rln-lgx
 
-# Seed the modules dir with the bundled capability module, then install
-mkdir -p modules
-cp -RL ./logos/modules/. ./modules/
-for pkg in libp2p-lgx lez-rln-lgx rln-lgx delivery-lgx; do
-  ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file "$pkg"/*.lgx
-done
+mkdir -p packages
+cp -f delivery-lgx/*.lgx libp2p-lgx/*.lgx rln-lez-lgx/*.lgx \
+  allocation-client-lgx/*.lgx rln-lgx/*.lgx packages/
 ```
 
 The first build compiles the whole runtime stack through Nix — allow
 ~30–45 min. Later builds are fast.
 
-`.#lgx` is a development package that only the Nix-built runtime above can
-load. To install a local build into a released `logosctl` instead, build
-`.#lgx-portable` and pass it to `logosctl package install`.
+`.#lgx` is a development package that only the Nix-built `logosctl` above can
+load: its libraries find their own dependencies in the Nix store. On Linux
+the libp2p package needs one more build to bring those into the store; the
+[runtime doc-test](https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md)
+shows it. To install a local build into a released `logosctl` instead, build
+`.#lgx-portable` and pass it to `logosctl package install`; such a build loads
+`rln_module`, which the catalog does not carry yet, so there it runs presets
+without RLN only.
 
-### Start the daemon
-
-Put `logoscore` on your `PATH` and start it in daemon mode pointed at
-`./modules`:
+### Start the daemon and install
 
 ```bash
 export PATH="$PWD/logos/bin:$PATH"
-logoscore -D -m ./modules > logs.txt &
+logosctl daemon start --detach
+logosctl install --dir packages -y
 ```
+
+`--dir` installs every `.lgx` in the directory from disk, with no catalog
+involved. As with the prebuilt binaries, everything lives in the session
+directory, `~/.logosctl` unless `--config-dir` names another.
 
 ### Boot the node
 
 ```bash
-logoscore load-module delivery_module
-logoscore call delivery_module createNode @conf/logos-test.json
-logoscore call delivery_module start
+logosctl module load delivery_module
+logosctl call delivery_module createNode @conf/logos-test.json
+logosctl call delivery_module start
 ```
 
-Verify:
+The node can send once it holds an RLN membership — see
+[Fund the node's RLN membership](#fund-the-nodes-rln-membership).
 
-```bash
-logoscore status
-```
+Verify with `logosctl daemon status`; stop with `logosctl daemon stop`.
 
-### Stop
-
-```bash
-logoscore stop
-```
-
-> For a fully pinned, build-from-this-commit walkthrough — plus notes on the
-> blocking Kademlia bootstrap in headless runs — see the
-> [runtime doc-test](https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md).
+> The [runtime doc-test](https://github.com/logos-co/logos-delivery-module/blob/master/doctests/outputs/delivery-module-runtime.md)
+> walks through the same steps as an executable spec that CI runs, with the
+> module dependencies pinned by commit, plus notes on the blocking Kademlia
+> bootstrap in headless runs.
 
 ## Check the node
 
@@ -260,8 +270,7 @@ logosctl call delivery_module getNodeInfo Multiaddrs --json | jq -r .result.valu
 # /ip4/<public-ip>/tcp/30303/p2p/16Uiu2…,/ip4/<public-ip>/udp/30303/quic-v1/p2p/16Uiu2…
 ```
 
-With Docker, prefix them with `docker exec logos-node`; with the Nix build,
-use `logoscore call …`. See
+With Docker, prefix them with `docker exec logos-node`. See
 [`query-node.md`](./query-node.md) for everything else the node reports.
 
 ## Configuration
@@ -328,28 +337,18 @@ RLN comes from the preset — there is nothing to configure. `logos.test` runs
 with it on (the LEZ testnet registry), so a `logos.test` node needs the RLN
 modules and an active RLN membership; see [`rln.md`](./rln.md#turning-rln-on).
 `logos.dev` runs with it off, so a `logos.dev` node needs no RLN modules;
-`module load` reports `liblogos_rln_module` as skipped and carries on.
+`module load` reports the RLN module as skipped and carries on.
 [`networks.md`](./networks.md) tracks each network's RLN state.
 
-On a preset with RLN on, install the RLN modules next to this one before
-`createNode`, or bring-up ends in `Failed`:
-
-- Prebuilt binaries — they are in a separate catalog:
-
-  ```bash
-  logosctl catalog add https://github.com/logos-co/logos-rln-modules/releases/download/index/logos-repo.json
-  logosctl catalog refresh
-  logosctl package install liblogos_rln_module --yes
-  ```
-
-- Nix — the build above already installs them.
-- Docker — set the `RLN_VERSION` build arg of the
-  [logos-docker](https://github.com/logos-co/logos-docker) image in
-  [`docker-compose.yml`](../../docker-compose.yml), with `MODULES_REPO`
-  pointing at a catalog that carries the RLN modules.
+On a preset with RLN on, the RLN modules have to be installed next to this
+one before `createNode`, or bring-up ends in `Failed`. Each path above
+installs them; the Docker image takes their version from the `RLN_VERSION`
+build arg in [`docker-compose.yml`](../../docker-compose.yml).
 
 Follow bring-up with `rlnState`: `Disabled` → `Initializing` → `Ready` |
-`Failed`. See [`rln.md`](./rln.md) for the details.
+`Failed`. RLN comes up once, with the node, and `start` and `stop` do not
+touch it. See [`rln.md`](./rln.md#turning-rln-on) for the details, and for
+when to call `start` on a node with Mix on.
 
 ### Plugin-hosted discovery
 
@@ -373,7 +372,12 @@ above). Without it `start` fails and the node is stopped. On Windows, where
 
 `LIBP2P_MODULE_CONFIG` (inline JSON or a file path) is optional. Set it only to
 override libp2p's own defaults, for example its listen addresses when other
-nodes must reach it: unset, it listens on an ephemeral loopback port.
+nodes must reach it: unset, it listens on an ephemeral loopback port. With
+plugin discovery the node is created with `mountKad` and
+`mountServiceDiscovery` on and the node's DHT bootstrap peers in place of the
+config's `bootstrapNodes`. Without it this module creates no libp2p node. The
+RLN stack does not use `libp2p_module` or this variable: its allocation client
+runs a node of its own.
 
 How it works is described in [Architecture](./architecture.md#plugin-hosted-discovery).
 
