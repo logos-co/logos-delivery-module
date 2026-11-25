@@ -3,9 +3,11 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <deque>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -137,6 +139,9 @@ void unregisterMixRlnBridge(RlnBridge* bridge)
 void DeliveryModuleImpl::start_callback(int errCode, const char* const* reply,
                                         const char* errMsg, void* userData)
 {
+    if (errCode == NIMFFI_RET_STALE_WARN) {
+        return; // a progress tick, not the reply
+    }
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
         fprintf(stderr, "DeliveryModuleImpl::start_callback: Invalid userData\n");
@@ -156,14 +161,10 @@ void DeliveryModuleImpl::stopAfterFailedStart()
         return;
     }
     failedStartStopArmed = false;
-    // The same two halves as stop(): the node, then the RLN backend this
-    // module started for it.
     failedStartStopThread = std::thread([this] {
         if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
             fprintf(stderr, "DeliveryModuleImpl: failed to stop the node after a failed start\n");
-            return;
         }
-        stopRlnBackend();
     });
 }
 
@@ -182,6 +183,9 @@ void DeliveryModuleImpl::joinFailedStartStop()
 void DeliveryModuleImpl::stop_callback(int errCode, const char* const* reply,
                                        const char* errMsg, void* userData)
 {
+    if (errCode == NIMFFI_RET_STALE_WARN) {
+        return; // a progress tick, not the reply
+    }
     auto* impl = static_cast<DeliveryModuleImpl*>(userData);
     if (!impl) {
         fprintf(stderr, "DeliveryModuleImpl::stop_callback: Invalid userData\n");
@@ -320,7 +324,7 @@ std::string DeliveryModuleImpl::bringUpRlnBridge()
         // dereference an unset pointer here.
         return "module context not ready";
     }
-    rlnBridge->init(&modules().liblogos_rln_module);
+    rlnBridge->init(&modules().rln_module);
     return rlnBridge->enable();
 }
 
@@ -381,13 +385,16 @@ void DeliveryModuleImpl::abortRln()
 
 void DeliveryModuleImpl::releaseNode()
 {
-    // A stop issued after a failed start holds the context handle, and joins
-    // the bring-up thread itself: finish it first, so that join is not racing
-    // the one below.
+    // A stop issued after a failed start holds the context handle: finish it
+    // first.
     joinFailedStartStop();
     // The bring-up thread touches rlnBridge and rlnConfig; nothing below may
     // run while it is still in flight. A no-op when no thread was started.
     joinRlnBringUp();
+
+    // The backend this module started goes with the node context. Before
+    // abortRln, which forgets that this module manages one.
+    stopRlnBackend();
 
     // Before ctx_destroy on purpose: clearing the RLN surface fails all
     // in-flight RLN requests, so no new RLN callback is dispatched into this
@@ -525,6 +532,21 @@ static std::string toLowerCopy(std::string s)
     return s;
 }
 
+// Without leading and trailing whitespace, as the library strips the values
+// it matches (entryLayer, mode).
+static std::string trimCopy(std::string s)
+{
+    const auto isSpace = [](unsigned char c) { return std::isspace(c) != 0; };
+    s.erase(s.begin(), std::find_if_not(s.begin(), s.end(), isSpace));
+    s.erase(std::find_if_not(s.rbegin(), s.rend(), isSpace).base(), s.end());
+    return s;
+}
+
+// Whether the config names the kernel entry: `entryLayer` (key matched
+// without regard to case), its value trimmed and lower-cased as the library
+// reads it.
+static bool isKernelEntry(const nlohmann::json& cfgObj);
+
 // Case-insensitive key lookup, matching keys the same way as the upstream
 // conf parser. Returns the key as spelled in the config.
 static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
@@ -539,8 +561,8 @@ static std::optional<std::string> findKey(const nlohmann::json& cfgObj,
     return std::nullopt;
 }
 
-// True when the config is the legacy flat shape: any top-level key besides the
-// ones the layered parser consumes marks a bare WakuNodeConf field.
+// True when the config is a bare WakuNodeConf: any top-level key besides the
+// ones the layered parser consumes is a WakuNodeConf field.
 static bool isFlatShape(const nlohmann::json& cfgObj)
 {
     for (const auto& entry : cfgObj.items()) {
@@ -554,63 +576,139 @@ static bool isFlatShape(const nlohmann::json& cfgObj)
     return false;
 }
 
-// Locates the object that carries kernel/messaging settings for this config
-// shape: kernelConf when present, messagingOverrides for the layered shapes,
-// top level for the legacy flat shape.
-static nlohmann::json* configTarget(nlohmann::json& cfgObj)
+static bool isKernelEntry(const nlohmann::json& cfgObj)
 {
     const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-    const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-        && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
-    if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
-        kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
-        return &cfgObj[*kernelConfKey];
+    return entryLayerKey && cfgObj[*entryLayerKey].is_string()
+        && toLowerCopy(trimCopy(cfgObj[*entryLayerKey].get<std::string>())) == "kernel";
+}
+
+RlnMode configMode(const nlohmann::json& cfg)
+{
+    if (!cfg.is_object()) {
+        return RlnMode::Core;
     }
-    if (kernelEntry) {
-        return nullptr;
+    // The library reads no mode on the kernel entry.
+    if (isKernelEntry(cfg)) {
+        return RlnMode::Core;
     }
-    if (isFlatShape(cfgObj)) {
-        return &cfgObj;
+    const auto modeKey = findKey(cfg, {"mode"});
+    if (!modeKey || !cfg[*modeKey].is_string()) {
+        return RlnMode::Core;
     }
-    auto overridesKey = findKey(cfgObj, {"messagingoverrides"});
-    if (!overridesKey) {
-        return nullptr;
+    const std::string mode = toLowerCopy(trimCopy(cfg[*modeKey].get<std::string>()));
+    return mode == "edge" ? RlnMode::Edge : RlnMode::Core;
+}
+
+// Whether `target` turns Mix on, as logos-delivery v0.40.0 reads it:
+// `mix: true` (with `mixKey`) or an anonymityLevel of Preferred / Required
+// (with `level`). With logos-messaging/logos-delivery#4780 an absent level
+// turns Mix on too.
+static bool mixIsOn(const nlohmann::json& target, bool mixKey, bool level)
+{
+    if (!target.is_object()) {
+        return false;
     }
-    return cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
+    if (mixKey) {
+        if (const auto key = findKey(target, {"mix"});
+            key && target[*key].is_boolean() && target[*key].get<bool>()) {
+            return true;
+        }
+    }
+    if (level) {
+        if (const auto key = findKey(target, {"anonymitylevel", "anonymity-level"});
+            key && target[*key].is_string()) {
+            const std::string value = toLowerCopy(target[*key].get<std::string>());
+            return value == "preferred" || value == "required";
+        }
+    }
+    return false;
+}
+
+// Why the caller's mix-rln-registry-id is not the registry the backend serves
+// for Mix; empty when it is.
+static std::string callerMixRegistryError(const nlohmann::json& value, const RlnPresetEntry& preset)
+{
+    const std::string asked = value.is_string() ? value.get<std::string>() : value.dump();
+    if (!preset.hasMix()) {
+        return "mix-rln-registry-id " + asked + " is set, but the preset names no mix registry";
+    }
+    if (!value.is_string() || asked != preset.mixRegistryId) {
+        return "mix-rln-registry-id " + asked + " is not the preset's mix registry "
+               + preset.mixRegistryId;
+    }
+    return {};
 }
 
 // Defaults the node's storage directory to the host's per-instance path, so
 // side-by-side instances don't share upstream's cwd-relative "./data". Also
 // carries the preset's validation switch into the config as
 // rln-disable-validation: deployment policy, so it overrides any client key.
-// Each setting goes where the config shape accepts it: kernelConf when
-// present, messagingOverrides (created if needed) for the layered shapes,
-// top level for the legacy flat shape.
+// With a mix preset, sets each mix-rln-* key the caller left unset where the
+// target turns Mix on (mixIsOn). Each setting goes where the config shape
+// accepts it: kernelConf when present, messagingOverrides (created if needed)
+// for the layered shapes, top level for a bare WakuNodeConf. A
+// mix-rln-registry-id the caller wrote, in any of those objects, must pass
+// callerMixRegistryError. nullopt on failure, with the createNode error in
+// `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      bool disableRlnValidation)
+                                                      const RlnPresetEntry& preset,
+                                                      std::string& error)
 {
+    error.clear();
     nlohmann::json cfgObj;
     try {
         cfgObj = nlohmann::json::parse(cfg);
     } catch (const nlohmann::json::parse_error&) {
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not valid JSON\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
     if (!cfgObj.is_object()) {
         fprintf(stderr, "DeliveryModuleImpl: createNode cfg is not a JSON object\n");
+        error = "Invalid JSON config";
         return std::nullopt;
     }
 
-    if (!persistencePath.empty() || disableRlnValidation) {
+    // Checked only when this module starts the backend: a host-managed one
+    // serves registries the preset does not describe.
+    if (preset.enabled && preset.manageBackend) {
+        // Every object the library reads node keys from, whichever exist, and
+        // every spelling of the key findKey's lower-casing matches.
+        std::vector<const nlohmann::json*> layers{&cfgObj};
+        for (const char* layer : {"kernelconf", "messagingoverrides"}) {
+            if (const auto layerKey = findKey(cfgObj, {layer});
+                layerKey && cfgObj[*layerKey].is_object()) {
+                layers.push_back(&cfgObj[*layerKey]);
+            }
+        }
+        for (const nlohmann::json* layer : layers) {
+            for (const auto& item : layer->items()) {
+                const std::string key = toLowerCopy(item.key());
+                if (key != "mix-rln-registry-id" && key != "mixrlnregistryid") {
+                    continue;
+                }
+                error = callerMixRegistryError(item.value(), preset);
+                if (!error.empty()) {
+                    return std::nullopt;
+                }
+            }
+        }
+    }
+
+    const bool disableRlnValidation = preset.enabled && !preset.enableValidation;
+    const bool mixRegistry = preset.enabled && preset.hasMix();
+    if (!persistencePath.empty() || disableRlnValidation || mixRegistry) {
         nlohmann::json* target = &cfgObj;
-        const auto entryLayerKey = findKey(cfgObj, {"entrylayer"});
-        const bool kernelEntry = entryLayerKey && cfgObj[*entryLayerKey].is_string()
-            && toLowerCopy(cfgObj[*entryLayerKey].get<std::string>()) == "kernel";
+        bool mixKey = true;
+        bool level = true;
+        const bool kernelEntry = isKernelEntry(cfgObj);
         if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
             kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
             target = &cfgObj[*kernelConfKey];
+            level = false;
         } else if (kernelEntry) {
             // Kernel entry without a kernelConf object: leave the config
             // untouched for the parser to reject.
@@ -622,6 +720,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                 overridesKey = "messagingOverrides";
             }
             target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
+            mixKey = false;
         }
         if (target && !persistencePath.empty()
             && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
@@ -629,6 +728,22 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         }
         if (target && disableRlnValidation) {
             (*target)["rln-disable-validation"] = true;
+        }
+        if (target && mixRegistry) {
+            const auto callerSet = [&](const char* dashed, const char* joined) {
+                return findKey(*target, {dashed, joined}).has_value();
+            };
+            if (mixIsOn(*target, mixKey, level)) {
+                if (!callerSet("mix-rln-registry-id", "mixrlnregistryid")) {
+                    (*target)["mix-rln-registry-id"] = preset.mixRegistryId;
+                }
+                if (!callerSet("mix-rln-identifier-hex", "mixrlnidentifierhex")) {
+                    (*target)["mix-rln-identifier-hex"] = preset.mixRlnIdentifier;
+                }
+                if (!callerSet("mix-rln-metadata-topic", "mixrlnmetadatatopic")) {
+                    (*target)["mix-rln-metadata-topic"] = preset.mixMetadataTopic;
+                }
+            }
         }
     }
 
@@ -648,12 +763,14 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     fprintf(stderr, "DeliveryModuleImpl::createNode called\n");
 
     std::string presetName;
+    RlnMode rlnMode = RlnMode::Core;
     {
         nlohmann::json cfgObj = nlohmann::json::parse(cfg, nullptr, /*allow_exceptions=*/false);
         if (cfgObj.is_object()) {
             if (auto k = findKey(cfgObj, {"preset"}); k && cfgObj[*k].is_string()) {
                 presetName = cfgObj[*k].get<std::string>();
             }
+            rlnMode = configMode(cfgObj);
         }
     }
 
@@ -661,29 +778,28 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     // a deployment this node cannot reproduce, and coming up without RLN
     // would look like success.
     std::string presetError;
-    const RlnPresetEntry rlnPreset = resolveRlnPreset(presetName, presetError);
+    const RlnPresetEntry namedPreset = resolveRlnPreset(presetName, presetError);
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
+    // Everything below sees the preset resolved for this node's mode.
+    const RlnPresetEntry rlnPreset = namedPreset.forMode(rlnMode);
 
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(),
-                                               rlnPreset.enabled && !rlnPreset.enableValidation);
+    std::string cfgError;
+    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset, cfgError);
     if (!cfgWithDefaults) {
-        return {false, {}, "Invalid JSON config"};
+        return {false, {}, cfgError};
     }
     const std::string& cfgWithPorts = *cfgWithDefaults;
 
-    joinRlnBringUp();
-    rlnBridge->init(&modules().liblogos_rln_module);
+    rlnBridge->init(&modules().rln_module);
 
     if (rlnPreset.enabled) {
-        DeliveryRlnConfig fromPreset;
-        fromPreset.manageBackend = rlnPreset.manageBackend;
-        fromPreset.registryId = rlnPreset.registryId;
-        fromPreset.rlnIdentifier = rlnPreset.rlnIdentifier;
-        fromPreset.epochSizeSec = rlnPreset.epochSizeSec;
-        fromPreset.maxEpochGap = rlnPreset.maxEpochGap;
-        if (std::string failure = installRlnPlugin(fromPreset); !failure.empty()) {
+        {
+            std::lock_guard<std::mutex> lock(rlnStateMutex);
+            rlnStateMode = rlnMode;
+        }
+        if (std::string failure = installRlnPlugin(rlnPreset); !failure.empty()) {
             return {false, {}, failure};
         }
         setRlnState("Initializing", {});
@@ -910,10 +1026,11 @@ StdLogosResult DeliveryModuleImpl::stop()
         return {false, {}, "Context not initialized"};
     }
 
+    // RLN stays up: it lives as long as the node context, not as long as the
+    // node runs.
     if (logosdelivery_ctx_stop_node(asCtx(deliveryCtxHandle), stop_callback, this) != RET_OK) {
         return {false, {}, "failed to initiate stop"};
     }
-    stopRlnBackend();
     return {true, {}};
 }
 
@@ -1251,6 +1368,19 @@ StdLogosResult DeliveryModuleImpl::rlnState()
         out["registryId"] = rlnStateConfig.registryId;
         out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
         out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
+        out["mode"] = rlnModeName(rlnStateMode);
+        if (rlnStateConfig.rateLimit != 0) {
+            out["rateLimit"] = rlnStateConfig.rateLimit;
+        }
+        if (rlnStateConfig.hasMix()) {
+            if (rlnStateConfig.mixRateLimit != 0) {
+                out["mixRateLimit"] = rlnStateConfig.mixRateLimit;
+            }
+            out["mixRegistryId"] = rlnStateConfig.mixRegistryId;
+            out["mixRlnIdentifier"] = rlnStateConfig.mixRlnIdentifier;
+            out["mixEpochSizeSec"] = kMixEpochSizeSec;
+            out["mixMaxEpochGap"] = kMixMaxEpochGap;
+        }
     }
     return {true, std::move(out)};
 }
@@ -1312,20 +1442,15 @@ std::string DeliveryModuleImpl::startRlnBackend()
         return "rln bridge unavailable (" + failure + "); answering falls to rlnRespond";
     }
 
-    // A host sharing the backend with Mix owns its configuration and lifetime.
-    if (!rlnConfig->manageBackend) return {};
+    // A host sharing the backend with other consumers owns its configuration
+    // and lifetime.
+    if (!rlnConfig->manageBackend) {
+        return {};
+    }
 
-    // The delivery library no longer starts the backend, so this module does:
-    // a node that mounts RLN over a stopped module would Ignore every inbound
-    // RLN message.
-    nlohmann::json startCfg{{"registries", nlohmann::json::array({rlnConfig->registryId})}};
-    if (rlnConfig->epochSizeSec != 0) {
-        startCfg["epoch_size_sec"] = rlnConfig->epochSizeSec;
-    }
-    if (rlnConfig->maxEpochGap != 0) {
-        startCfg["max_epoch_gap"] = rlnConfig->maxEpochGap;
-    }
-    const std::string startFailure = rlnBridge->startBackend(startCfg.dump());
+    // A node that mounts RLN over a stopped backend Ignores every inbound RLN
+    // message. One start names every registry the node takes a membership on.
+    const std::string startFailure = rlnBridge->startBackend(rlnBackendStartConfig(*rlnConfig));
     if (!startFailure.empty()) {
         return "rln module start failed: " + startFailure;
     }
@@ -1337,6 +1462,33 @@ void DeliveryModuleImpl::joinRlnBringUp()
     if (rlnBringUpThread.joinable()) {
         rlnBringUpThread.join();
     }
+}
+
+std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg)
+{
+    // Each registry is an entry of its own: rln_module reads a top-level gap
+    // or rate as the default for every entry, so the relay registry's would
+    // reach the mix one. The top-level epoch size is the one key it requires.
+    nlohmann::json relay{{"registry_id", cfg.registryId}, {"epoch_size_sec", cfg.epochSizeSec}};
+    if (cfg.maxEpochGap != 0) {
+        relay["max_epoch_gap"] = cfg.maxEpochGap;
+    }
+    if (cfg.rateLimit != 0) {
+        relay["rate_limit"] = cfg.rateLimit;
+    }
+    nlohmann::json startCfg{{"epoch_size_sec", cfg.epochSizeSec},
+                            {"registries", nlohmann::json::array({std::move(relay)})}};
+    if (cfg.hasMix()) {
+        // The epoch size and gap native Mix's proof plugin runs at.
+        nlohmann::json mix{{"registry_id", cfg.mixRegistryId},
+                           {"epoch_size_sec", kMixEpochSizeSec},
+                           {"max_epoch_gap", kMixMaxEpochGap}};
+        if (cfg.mixRateLimit != 0) {
+            mix["rate_limit"] = cfg.mixRateLimit;
+        }
+        startCfg["registries"].push_back(std::move(mix));
+    }
+    return startCfg.dump();
 }
 
 StdLogosResult DeliveryModuleImpl::rlnRespond(int64_t reqId, const std::string& resultJson)

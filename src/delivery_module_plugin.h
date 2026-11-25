@@ -4,27 +4,32 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <logos_module_context.h>
 #include <logos_result.h>
+#include <nlohmann/json.hpp>
+
+#include "rln_presets.h"
 
 class DeliveryServiceDiscoveryPlugin;
 class RlnBridge;
 
-// Everything the delivery library no longer knows about RLN. Resolved from
-// the createNode config's network preset (see src/rln_presets.h), never
-// carried in the config itself.
-struct DeliveryRlnConfig {
-    bool enabled = false;
-    bool manageBackend = true;
-    std::string registryId;
-    std::string rlnIdentifier;
-    uint64_t epochSizeSec = 0;
-    uint64_t maxEpochGap = 0;
-};
+// The RLN settings this plugin holds for the delivery library: the createNode
+// config's network preset, resolved (see src/rln_presets.h), never carried in
+// the config itself.
+using DeliveryRlnConfig = RlnPresetEntry;
+
+// The rln_module `start` config for a deployment: one entry per registry the
+// node takes a membership on, each at its own rate.
+std::string rlnBackendStartConfig(const DeliveryRlnConfig& cfg);
+
+// The config's `mode` as the library reads it (trimmed, any case): Core when
+// absent, unknown, or `entryLayer` is "kernel".
+RlnMode configMode(const nlohmann::json& cfg);
 
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
@@ -368,7 +373,7 @@ public:
      * @brief Enables the in-process RLN bridge.
      *
      * Once enabled, each `rln*Request` is answered inside this module: the
-     * bridge's worker threads call the co-loaded `liblogos_rln_module` and
+     * bridge's worker threads call the co-loaded `rln_module` and
      * pass its reply back unchanged. The events keep emitting for
      * observability, but an external responder must not also answer an
      * enabled node: its second response per reqId is rejected. Idempotent;
@@ -392,14 +397,30 @@ public:
      * | `Ready` | The in-process bridge answers requests |
      * | `Failed` | Bring-up failed; `message` carries the reason |
      *
+     * RLN comes up once, with the node context, and stays up across @ref stop
+     * and @ref start; `Failed` is final for this node.
+     *
      * `Ready` means the backend started and the bridge answers. It does not
      * promise the RLN module's valid-root window is warm — that is a
      * background refresh the module does not currently expose.
      *
-     * @return Value `{"state": "<state>", "message": "<detail>"}`, plus
-     *         `registryId`, `rlnIdentifier` and `epochSizeSec` once a preset
-     *         has enabled RLN — the resolved deployment, so a caller can name
-     *         or query it without a second copy of the preset table.
+     * Once a preset has enabled RLN the value also carries the resolved
+     * deployment, so a caller can name or query it without a second copy of
+     * the preset table:
+     *
+     * | Key | Description |
+     * |---|---|
+     * | `registryId`, `rlnIdentifier`, `epochSizeSec` | The relay registry and scope |
+     * | `mixRegistryId`, `mixRlnIdentifier`, `mixEpochSizeSec`, `mixMaxEpochGap` | The same for native Mix; only with a mix registry |
+     * | `mode` | `Core` or `Edge`, from the config's `mode` |
+     * | `rateLimit`, `mixRateLimit` | The rates asked, not granted; omitted when left to the RLN module's default |
+     *
+     * The membership itself (its state and the rate granted) is the RLN
+     * module's to report: `rln_module.get_membership_state` with the registry
+     * and identifier above.
+     *
+     * @return Value `{"state": "<state>", "message": "<detail>"}` plus the
+     *         keys above.
      * @see rlnStateChanged for the same transitions as an event.
      */
     StdLogosResult rlnState();
@@ -518,8 +539,8 @@ logos_events:
 private:
     // Wires the bridge to the co-loaded RLN module on first use — modules()
     // is only valid once the framework has handed the context over — then
-    // starts it. Both enable doors (rlnBridgeEnable, the rln-lez config
-    // path) funnel through here. Returns an error string, or empty.
+    // starts it. Both enable doors (rlnBridgeEnable, startRlnBackend) funnel
+    // through here. Returns an error string, or empty.
     std::string bringUpRlnBridge();
 
     /**
@@ -542,8 +563,8 @@ private:
      * @brief Brings the bridge up and starts the co-loaded RLN module.
      *
      * The other half of RLN configuration, split from @ref installRlnPlugin
-     * because this one reaches the chain: @ref createNode runs it on its own
-     * thread so node creation does not wait for a registry round trip.
+     * because this one calls another module: @ref createNode runs it on its
+     * own thread so node creation does not wait for it.
      *
      * @return Empty on success, a description of the problem otherwise.
      */
@@ -556,8 +577,8 @@ private:
     // Joins a finished bring-up thread, if any. Call under createNodeMutex.
     void joinRlnBringUp();
 
-    // stop()'s RLN half, also run by the stop after a failed start. Serialized
-    // because both may join the bring-up thread at once.
+    // Stops a backend this module started. Run when the node context is
+    // released: stop() leaves RLN up.
     void stopRlnBackend();
     std::mutex rlnBackendStopMutex;
 
@@ -582,6 +603,8 @@ private:
     // The resolved deployment, published so a caller can query the same
     // registry this node answers for without resolving the preset itself.
     DeliveryRlnConfig rlnStateConfig;
+    // The mode that config was resolved for (guarded by rlnStateMutex).
+    RlnMode rlnStateMode{RlnMode::Core};
 
     // Runs startRlnBackend() for a node whose preset enables RLN.
     std::thread rlnBringUpThread;
@@ -590,17 +613,16 @@ private:
     // and started by bringUpRlnBridge().
     std::unique_ptr<RlnBridge> rlnBridge;
 
-    // Everything the delivery library no longer knows about RLN (see
-    // DeliveryRlnConfig).
+    // The RLN settings held for the delivery library (see DeliveryRlnConfig).
     // Never null. Replaced, never mutated: a writer publishes a new snapshot.
     std::shared_ptr<const DeliveryRlnConfig> rlnConfig =
         std::make_shared<const DeliveryRlnConfig>();
     // Guards the rlnConfig pointer. Read by the RLN trampolines on a library
     // thread, written by installRlnPlugin and abortRln on ours -- and a callback
     // already executing is never joined, so a reader copies the pointer under
-    // the lock and keeps that snapshot alive for the rest of the call. Reads
-    // ordered against every writer by joinRlnBringUp (stop, and startRlnBackend
-    // on the bring-up thread) need no lock.
+    // the lock and keeps that snapshot alive for the rest of the call. The
+    // bring-up thread's reads need no lock: installRlnPlugin runs before it
+    // starts, abortRln after joinRlnBringUp.
     mutable std::mutex rlnConfigMutex;
 
     // Copies the rlnConfig pointer under rlnConfigMutex. For readers not

@@ -15,19 +15,22 @@
     # TinyCBOR for the generated binding: nim-ffi's vendored copy, at the rev
     # logos-delivery's nimble.lock pins.
     nim-ffi = {
-      url = "github:logos-messaging/nim-ffi/4c1218626bbbf89e19836845b690937cd255c3f0";
+      url = "github:logos-messaging/nim-ffi/d98f77141de9c95c0c543d191a79aee18e7536a4";
       flake = false;
     };
-    # The name is load-bearing: the builder resolves the metadata.json
-    # dependency of the same name and generates the client from its LIDL.
-    libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module";
-    # The name is load-bearing: the builder resolves each optional_dependencies
-    # entry as the input of that name and generates bindings from its LIDL.
-    liblogos_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-rln-module";
-    # The registry provider at the same rev: its built-in network table is
-    # what resolves the logos.test registry id (logos:testnet) to a sequencer,
-    # and the RLN module's own lock may trail it.
-    liblogos_rln_module.inputs.liblogos_lez_rln_module.url = "git+https://github.com/logos-co/logos-rln-modules?ref=main&rev=a814e7feda974a16eaa5dd50667b8fd843177f0e&dir=logos-lez-rln-module";
+    # Names are load-bearing: the builder resolves metadata.json's
+    # optional_dependencies (and rln_module's own dependencies) as inputs of those names.
+    libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module?ref=refs/tags/v1.1.1";
+    rln_lez_module.url = "github:logos-co/logos-rln-lez-module/5a3b87dd0fecf22e97ce81603eba348d2bff69cc";
+    membership_allocation_client_module = {
+      url = "github:logos-co/logos-membership-allocation-client-module/ea9f179f1bfaab1b770600d4c6371b88fd02a029";
+      inputs.libp2p_module.follows = "libp2p_module";
+    };
+    rln_module = {
+      url = "github:logos-co/logos-rln-module/992fab9747aa84a3c72a36176470dccf226130f6";
+      inputs.rln_lez_module.follows = "rln_lez_module";
+      inputs.membership_allocation_client_module.follows = "membership_allocation_client_module";
+    };
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
@@ -150,19 +153,26 @@
       };
 
       # The optional module dependencies (libp2p, the RLN chain), re-exported
-      # at the revs this flake locks.
-      rlnModule = inputs.liblogos_rln_module;
-      lezRlnModule = rlnModule.inputs.liblogos_lez_rln_module;
+      # from their top-level inputs as `<name>-lgx`.
+      reexported = [
+        "rln_module"
+        "rln_lez_module"
+        "membership_allocation_client_module"
+        "libp2p_module"
+      ];
+      # Not every module builds for every system (libp2p_module has no
+      # Windows build), so an attribute exists only where its input has it.
+      reexport = system: name: attr:
+        let depPkgs = inputs.${name}.packages.${system} or { }; in
+        if depPkgs ? ${attr}
+        then { "${name}-${attr}" = depPkgs.${attr}; }
+        else { };
     in
     module // {
-      packages = builtins.mapAttrs (system: pkgs: pkgs // {
-        "liblogos_rln_module-lgx" = rlnModule.packages.${system}.lgx;
-        "liblogos_lez_rln_module-lgx" = lezRlnModule.packages.${system}.lgx;
-      } // (
-        # libp2p_module has no build for every system (none for Windows).
-        if inputs.libp2p_module.packages ? ${system}
-        then { "libp2p_module-lgx" = inputs.libp2p_module.packages.${system}.lgx; }
-        else { }
+      packages = builtins.mapAttrs (system: pkgs: pkgs // (
+        builtins.foldl' (acc: name:
+          acc // (reexport system name "lgx")
+        ) { } reexported
       )) module.packages;
     };
 }
