@@ -1136,7 +1136,8 @@ LOGOS_TEST(preset_table_parses_the_mix_registry_with_defaults) {
     // Without a mix registry nothing mix-related is in force.
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
     LOGOS_ASSERT_FALSE(table["logos.test"].hasMix());
-    LOGOS_ASSERT_EQ(table["logos.test"].rates.core.rateLimit, static_cast<uint64_t>(0));
+    // A preset that sets no rate runs at the default ones.
+    LOGOS_ASSERT_EQ(table["logos.test"].rates.core.rateLimit, static_cast<uint64_t>(600));
 }
 
 // A mix registry that cannot work is refused where it is written.
@@ -1249,7 +1250,8 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
         LOGOS_ASSERT_EQ(core.mixRateLimit, static_cast<uint64_t>(100));
     }
 
-    // One mode named: the other runs at the entry's rates.
+    // One mode named: the other runs at the entry's rates, and a rate the
+    // entry leaves out at that mode's default.
     LOGOS_ASSERT_EQ(parseRlnPresetTable(
         R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,"rate-limit":100,
             "mix-registry-id":"mixreg","mix-metadata-topic":"/t",
@@ -1259,7 +1261,7 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
         const RlnModeRates& rates = table["logos.test"].rates;
         LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(20));
         LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(100));
-        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(0));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(100));
         LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(100));
     }
 
@@ -1288,6 +1290,64 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
                     rlnBackendStartConfig(builtin, RlnMode::Core));
     LOGOS_ASSERT_EQ(std::string(rlnModeName(RlnMode::Core)), std::string("Core"));
     LOGOS_ASSERT_EQ(std::string(rlnModeName(RlnMode::Edge)), std::string("Edge"));
+}
+
+// The built-in presets run at the default rates: relay 600 for both modes,
+// Mix 100 for Core and 20 for Edge. A preset file that sets no rate gets the
+// same; one that sets a rate overrides it, and 0 leaves it to the RLN module.
+LOGOS_TEST(presets_default_to_the_logos_rates) {
+    std::string err;
+    ::unsetenv(kRlnPresetsEnvVar);
+    const RlnPresetEntry dev = resolveRlnPreset("logos.dev", err);
+    LOGOS_ASSERT_TRUE(err.empty());
+    auto core = nlohmann::json::parse(rlnBackendStartConfig(dev, RlnMode::Core));
+    LOGOS_ASSERT_EQ(core["registries"][0].value("rate_limit", 0), 600);
+    LOGOS_ASSERT_EQ(core["registries"][1].value("rate_limit", 0), 100);
+    auto edge = nlohmann::json::parse(rlnBackendStartConfig(dev, RlnMode::Edge));
+    LOGOS_ASSERT_EQ(edge["registries"][0].value("rate_limit", 0), 600);
+    LOGOS_ASSERT_EQ(edge["registries"][1].value("rate_limit", 0), 20);
+
+    const RlnPresetEntry test = resolveRlnPreset("logos.test", err);
+    LOGOS_ASSERT_TRUE(err.empty());
+    auto testCore = nlohmann::json::parse(rlnBackendStartConfig(test, RlnMode::Core));
+    LOGOS_ASSERT_EQ(testCore["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(testCore["registries"][0].value("rate_limit", 0), 600);
+
+    const std::string withMix =
+        R"("enabled":true,"registry-id":"reg","epoch-size-sec":600,)"
+        R"("mix-registry-id":"mixreg","mix-metadata-topic":"/t")";
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix + "}}", table),
+                    std::string());
+    {
+        const RlnModeRates& rates = table["logos.dev"].rates;
+        LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(600));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(600));
+        LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(20));
+    }
+
+    // A top-level rate sets both modes; a mode's key then overrides one.
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix
+                                            + R"(,"rate-limit":300,"modes":{"edge":{"mix-rate-limit":5}}}})",
+                                        table),
+                    std::string());
+    {
+        const RlnModeRates& rates = table["logos.dev"].rates;
+        LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(300));
+        LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(300));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(5));
+    }
+
+    // 0 leaves the rate to the RLN module: the start config carries none.
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix
+                                            + R"(,"rate-limit":0,"mix-rate-limit":0}})",
+                                        table),
+                    std::string());
+    auto none = nlohmann::json::parse(rlnBackendStartConfig(table["logos.dev"], RlnMode::Edge));
+    LOGOS_ASSERT_FALSE(none["registries"][0].contains("rate_limit"));
+    LOGOS_ASSERT_FALSE(none["registries"][1].contains("rate_limit"));
 }
 
 // What `modes` cannot say is refused where it is written, naming the mode.
@@ -1594,8 +1654,9 @@ LOGOS_TEST(createNode_resolves_the_preset_for_the_config_mode) {
     delivery_test_rln::resetRlnMockState();
 }
 
-// A rate the preset leaves to the RLN module is not reported, and a preset
-// without modes still names the node's mode.
+// A preset that sets no rate reports the default ones, a rate it leaves to
+// the RLN module (0) is not reported, and a preset without modes still names
+// the node's mode.
 LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
@@ -1607,8 +1668,17 @@ LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
         LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"edge","preset":"logos.test"})").success);
         const auto state = impl.rlnState().value;
         LOGOS_ASSERT_EQ(state.value("mode", ""), std::string("Edge"));
-        LOGOS_ASSERT_FALSE(state.contains("rateLimit"));
+        LOGOS_ASSERT_EQ(state.value("rateLimit", 0), 600);
         LOGOS_ASSERT_FALSE(state.contains("mixRateLimit"));
+        (void)settledRlnState(impl);
+    }
+    delivery_test_rln::resetRlnMockState();
+    {
+        RlnPresetsFile presets(
+            R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,"rate-limit":0}})");
+        DeliveryModuleImpl impl;
+        LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"edge","preset":"logos.test"})").success);
+        LOGOS_ASSERT_FALSE(impl.rlnState().value.contains("rateLimit"));
         (void)settledRlnState(impl);
     }
     delivery_test_rln::resetRlnMockState();

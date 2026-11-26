@@ -68,14 +68,16 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
                         .epochSizeSec = 600,
                         .mixRegistryId = "logos:devnet:c0ce2ec618137995d2894fc612a9211022217731bfb23112a9aaa8162e9b278f",
                         .mixRlnIdentifier = kMixRlnIdentifierV1,
-                        .mixMetadataTopic = "/logos-delivery/1/mix-rln-metadata/proto"}},
+                        .mixMetadataTopic = "/logos-delivery/1/mix-rln-metadata/proto",
+                        .rates = kDefaultRlnModeRates}},
         {"logos.test",
          RlnPresetEntry{.enabled = true,
                         .enableValidation = false,
                         .registryId = "logos:testnet:"
                                       "fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971",
                         .rlnIdentifier = kLogosDeliveryRlnIdentifier,
-                        .epochSizeSec = 600}},
+                        .epochSizeSec = 600,
+                        .rates = kDefaultRlnModeRates}},
     };
     return table;
 }
@@ -184,8 +186,13 @@ std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnP
     entry.mixRegistryId = read.str("mix-registry-id");
     entry.mixRlnIdentifier = read.str("mix-rln-identifier");
     entry.mixMetadataTopic = read.str("mix-metadata-topic");
-    const RlnRates rates{read.number("rate-limit"), read.number("mix-rate-limit")};
-    entry.rates = RlnModeRates{.core = rates, .edge = rates};
+    // A rate key sets both modes' rate; one left out keeps each mode's default.
+    entry.rates = kDefaultRlnModeRates;
+    for (RlnMode mode : {RlnMode::Core, RlnMode::Edge}) {
+        RlnRates& rates = entry.rates.of(mode);
+        rates.rateLimit = read.number("rate-limit", rates.rateLimit);
+        rates.mixRateLimit = read.number("mix-rate-limit", rates.mixRateLimit);
+    }
     if (!read.error.empty()) {
         return read.error;
     }

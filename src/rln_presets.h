@@ -70,6 +70,17 @@ struct RlnModeRates {
 };
 
 /**
+ * @brief The rates a preset runs at unless it sets its own: relay 600 for
+ * both modes (a message a second over a 600 s epoch), Mix 100 for Core and
+ * 20 for Edge (10 and 2 a second over Mix's 10 s epoch). The built-in
+ * presets use them as they are; a preset file overrides one by setting its
+ * key, and `0` leaves that rate to the RLN module.
+ */
+inline constexpr RlnModeRates kDefaultRlnModeRates{
+    .core = RlnRates{.rateLimit = 600, .mixRateLimit = 100},
+    .edge = RlnRates{.rateLimit = 600, .mixRateLimit = 20}};
+
+/**
  * @brief One deployment's RLN settings, selected by a `createNode` preset.
  *
  * `registryId`, `rlnIdentifier`, `epochSizeSec` and `maxEpochGap` are
@@ -115,7 +126,9 @@ struct RlnPresetEntry {
  * `rln-identifier`, `max-epoch-gap`, `rate-limit` and `enable-validation`.
  * An omitted `rln-identifier` defaults to @ref kLogosDeliveryRlnIdentifier;
  * an omitted `enable-validation` defaults to true. An enabled entry missing
- * a required field is rejected here rather than at node creation. A key that
+ * a required field is rejected here rather than at node creation. An omitted
+ * `rate-limit` or `mix-rate-limit` is that mode's @ref kDefaultRlnModeRates
+ * value; `0` leaves the rate to the RLN module. A key that
  * is present with the wrong JSON type (numbers are unsigned integers) is
  * rejected too, naming the preset and the key; it is never read as its
  * default.
@@ -143,7 +156,8 @@ std::string parseRlnPresetTable(const std::string& json,
  *
  * Of the built-in presets `logos.test` has relay RLN on (the LEZ testnet
  * registry, 600 s epochs, validation off) and `logos.dev` relay and Mix RLN
- * (placeholder registries); `""` ships with it off. The file named by
+ * (placeholder registries), both at @ref kDefaultRlnModeRates; `""` ships
+ * with it off. The file named by
  * @ref kRlnPresetsEnvVar is merged over them, which is how a test or local
  * deployment supplies its own registry with no public API for it. That file
  * may only key entries by preset names the delivery library accepts — it

@@ -175,10 +175,22 @@ the preset and the key, and the key is never read as its default. A key this
 module does not know is ignored.
 
 `rate-limit` (optional) is the rate asked for the node's relay membership
-when the RLN module obtains one; omitted or `0`, the RLN module's default
-(100) is asked. An allocator may grant less, a registry the node already
-holds a membership on keeps that membership's rate, and the RLN module
-refuses a rate outside the registry's bounds.
+when the RLN module obtains one. Omitted, it is the default, 600 for both
+modes (a message a second over a 600 s epoch); `0` leaves it to the RLN
+module's own default (100). An allocator may grant less, a registry the node
+already holds a membership on keeps that membership's rate, and the RLN
+module refuses a rate outside the registry's bounds.
+
+The built-in `logos.dev` and `logos.test` presets run at the defaults:
+
+| Rate | Core | Edge |
+|---|---|---|
+| `rate-limit` (relay, 600 s epoch) | 600 | 600 |
+| `mix-rate-limit` (Mix, 10 s epoch) | 100 | 20 |
+
+`logos.test` has no mix registry, so only its relay rate is asked. An entry
+for either name in this file replaces the built-in one, and a rate it leaves
+out is again the default.
 
 ### How a membership is obtained
 
@@ -222,9 +234,9 @@ neither is configurable. `mix-registry-id` has to name another registry than
 `registry-id`: the same id, also in another letter case, fails the file, as
 do a missing `mix-metadata-topic` and an
 identifier that is not 32 bytes of hex. `mix-rate-limit` (optional) is the
-rate asked for the mix membership, on the same terms as `rate-limit`;
-omitted or `0`, the RLN module's default (100) is asked, whatever
-`rate-limit` says.
+rate asked for the mix membership, on the same terms as `rate-limit`.
+Omitted, it is the mode's default (100 for Core, 20 for Edge); `0` leaves it
+to the RLN module's default (100), whatever `rate-limit` says.
 
 With a mix registry in the preset and Mix on, this module starts the backend
 for the node's registries (one `start`) and the `createNode` config receives
@@ -292,7 +304,7 @@ only these:
 
 A key a mode sets replaces the entry's value for nodes of that mode; a key it
 leaves out is inherited from the entry, and a mode the entry does not name
-runs the entry as written. Everything else — registries, epoch sizes,
+runs the entry as written. A rate neither sets is that mode's default. Everything else — registries, epoch sizes,
 identifiers — is the deployment's and cannot be set in a mode.
 
 An unknown mode or a mode written twice (`edge` and `Edge`) fails the file as
@@ -300,8 +312,8 @@ An unknown mode or a mode written twice (`edge` and `Edge`) fails the file as
 `preset "" mode edge: …`.
 
 `rlnState` reports what the node asks as a node of its mode: `mode` (`Core`
-or `Edge`), `rateLimit` and `mixRateLimit` (a rate left to the RLN module's
-default of 100 is omitted; `mixRateLimit` appears only with a mix registry).
+or `Edge`), `rateLimit` and `mixRateLimit` (a rate set to `0`, left to the RLN
+module's default of 100, is omitted; `mixRateLimit` appears only with a mix registry).
 These are the rates asked, not the ones a membership was granted at: that is
 `rln_module.get_membership_state`'s `rate_limit` once the membership is
 active.
