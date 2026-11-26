@@ -2289,6 +2289,9 @@ LOGOS_TEST(relayRlnIsOn_drops_relay_rln_on_the_callers_word) {
     // An on-chain contract picks the library's own backend.
     LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"rln-relay-eth-contract-address":"0xabc"}})"));
     LOGOS_ASSERT_TRUE(on(R"({"rln-relay-eth-contract-address":""})"));
+    // So does a keystore: the library's RLN conf builder reads it as on-chain.
+    LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"rln-relay-cred-path":"/k.json"}})"));
+    LOGOS_ASSERT_FALSE(on(R"({"kernelConf":{"rlnRelayCredPath":"/k.json"}})"));
 }
 
 // The preset decides which memberships exist; the config only drops them, each

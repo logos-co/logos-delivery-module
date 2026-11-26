@@ -664,8 +664,9 @@ bool mixIsOn(const nlohmann::json& cfgObj, const std::string& preset)
 }
 
 // Whether the caller's config keeps the preset's relay RLN membership:
-// `rln-relay: false` turns relay RLN off, and an on-chain contract address
-// picks the library's own backend instead.
+// `rln-relay: false` turns relay RLN off, and an on-chain contract address or
+// a keystore (`rln-relay-cred-path`) picks the library's own backend instead,
+// as the library's RLN conf builder does.
 bool relayRlnIsOn(const nlohmann::json& cfgObj)
 {
     if (!cfgObj.is_object()) {
@@ -678,7 +679,11 @@ bool relayRlnIsOn(const nlohmann::json& cfgObj)
     }
     const auto contract = lastValue(layers, {"rln-relay-eth-contract-address",
                                              "rlnrelayethcontractaddress", "rlncontractaddress"});
-    return !(contract && contract->is_string() && !contract->get<std::string>().empty());
+    const auto credPath = lastValue(layers, {"rln-relay-cred-path", "rlnrelaycredpath"});
+    const auto named = [](const std::optional<nlohmann::json>& v) {
+        return v && v->is_string() && !v->get<std::string>().empty();
+    };
+    return !named(contract) && !named(credPath);
 }
 
 RlnPresetEntry nodeRlnPreset(const RlnPresetEntry& preset, const nlohmann::json& cfgObj,
