@@ -18,7 +18,7 @@ extern "C" {
    forwards a call.
 
    result_json follows the RLN module API's own wire dialect (logos-rln-modules,
-   liblogos_rln_module.lidl / docs/wire-binding.md), forwarded verbatim:
+   rln_module.lidl / docs/wire-binding.md), forwarded verbatim:
    - get_epoch_quota/generate_proof/validate_proof results are the LogosResult
      envelope {"success":bool,"value":…,"error":…} where a failure's error is
      the JSON-encoded typed object {"class":…,"kind":…,"message":…}

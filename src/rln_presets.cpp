@@ -1,8 +1,10 @@
 #include "rln_presets.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -37,15 +39,20 @@ std::string knownPresetNameList()
     return out;
 }
 
+std::string unknownPresetError(const std::string& name)
+{
+    return "preset \"" + name + "\" is not a name the delivery library accepts ("
+           + knownPresetNameList() + ")";
+}
+
 // The identifier is this application's and is known; the registry and epoch
 // size belong to a deployment. Only logos.test runs RLN, on the LEZ testnet
 // registry: the CAIP-10 account is the registration program's config account
 // (base58 J3NXPWUspX2zqJU3tUbR6MHmm83aJc5AzvidEaBBKnat) on the LEZ v0.3.1 zone
 // behind sequencer https://testnet.lez.logos.co/, channel
 // 0101010101010101010101010101010101010101010101010101010101010101.
-// liblogos_rln_module >= 0.12.0 / liblogos_lez_rln_module >= 5.1.0 resolve
-// `logos:testnet` to that sequencer themselves; older lez modules link an
-// older LEZ wallet that cannot sync this zone. maxEpochGap stays 0 so `start`
+// Needs rln_module >= 0.14.2 / rln_lez_module >= 6.0.0, which resolve
+// `logos:testnet` to that sequencer themselves. maxEpochGap stays 0 so `start`
 // omits it and the RLN module's own default applies.
 const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
@@ -78,25 +85,201 @@ std::string readWholeFile(const std::string& path, std::string& contents)
     return {};
 }
 
-std::string stringField(const nlohmann::json& obj, const char* key)
-{
-    auto it = obj.find(key);
-    if (it == obj.end() || !it->is_string()) {
-        return {};
+// Typed reads of one preset's keys: a present key of the wrong JSON type is
+// an error (the first is kept in `error`), never its default.
+struct EntryReader {
+    const nlohmann::json& obj;
+    const std::string& who;
+    std::string error;
+
+    bool has(const char* key) const { return obj.find(key) != obj.end(); }
+
+    void wrongType(const char* key, const char* expected)
+    {
+        if (error.empty()) {
+            error = who + " " + key + " must be " + expected;
+        }
     }
-    return it->get<std::string>();
+
+    std::string str(const char* key)
+    {
+        auto it = obj.find(key);
+        if (it == obj.end()) {
+            return {};
+        }
+        if (!it->is_string()) {
+            wrongType(key, "a string");
+            return {};
+        }
+        return it->get<std::string>();
+    }
+
+    // `fallback` when the key is absent; the value, 0 included, when it is set.
+    uint64_t number(const char* key, uint64_t fallback = 0)
+    {
+        auto it = obj.find(key);
+        if (it == obj.end()) {
+            return fallback;
+        }
+        if (!it->is_number_unsigned()) {
+            wrongType(key, "an unsigned integer");
+            return fallback;
+        }
+        return it->get<uint64_t>();
+    }
+
+    bool flag(const char* key, bool fallback)
+    {
+        auto it = obj.find(key);
+        if (it == obj.end()) {
+            return fallback;
+        }
+        if (!it->is_boolean()) {
+            wrongType(key, "a boolean");
+            return fallback;
+        }
+        return it->get<bool>();
+    }
+};
+
+bool equalIgnoringAsciiCase(const std::string& a, const std::string& b)
+{
+    return a.size() == b.size()
+        && std::equal(a.begin(), a.end(), b.begin(), [](unsigned char x, unsigned char y) {
+               return std::tolower(x) == std::tolower(y);
+           });
 }
 
-uint64_t unsignedField(const nlohmann::json& obj, const char* key)
+// The delivery library reads the mix identifier as exactly 32 bytes of hex.
+bool isHex32Bytes(const std::string& s)
 {
-    auto it = obj.find(key);
-    if (it == obj.end() || !it->is_number_unsigned()) {
-        return 0;
+    return s.size() == 64 && std::all_of(s.begin(), s.end(), [](unsigned char c) {
+        return std::isxdigit(c) != 0;
+    });
+}
+
+// Reads and validates one preset as written; `who` opens every error. Its
+// rates are both modes': `modes` is parseModes' business. Returns the error,
+// empty when `entry` is usable.
+std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnPresetEntry& entry)
+{
+    EntryReader read{value, who, {}};
+    entry.enabled = read.flag("enabled", false);
+    entry.enableValidation = read.flag("enable-validation", true);
+    entry.manageBackend = read.flag("manage-backend", true);
+    entry.registryId = read.str("registry-id");
+    entry.rlnIdentifier = read.str("rln-identifier");
+    entry.epochSizeSec = read.number("epoch-size-sec");
+    entry.maxEpochGap = read.number("max-epoch-gap");
+    entry.mixRegistryId = read.str("mix-registry-id");
+    entry.mixRlnIdentifier = read.str("mix-rln-identifier");
+    entry.mixMetadataTopic = read.str("mix-metadata-topic");
+    const RlnRates rates{read.number("rate-limit"), read.number("mix-rate-limit")};
+    entry.rates = RlnModeRates{.core = rates, .edge = rates};
+    if (!read.error.empty()) {
+        return read.error;
     }
-    return it->get<uint64_t>();
+    if (entry.rlnIdentifier.empty()) {
+        entry.rlnIdentifier = kLogosDeliveryRlnIdentifier;
+    }
+    if (entry.mixRlnIdentifier.empty()) {
+        entry.mixRlnIdentifier = kMixRlnIdentifierV1;
+    }
+
+    if (entry.enabled) {
+        if (entry.registryId.empty()) {
+            return who + " needs registry-id";
+        }
+        // The RLN module rejects a start config without it, and has no default.
+        if (entry.epochSizeSec == 0) {
+            return who + " needs a positive epoch-size-sec";
+        }
+    }
+    if (entry.hasMix()) {
+        // Mix proofs ride the relay bridge; the library refuses mix
+        // without relay RLN.
+        if (!entry.enabled) {
+            return who + " has mix-registry-id but RLN is not enabled";
+        }
+        // Relay and Mix prove on two registries: the backend is started for
+        // the mix one at Mix's own epoch size and gap. Ids that differ only
+        // in letter case would be started as two registries, which the RLN
+        // module may take for one.
+        if (equalIgnoringAsciiCase(entry.mixRegistryId, entry.registryId)) {
+            return who + " mix-registry-id must name another registry than registry-id";
+        }
+        if (!isHex32Bytes(entry.mixRlnIdentifier)) {
+            return who + " mix-rln-identifier is not 32 bytes of hex";
+        }
+        // The library refuses a mix registry without the topic its proof
+        // metadata is published on.
+        if (entry.mixMetadataTopic.empty()) {
+            return who + " needs mix-metadata-topic";
+        }
+    }
+    return {};
+}
+
+// The keys a mode may set; everything else is the deployment's, one value for
+// every node.
+bool isModeKey(const std::string& key)
+{
+    static const std::vector<std::string> keys = {"rate-limit", "mix-rate-limit"};
+    return std::find(keys.begin(), keys.end(), key) != keys.end();
+}
+
+// Reads a preset's `modes` into `rates`, which holds the entry's own rates for
+// both modes: a key a mode sets, 0 included, replaces that mode's rate.
+std::string parseModes(const nlohmann::json& value, const std::string& name, RlnModeRates& rates)
+{
+    const auto modesIt = value.find("modes");
+    if (modesIt == value.end()) {
+        return {};
+    }
+    const std::string who = "preset \"" + name + "\"";
+    if (!modesIt->is_object()) {
+        return who + " modes must be an object";
+    }
+    std::set<RlnMode> written;
+    for (const auto& item : modesIt->items()) {
+        std::string modeName = item.key();
+        for (char& c : modeName) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (modeName != "core" && modeName != "edge") {
+            return who + " modes: unknown mode \"" + item.key() + "\"";
+        }
+        const RlnMode mode = modeName == "edge" ? RlnMode::Edge : RlnMode::Core;
+        // Two spellings of one mode ("edge" and "Edge").
+        if (!written.insert(mode).second) {
+            return who + " modes: mode " + modeName + " is written twice";
+        }
+        if (!item.value().is_object()) {
+            return who + " mode " + modeName + " must be an object";
+        }
+        const std::string inMode = who + " mode " + modeName + ":";
+        for (const auto& key : item.value().items()) {
+            if (!isModeKey(key.key())) {
+                return inMode + " " + key.key() + " cannot be set in a mode";
+            }
+        }
+        RlnRates& modeRates = rates.of(mode);
+        EntryReader read{item.value(), inMode, {}};
+        modeRates.rateLimit = read.number("rate-limit", modeRates.rateLimit);
+        modeRates.mixRateLimit = read.number("mix-rate-limit", modeRates.mixRateLimit);
+        if (!read.error.empty()) {
+            return read.error;
+        }
+    }
+    return {};
 }
 
 } // namespace
+
+const char* rlnModeName(RlnMode mode)
+{
+    return mode == RlnMode::Edge ? "Edge" : "Core";
+}
 
 std::string parseRlnPresetTable(const std::string& json,
                                 std::map<std::string, RlnPresetEntry>& out)
@@ -118,44 +301,16 @@ std::string parseRlnPresetTable(const std::string& json,
         }
 
         if (!isKnownPresetName(name)) {
-            return "preset \"" + name + "\" is not a name the delivery library accepts ("
-                   + knownPresetNameList() + ")";
+            return unknownPresetError(name);
         }
 
         RlnPresetEntry entry;
-        auto enabledIt = value.find("enabled");
-        entry.enabled = enabledIt != value.end() && enabledIt->is_boolean()
-                            ? enabledIt->get<bool>()
-                            : false;
-        auto enableValidationIt = value.find("enable-validation");
-        entry.enableValidation = enableValidationIt != value.end() && enableValidationIt->is_boolean()
-                                     ? enableValidationIt->get<bool>()
-                                     : true;
-        auto manageIt = value.find("manage-backend");
-        if (manageIt != value.end()) {
-            if (!manageIt->is_boolean()) {
-                return "manage-backend must be a boolean";
-            }
-            entry.manageBackend = manageIt->get<bool>();
+        if (std::string failure = parseEntry(value, "preset \"" + name + "\"", entry);
+            !failure.empty()) {
+            return failure;
         }
-        entry.registryId = stringField(value, "registry-id");
-        entry.rlnIdentifier = stringField(value, "rln-identifier");
-        entry.epochSizeSec = unsignedField(value, "epoch-size-sec");
-        entry.maxEpochGap = unsignedField(value, "max-epoch-gap");
-
-        // The application's own scope unless the deployment names another.
-        if (entry.rlnIdentifier.empty()) {
-            entry.rlnIdentifier = kLogosDeliveryRlnIdentifier;
-        }
-
-        if (entry.enabled) {
-            if (entry.registryId.empty()) {
-                return "preset \"" + name + "\" needs registry-id";
-            }
-            // The RLN module rejects a start config without it, and has no default.
-            if (entry.epochSizeSec == 0) {
-                return "preset \"" + name + "\" needs a positive epoch-size-sec";
-            }
+        if (std::string failure = parseModes(value, name, entry.rates); !failure.empty()) {
+            return failure;
         }
         parsed[name] = entry;
     }
@@ -169,8 +324,7 @@ RlnPresetEntry resolveRlnPreset(const std::string& preset, std::string& error)
     error.clear();
 
     if (!isKnownPresetName(preset)) {
-        error = "preset \"" + preset + "\" is not a name the delivery library accepts ("
-                + knownPresetNameList() + ")";
+        error = unknownPresetError(preset);
         return {};
     }
 

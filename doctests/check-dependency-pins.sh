@@ -13,16 +13,24 @@ cd "$(dirname "$0")/.."
 
 SPEC="doctests/delivery-module-runtime.test.yaml"
 
-rln=$(jq -r '.nodes[.root].inputs.liblogos_rln_module' flake.lock)
-lez=$(jq -r --arg n "$rln" '.nodes[$n].inputs.liblogos_lez_rln_module' flake.lock)
-
-libp2p=$(jq -r '.nodes[.root].inputs.libp2p_module' flake.lock)
-
 status=0
-for node in "$libp2p" "$rln" "$lez"; do
+for input in libp2p_module rln_module rln_lez_module membership_allocation_client_module; do
+  # An input that follows another's is locked as the path to it from the
+  # root, not as a node name.
+  node=$(jq -r --arg i "$input" '
+    . as $lock
+    | def node: if type == "array"
+        then reduce .[] as $name ($lock.root; $lock.nodes[.].inputs[$name] | node)
+        else . end;
+    .nodes[.root].inputs[$i] // empty | node' flake.lock)
+  if [ -z "$node" ]; then
+    echo "flake.lock has no top-level input $input (relock)" >&2
+    status=1
+    continue
+  fi
   rev=$(jq -r --arg n "$node" '.nodes[$n].locked.rev' flake.lock)
   if ! grep -q "$rev" "$SPEC"; then
-    echo "$SPEC does not pin $node at $rev (flake.lock)" >&2
+    echo "$SPEC does not pin $input at $rev (flake.lock)" >&2
     status=1
   fi
 done

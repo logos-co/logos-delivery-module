@@ -135,12 +135,13 @@ new release to the version dropdown means editing
 
 ## Native Mix with a shared RLN backend
 
-Enable native Mix and set `anonymityLevel` to `Required` in `createNode` to
-route application `send()` calls through Mix. Configure
-`mix-rln-registry-id`, `mix-rln-identifier-hex`, and `mix-rln-metadata-topic`
-for the shared Mix proof provider. All Mix peers must use compatible scopes,
-epoch settings, and proof encoding. `Required` does not allow direct-send
-fallback when Mix is unavailable.
+Enable native Mix (`"mix": true`) and set `anonymityLevel` to `Required` in
+`createNode` to route application `send()` calls through Mix. The Mix
+registry, scope and metadata topic come from the deployment's preset, and
+this module writes them into the config of a node that turns Mix on (see
+[docs/pages/rln.md](docs/pages/rln.md#a-deployment-with-native-mix)). All
+Mix peers must use compatible scopes, epoch settings, and proof encoding.
+`Required` does not allow direct-send fallback when Mix is unavailable.
 
 `getLocalMixPeerRecord()` returns the node's Mix record;
 `addMixPeer(recordJson)` installs another participant's record. These methods
@@ -149,18 +150,28 @@ same record format. The final Mix exit must provide Lightpush service and
 connect to Relay; an ordinary Delivery recipient can receive via Relay or
 Filter without running Mix.
 
-Mix proofs and Relay proofs use separate application scopes. Native Mix calls
-`liblogos_rln_module` asynchronously through the module bridge. Its proof
-metadata is published through ordinary Relay or Lightpush, outside the
+Mix proofs and Relay proofs use separate application scopes and separate
+memberships: relay proves on the preset's `registry-id`, mix on its
+`mix-registry-id` (another registry, run at native Mix's 10 s epoch / gap
+3). Native Mix calls `rln_module` asynchronously through the module bridge. Its
+proof metadata is published through ordinary Relay or Lightpush, outside the
 application's `Required` path, to avoid a circular dependency. Shared Mix
-requires Relay RLN to be enabled before startup.
+requires Relay RLN to be enabled before startup; for when to call `start()`
+on a node with Mix on, see
+[docs/pages/rln.md](docs/pages/rln.md#turning-rln-on).
+
+With a mix registry in the preset, this module starts the RLN backend for
+both registries in one `start`, and the RLN module obtains a membership on
+each, at that registry's rate (see
+[docs/pages/rln.md](docs/pages/rln.md#how-a-membership-is-obtained)).
 
 When several consumers share the backend, the host owns its startup and
-shutdown. In the `LOGOS_DELIVERY_RLN_PRESETS` table, set `manage-backend` to
-`false` for the selected preset. Delivery still installs the Relay proof
-bridge, but does not call backend `start` or `stop`. The default is `true`.
-Start and provision the backend before Delivery, with separate active Mix and
-Relay memberships; stop it only after all consumers have stopped.
+shutdown instead. In the `LOGOS_DELIVERY_RLN_PRESETS` table, set
+`manage-backend` to `false` for the selected preset. Delivery still installs
+the Relay proof bridge, but does not call backend `start` or `stop`. The
+default is `true`. Start and provision the backend before Delivery, naming
+both registries so the node holds separate active Mix and Relay memberships;
+stop it only after all consumers have stopped.
 
 The full standalone/Delivery topology and its current verification status are
 tracked in [the Mix module work summary](https://github.com/logos-co/logos-libp2p-mix-rln/blob/feat/standalone-mix-intermediate/WORK_SUMMARY.md).
