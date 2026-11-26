@@ -49,6 +49,14 @@ runs:
       run: |
         nix build -L .#lgx-portable
 
+    # The release catalog has no rln_module, rln_lez_module or membership_allocation_client_module.
+    - name: Build the RLN modules at this flake's pins (lgx-portable)
+      shell: bash
+      run: |
+        nix build -L --inputs-from . 'membership_allocation_client_module#lgx-portable' --out-link result-membership
+        nix build -L --inputs-from . 'rln_lez_module#lgx-portable' --out-link result-rln-lez
+        nix build -L --inputs-from . 'rln_module#lgx-portable' --out-link result-rln
+
     - name: Load the cached logosctl image
       if: steps.logosctl-image.outputs.cache-hit == 'true'
       shell: bash
@@ -102,10 +110,11 @@ runs:
       run: |
         logosctl daemon start --detach
         logosctl catalog refresh
-        logosctl install liblogos_lez_rln_module --version 5.1.0 -y
-        logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
         logosctl install libp2p_module --version 1.1.0 -y
-        logosctl install result/*.lgx -y
+        logosctl install result-membership/*.lgx --no-deps -y
+        logosctl install result-rln-lez/*.lgx --no-deps -y
+        logosctl install result-rln/*.lgx --no-deps -y
+        logosctl install result/*.lgx --no-deps -y
         logosctl daemon stop
         echo "LOGOS_MODULES_DIR=$LOGOSCTL_CONFIG_DIR/modules" >> $GITHUB_ENV
 
