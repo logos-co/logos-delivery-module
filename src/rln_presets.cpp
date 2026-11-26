@@ -63,10 +63,10 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
         // LEZ deployment is chosen; a node on them cannot register yet.
         {"logos.dev",
          RlnPresetEntry{.enabled = true,
-                        .registryId = "logos:dev:TODO-relay-registry",
+                        .registryId = "logos:devnet:570ed6252ddb9333458460f6342a221bf2b7bc7ececbe99957f165c00b15de1b",
                         .rlnIdentifier = kLogosDeliveryRlnIdentifier,
                         .epochSizeSec = 600,
-                        .mixRegistryId = "logos:dev:TODO-mix-registry",
+                        .mixRegistryId = "logos:devnet:c0ce2ec618137995d2894fc612a9211022217731bfb23112a9aaa8162e9b278f",
                         .mixRlnIdentifier = kMixRlnIdentifierV1,
                         .mixMetadataTopic = "/logos-delivery/1/mix-rln-metadata/proto"}},
         {"logos.test",
