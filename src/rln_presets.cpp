@@ -46,7 +46,7 @@ std::string unknownPresetError(const std::string& name)
 }
 
 // The identifier is this application's and is known; the registry and epoch
-// size belong to a deployment. Only logos.test runs RLN, on the LEZ testnet
+// size belong to a deployment. logos.test runs relay RLN on the LEZ testnet
 // registry: the CAIP-10 account is the registration program's config account
 // (base58 J3NXPWUspX2zqJU3tUbR6MHmm83aJc5AzvidEaBBKnat) on the LEZ v0.3.1 zone
 // behind sequencer https://testnet.lez.logos.co/, channel
@@ -58,7 +58,17 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
         {"", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
-        {"logos.dev", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
+        // logos.dev runs relay RLN and Mix RLN. TODO(D1): the registry ids,
+        // epoch size and metadata topic are placeholders until the logos.dev
+        // LEZ deployment is chosen; a node on them cannot register yet.
+        {"logos.dev",
+         RlnPresetEntry{.enabled = true,
+                        .registryId = "logos:dev:TODO-relay-registry",
+                        .rlnIdentifier = kLogosDeliveryRlnIdentifier,
+                        .epochSizeSec = 600,
+                        .mixRegistryId = "logos:dev:TODO-mix-registry",
+                        .mixRlnIdentifier = kMixRlnIdentifierV1,
+                        .mixMetadataTopic = "/logos-delivery/1/mix-rln-metadata/proto"}},
         {"logos.test",
          RlnPresetEntry{.enabled = true,
                         .enableValidation = false,
@@ -196,16 +206,12 @@ std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnP
         }
     }
     if (entry.hasMix()) {
-        // Mix proofs ride the relay bridge; the library refuses mix
-        // without relay RLN.
-        if (!entry.enabled) {
-            return who + " has mix-registry-id but RLN is not enabled";
-        }
-        // Relay and Mix prove on two registries: the backend is started for
+        // Mix RLN is independent of relay RLN: a preset may name either.
+        // With both, they prove on two registries: the backend is started for
         // the mix one at Mix's own epoch size and gap. Ids that differ only
         // in letter case would be started as two registries, which the RLN
         // module may take for one.
-        if (equalIgnoringAsciiCase(entry.mixRegistryId, entry.registryId)) {
+        if (entry.enabled && equalIgnoringAsciiCase(entry.mixRegistryId, entry.registryId)) {
             return who + " mix-registry-id must name another registry than registry-id";
         }
         if (!isHex32Bytes(entry.mixRlnIdentifier)) {

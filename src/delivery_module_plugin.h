@@ -26,6 +26,21 @@ std::string rlnBackendStartConfig(const RlnPresetEntry& preset, RlnMode mode);
 // absent, unknown, or `entryLayer` is "kernel".
 RlnMode configMode(const nlohmann::json& cfg);
 
+// Whether the createNode config `cfg` on network preset `preset` mounts Mix,
+// as the delivery library decides it: an anonymity level above None, else
+// `mix`, else the network preset (on for logos.dev and logos.test).
+bool mixIsOn(const nlohmann::json& cfg, const std::string& preset);
+
+// False when `cfg` turns relay RLN off (`rln-relay: false`) or picks the
+// library's on-chain backend (an `rln-relay-eth-contract-address`).
+bool relayRlnIsOn(const nlohmann::json& cfg);
+
+// The memberships this node takes on `preset`: the preset decides which exist
+// and `cfg` may only drop them -- relay RLN by relayRlnIsOn, the mix registry
+// when the node does not run Mix (mixIsOn). The two are independent.
+RlnPresetEntry nodeRlnPreset(const RlnPresetEntry& preset, const nlohmann::json& cfg,
+                             const std::string& presetName);
+
 /**
  * @brief Pure C++ implementation of the delivery messaging module.
  *

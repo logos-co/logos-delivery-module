@@ -29,8 +29,25 @@ epoch size, the application identifier — is a property of the deployment
 rather than of the caller. A client picks a network and gets whatever rate
 limiting that network runs.
 
-Of the shipped presets only `logos.test` has RLN **on**; `logos.dev` and the
-preset-less `""` have it off (see [`networks.md`](./networks.md)).
+Of the shipped presets `logos.test` runs relay RLN and `logos.dev` runs relay
+RLN and Mix RLN; the preset-less `""` has it off (see
+[`networks.md`](./networks.md)). The `logos.dev` registries, epoch size and
+metadata topic are placeholders until its LEZ deployment is chosen: a node on
+them cannot register yet.
+
+Relay (messaging) RLN and Mix RLN are independent memberships. The preset
+decides which exist; the `createNode` config can only drop one, never add one:
+
+| Membership | The preset has it with | The config drops it with |
+|---|---|---|
+| relay RLN | `enabled: true` | `rln-relay: false`, or an `rln-relay-eth-contract-address` (the library's on-chain backend instead) |
+| Mix RLN | `mix-registry-id` | anything that leaves Mix off, by the library's rule: an anonymity level of `None`, else `mix: false`, else a network preset that runs no Mix (Mix runs by default on `logos.dev` and `logos.test`) |
+
+Either key may be in any layer the library reads (top level, `kernelConf`,
+`messagingOverrides`). With relay RLN dropped, or with a preset that has only a
+mix registry, the library's relay plugin is not installed: Mix proofs reach the
+backend over the mix bridge, and Core nodes publish the proof metadata without
+a relay proof.
 
 | `logos.test` | |
 |---|---|
@@ -203,42 +220,33 @@ and mix budgets are independent. The preset carries that registry:
 defaults it). The mix registry always runs at 10 s epochs and a gap of 3;
 neither is configurable. `mix-registry-id` has to name another registry than
 `registry-id`: the same id, also in another letter case, fails the file, as
-do a mix registry on a disabled entry, a missing `mix-metadata-topic` and an
+do a missing `mix-metadata-topic` and an
 identifier that is not 32 bytes of hex. `mix-rate-limit` (optional) is the
 rate asked for the mix membership, on the same terms as `rate-limit`;
 omitted or `0`, the RLN module's default (100) is asked, whatever
 `rate-limit` says.
 
-With a mix registry in the preset, this module starts the backend for both
-registries (one `start`), and a `createNode` config that turns Mix on
-receives `mix-rln-registry-id`, `mix-rln-identifier-hex` and
-`mix-rln-metadata-topic` from the preset — an identifier or topic the config
-already carries is left as written. What turns Mix on depends on the config
-shape, by the library's own rule for mounting Mix, and the keys go where that
-shape takes node keys:
+With a mix registry in the preset and Mix on, this module starts the backend
+for the node's registries (one `start`) and the `createNode` config receives
+`mix-rln-registry-id`, `mix-rln-identifier-hex` and `mix-rln-metadata-topic`
+from the preset; an identifier or topic the config already carries is left as
+written. The keys go where the config shape takes node keys:
 
-| Shape | Mix is on with | Keys go to |
-|---|---|---|
-| flat (bare node keys at the top level) | `"mix": true`, or an anonymity level above `None` | the top level |
-| kernel entry (`entryLayer: "kernel"`) | `"mix": true` in `kernelConf` | `kernelConf` |
+| Shape | Keys go to |
+|---|---|
+| flat (bare node keys at the top level) | the top level |
+| layered (`mode`, `preset`, `messagingOverrides`) | `messagingOverrides` |
+| kernel entry (`entryLayer: "kernel"`) | `kernelConf` |
 
-A kernel-entry config carries no `preset` (the library accepts no key outside
-`kernelConf` there), so such a node takes the preset-less `""` entry.
-
-A layered config (`mode`, `preset`, `messagingOverrides`) cannot run native
-Mix with RLN on the library this module pins: the keys would go into
-`messagingOverrides`, where that library accepts no `mix-rln-*` key, so
-`createNode` fails.
-
-An anonymity level above `None` is `anonymityLevel` (also spelled
-`anonymity-level`) `Preferred` or `Required`. A config that does not turn Mix
-on gets none of the keys. On a preset that runs RLN with a managed backend, a
-`mix-rln-registry-id` set in the node config (top level, `kernelConf` or
-`messagingOverrides`, also spelled `mixRlnRegistryId`, whether or not `mix`
-is on) must equal the preset's mix registry; any other value, or the key when
-the preset has no mix registry, fails `createNode`. `rlnState` reports
-`mixRegistryId`, `mixRlnIdentifier`, `mixEpochSizeSec` and `mixMaxEpochGap`
-beside the relay fields.
+The kernel entry reads no anonymity level: there `mix` in `kernelConf`, else
+the network preset, decides. A config that leaves Mix off gets none of the keys
+and the node takes no mix membership. On a preset that runs RLN with a managed
+backend, a `mix-rln-registry-id` set in the node config (in any layer, also
+spelled `mixRlnRegistryId`) must equal the preset's mix registry; any other
+value, or the key on a node that takes no mix membership, fails `createNode`.
+`rlnState` reports `mixRegistryId`, `mixRlnIdentifier`, `mixEpochSizeSec` and
+`mixMaxEpochGap` beside the relay fields, and the relay fields only when the
+node takes the relay membership.
 
 A host that shares the backend with other consumers sets
 `manage-backend: false` and starts the RLN module itself, naming both

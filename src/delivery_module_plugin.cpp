@@ -369,10 +369,12 @@ std::shared_ptr<const RlnPresetEntry> DeliveryModuleImpl::rlnConfigSnapshot() co
 void DeliveryModuleImpl::abortRln()
 {
     // Only this thread writes rlnConfig, so reading it here needs no lock.
-    if (!rlnConfig->enabled) {
+    if (!rlnConfig->runsRln()) {
         return;
     }
-    logosdelivery_rln_set_plugin(nullptr, nullptr);
+    if (rlnConfig->enabled) {
+        logosdelivery_rln_set_plugin(nullptr, nullptr);
+    }
     {
         std::lock_guard<std::mutex> lock(rlnConfigMutex);
         rlnConfig = std::make_shared<const RlnPresetEntry>();
@@ -400,7 +402,7 @@ void DeliveryModuleImpl::releaseNode()
     // in-flight RLN requests, so no new RLN callback is dispatched into this
     // object while the node goes away. (A callback already executing on the
     // library thread is not joined; it holds its own rlnConfig snapshot.)
-    // Guarded on rlnConfig->enabled because the library's plugin is
+    // Guarded on rlnConfig->enabled (inside) because the library's plugin is
     // process-global -- clearing it unconditionally would disarm another
     // instance's RLN.
     abortRln();
@@ -421,7 +423,7 @@ void DeliveryModuleImpl::releaseNode()
 
 StdLogosResult DeliveryModuleImpl::releaseAndFail(std::string reason)
 {
-    const bool rlnWasInstalled = rlnConfig->enabled;
+    const bool rlnWasInstalled = rlnConfig->runsRln();
     releaseNode();
     if (rlnWasInstalled) {
         setRlnState("Disabled", {});
@@ -600,29 +602,96 @@ RlnMode configMode(const nlohmann::json& cfg)
     return mode == "edge" ? RlnMode::Edge : RlnMode::Core;
 }
 
-// Whether `target` turns Mix on, as logos-delivery v0.40.0 reads it:
-// `mix: true` (with `mixKey`) or an anonymityLevel of Preferred / Required
-// (with `level`). With logos-messaging/logos-delivery#4780 an absent level
-// turns Mix on too.
-static bool mixIsOn(const nlohmann::json& target, bool mixKey, bool level)
+// The objects the library reads node keys from, in the order a later one
+// wins: the top level (flat shape), kernelConf, messagingOverrides.
+static std::vector<const nlohmann::json*> configLayers(const nlohmann::json& cfgObj)
 {
-    if (!target.is_object()) {
+    std::vector<const nlohmann::json*> layers{&cfgObj};
+    for (const char* layer : {"kernelconf", "messagingoverrides"}) {
+        if (const auto layerKey = findKey(cfgObj, {layer});
+            layerKey && cfgObj[*layerKey].is_object()) {
+            layers.push_back(&cfgObj[*layerKey]);
+        }
+    }
+    return layers;
+}
+
+// The last value of a key in `layers`, in any of its spellings.
+static std::optional<nlohmann::json> lastValue(const std::vector<const nlohmann::json*>& layers,
+                                               std::initializer_list<const char*> names)
+{
+    std::optional<nlohmann::json> found;
+    for (const nlohmann::json* layer : layers) {
+        if (const auto key = findKey(*layer, names)) {
+            found = (*layer)[*key];
+        }
+    }
+    return found;
+}
+
+// The delivery library's network presets that run Mix (`mix: true` in
+// networks_config.nim), so default to anonymity level Preferred.
+static bool libraryPresetRunsMix(const std::string& preset)
+{
+    return preset == "logos.dev" || preset == "logos.test";
+}
+
+// Whether the node mounts Mix, as the delivery library decides it
+// (api/conf/logos_delivery_conf.nim): an anonymity level above None turns it
+// on; without a level, `mix` decides; without either, the network preset
+// (libraryPresetRunsMix). The kernel entry reads no level.
+bool mixIsOn(const nlohmann::json& cfgObj, const std::string& preset)
+{
+    if (!cfgObj.is_object()) {
         return false;
     }
-    if (mixKey) {
-        if (const auto key = findKey(target, {"mix"});
-            key && target[*key].is_boolean() && target[*key].get<bool>()) {
-            return true;
+    const auto layers = configLayers(cfgObj);
+    const auto mix = lastValue(layers, {"mix"});
+    const bool mixSet = mix && mix->is_boolean();
+    if (mixSet && mix->get<bool>()) {
+        return true;
+    }
+    if (!isKernelEntry(cfgObj)) {
+        if (const auto level = lastValue(layers, {"anonymitylevel", "anonymity-level"});
+            level && level->is_string()) {
+            return toLowerCopy(level->get<std::string>()) != "none";
         }
     }
-    if (level) {
-        if (const auto key = findKey(target, {"anonymitylevel", "anonymity-level"});
-            key && target[*key].is_string()) {
-            const std::string value = toLowerCopy(target[*key].get<std::string>());
-            return value == "preferred" || value == "required";
-        }
+    if (mixSet) {
+        return false;
     }
-    return false;
+    return libraryPresetRunsMix(preset);
+}
+
+// Whether the caller's config keeps the preset's relay RLN membership:
+// `rln-relay: false` turns relay RLN off, and an on-chain contract address
+// picks the library's own backend instead.
+bool relayRlnIsOn(const nlohmann::json& cfgObj)
+{
+    if (!cfgObj.is_object()) {
+        return true;
+    }
+    const auto layers = configLayers(cfgObj);
+    if (const auto rlnRelay = lastValue(layers, {"rln-relay", "rlnrelay"});
+        rlnRelay && rlnRelay->is_boolean() && !rlnRelay->get<bool>()) {
+        return false;
+    }
+    const auto contract = lastValue(layers, {"rln-relay-eth-contract-address",
+                                             "rlnrelayethcontractaddress", "rlncontractaddress"});
+    return !(contract && contract->is_string() && !contract->get<std::string>().empty());
+}
+
+RlnPresetEntry nodeRlnPreset(const RlnPresetEntry& preset, const nlohmann::json& cfgObj,
+                             const std::string& presetName)
+{
+    RlnPresetEntry node = preset;
+    if (node.enabled && !relayRlnIsOn(cfgObj)) {
+        node.enabled = false;
+    }
+    if (node.hasMix() && !mixIsOn(cfgObj, presetName)) {
+        node.mixRegistryId.clear();
+    }
+    return node;
 }
 
 // Why the caller's mix-rln-registry-id is not the registry the backend serves
@@ -631,7 +700,9 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 {
     const std::string asked = value.is_string() ? value.get<std::string>() : value.dump();
     if (!preset.hasMix()) {
-        return "mix-rln-registry-id " + asked + " is set, but the preset names no mix registry";
+        return "mix-rln-registry-id " + asked
+               + " is set, but this node takes no Mix membership (the preset names no mix "
+                 "registry, or the node does not run Mix)";
     }
     if (!value.is_string() || asked != preset.mixRegistryId) {
         return "mix-rln-registry-id " + asked + " is not the preset's mix registry "
@@ -674,17 +745,10 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
 
     // Checked only when this module starts the backend: a host-managed one
     // serves registries the preset does not describe.
-    if (preset.enabled && preset.manageBackend) {
+    if (preset.runsRln() && preset.manageBackend) {
         // Every object the library reads node keys from, whichever exist, and
         // every spelling of the key findKey's lower-casing matches.
-        std::vector<const nlohmann::json*> layers{&cfgObj};
-        for (const char* layer : {"kernelconf", "messagingoverrides"}) {
-            if (const auto layerKey = findKey(cfgObj, {layer});
-                layerKey && cfgObj[*layerKey].is_object()) {
-                layers.push_back(&cfgObj[*layerKey]);
-            }
-        }
-        for (const nlohmann::json* layer : layers) {
+        for (const nlohmann::json* layer : configLayers(cfgObj)) {
             for (const auto& item : layer->items()) {
                 const std::string key = toLowerCopy(item.key());
                 if (key != "mix-rln-registry-id" && key != "mixrlnregistryid") {
@@ -699,16 +763,15 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     }
 
     const bool disableRlnValidation = preset.enabled && !preset.enableValidation;
-    const bool mixRegistry = preset.enabled && preset.hasMix();
+    // `preset` is this node's (nodeRlnPreset): a mix registry is left only
+    // when the node runs Mix.
+    const bool mixRegistry = preset.hasMix();
     if (!persistencePath.empty() || disableRlnValidation || mixRegistry) {
         nlohmann::json* target = &cfgObj;
-        bool mixKey = true;
-        bool level = true;
         const bool kernelEntry = isKernelEntry(cfgObj);
         if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
             kernelConfKey && cfgObj[*kernelConfKey].is_object()) {
             target = &cfgObj[*kernelConfKey];
-            level = false;
         } else if (kernelEntry) {
             // Kernel entry without a kernelConf object: leave the config
             // untouched for the parser to reject.
@@ -720,7 +783,6 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                 overridesKey = "messagingOverrides";
             }
             target = cfgObj[*overridesKey].is_object() ? &cfgObj[*overridesKey] : nullptr;
-            mixKey = false;
         }
         if (target && !persistencePath.empty()
             && !findKey(*target, {"localstoragepath", "local-storage-path"})) {
@@ -733,16 +795,14 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
             const auto callerSet = [&](const char* dashed, const char* joined) {
                 return findKey(*target, {dashed, joined}).has_value();
             };
-            if (mixIsOn(*target, mixKey, level)) {
-                if (!callerSet("mix-rln-registry-id", "mixrlnregistryid")) {
-                    (*target)["mix-rln-registry-id"] = preset.mixRegistryId;
-                }
-                if (!callerSet("mix-rln-identifier-hex", "mixrlnidentifierhex")) {
-                    (*target)["mix-rln-identifier-hex"] = preset.mixRlnIdentifier;
-                }
-                if (!callerSet("mix-rln-metadata-topic", "mixrlnmetadatatopic")) {
-                    (*target)["mix-rln-metadata-topic"] = preset.mixMetadataTopic;
-                }
+            if (!callerSet("mix-rln-registry-id", "mixrlnregistryid")) {
+                (*target)["mix-rln-registry-id"] = preset.mixRegistryId;
+            }
+            if (!callerSet("mix-rln-identifier-hex", "mixrlnidentifierhex")) {
+                (*target)["mix-rln-identifier-hex"] = preset.mixRlnIdentifier;
+            }
+            if (!callerSet("mix-rln-metadata-topic", "mixrlnmetadatatopic")) {
+                (*target)["mix-rln-metadata-topic"] = preset.mixMetadataTopic;
             }
         }
     }
@@ -764,24 +824,25 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     std::string presetName;
     RlnMode rlnMode = RlnMode::Core;
-    {
-        nlohmann::json cfgObj = nlohmann::json::parse(cfg, nullptr, /*allow_exceptions=*/false);
-        if (cfgObj.is_object()) {
-            if (auto k = findKey(cfgObj, {"preset"}); k && cfgObj[*k].is_string()) {
-                presetName = cfgObj[*k].get<std::string>();
-            }
-            rlnMode = configMode(cfgObj);
+    const nlohmann::json cfgObj =
+        nlohmann::json::parse(cfg, nullptr, /*allow_exceptions=*/false);
+    if (cfgObj.is_object()) {
+        if (auto k = findKey(cfgObj, {"preset"}); k && cfgObj[*k].is_string()) {
+            presetName = cfgObj[*k].get<std::string>();
         }
+        rlnMode = configMode(cfgObj);
     }
 
     // A named presets file that cannot be used is fatal: the caller asked for
     // a deployment this node cannot reproduce, and coming up without RLN
     // would look like success.
     std::string presetError;
-    const RlnPresetEntry rlnPreset = resolveRlnPreset(presetName, presetError);
+    const RlnPresetEntry namedPreset = resolveRlnPreset(presetName, presetError);
     if (!presetError.empty()) {
         return {false, {}, presetError};
     }
+    // Everything below sees the memberships this node takes.
+    const RlnPresetEntry rlnPreset = nodeRlnPreset(namedPreset, cfgObj, presetName);
 
     std::string cfgError;
     auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset, cfgError);
@@ -792,7 +853,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     rlnBridge->init(&modules().rln_module);
 
-    if (rlnPreset.enabled) {
+    if (rlnPreset.runsRln()) {
         if (std::string failure = installRlnPlugin(rlnPreset, rlnMode); !failure.empty()) {
             return {false, {}, failure};
         }
@@ -943,7 +1004,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
         return releaseAndFail("service discovery setup failed: " + failure);
     }
 
-    if (rlnPreset.enabled) {
+    if (rlnPreset.runsRln()) {
         rlnBringUpThread = std::thread([this, rlnMode] {
             const std::string failure = startRlnBackend(rlnMode);
             if (failure.empty()) {
@@ -1035,7 +1096,7 @@ void DeliveryModuleImpl::stopRlnBackend()
     // that is still starting would race the bring-up thread.
     joinRlnBringUp();
     const auto config = rlnConfigSnapshot();
-    if (config->enabled && config->manageBackend && rlnBridge->enabled()) {
+    if (config->runsRln() && config->manageBackend && rlnBridge->enabled()) {
         const std::string failure = rlnBridge->stopBackend();
         if (!failure.empty()) {
             fprintf(stderr, "DeliveryModuleImpl: rln module stop failed: %s\n",
@@ -1358,14 +1419,16 @@ StdLogosResult DeliveryModuleImpl::rlnState()
 {
     std::lock_guard<std::mutex> lock(rlnStateMutex);
     nlohmann::json out{{"state", rlnStateName}, {"message", rlnStateMessage}};
-    if (rlnStateConfig.enabled) {
-        out["registryId"] = rlnStateConfig.registryId;
-        out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
-        out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
+    if (rlnStateConfig.runsRln()) {
         out["mode"] = rlnModeName(rlnStateMode);
         const RlnRates& rates = rlnStateConfig.rates.of(rlnStateMode);
-        if (rates.rateLimit != 0) {
-            out["rateLimit"] = rates.rateLimit;
+        if (rlnStateConfig.enabled) {
+            out["registryId"] = rlnStateConfig.registryId;
+            out["rlnIdentifier"] = rlnStateConfig.rlnIdentifier;
+            out["epochSizeSec"] = rlnStateConfig.epochSizeSec;
+            if (rates.rateLimit != 0) {
+                out["rateLimit"] = rates.rateLimit;
+            }
         }
         if (rlnStateConfig.hasMix()) {
             if (rates.mixRateLimit != 0) {
@@ -1405,16 +1468,16 @@ std::string DeliveryModuleImpl::installRlnPlugin(const RlnPresetEntry& preset, R
         .validate_proof = rln_validate_proof_callback,
     };
 
-    auto next = std::make_shared<RlnPresetEntry>(preset);
-    next->enabled = true;
     {
         std::lock_guard<std::mutex> lock(rlnConfigMutex);
-        rlnConfig = std::move(next);
+        rlnConfig = std::make_shared<const RlnPresetEntry>(preset);
     }
+    // The library's relay plugin only for relay RLN: Mix RLN reaches the
+    // backend over the mix bridge (registerMixRlnBridge), not this plugin.
     // The setter is no nim-ffi entry point, so it does not bring the Nim runtime
     // up; before that its lock is uninitialized (fatal on Windows). This call does.
     (void)logosdelivery_version();
-    if (logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
+    if (preset.enabled && logosdelivery_rln_set_plugin(&rlnPlugin, this) != 0) {
         std::lock_guard<std::mutex> lock(rlnConfigMutex);
         rlnConfig = std::make_shared<const RlnPresetEntry>();
         return "failed to install the RLN plugin";
@@ -1467,16 +1530,22 @@ std::string rlnBackendStartConfig(const RlnPresetEntry& preset, RlnMode mode)
     // Each registry is an entry of its own: rln_module reads a top-level gap
     // or rate as the default for every entry, so the relay registry's would
     // reach the mix one. The top-level epoch size is the one key it requires.
-    nlohmann::json relay{{"registry_id", preset.registryId},
-                         {"epoch_size_sec", preset.epochSizeSec}};
-    if (preset.maxEpochGap != 0) {
-        relay["max_epoch_gap"] = preset.maxEpochGap;
+    // Relay and Mix RLN are independent, so either list entry may be absent;
+    // with no relay registry the top-level epoch size is Mix's.
+    nlohmann::json startCfg{
+        {"epoch_size_sec", preset.enabled ? preset.epochSizeSec : kMixEpochSizeSec},
+        {"registries", nlohmann::json::array()}};
+    if (preset.enabled) {
+        nlohmann::json relay{{"registry_id", preset.registryId},
+                             {"epoch_size_sec", preset.epochSizeSec}};
+        if (preset.maxEpochGap != 0) {
+            relay["max_epoch_gap"] = preset.maxEpochGap;
+        }
+        if (rates.rateLimit != 0) {
+            relay["rate_limit"] = rates.rateLimit;
+        }
+        startCfg["registries"].push_back(std::move(relay));
     }
-    if (rates.rateLimit != 0) {
-        relay["rate_limit"] = rates.rateLimit;
-    }
-    nlohmann::json startCfg{{"epoch_size_sec", preset.epochSizeSec},
-                            {"registries", nlohmann::json::array({std::move(relay)})}};
     if (preset.hasMix()) {
         // The epoch size and gap native Mix's proof plugin runs at.
         nlohmann::json mix{{"registry_id", preset.mixRegistryId},

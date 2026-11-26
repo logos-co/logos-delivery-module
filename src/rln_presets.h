@@ -77,7 +77,8 @@ struct RlnModeRates {
  * them, and `rlnIdentifier` in particular must match across every proof
  * generator and verifier or each message is rejected as invalid.
  *
- * The `mix*` fields describe the registry native Mix proves on: another
+ * `enabled` turns relay (messaging) RLN on. The `mix*` fields, independent
+ * of it, describe the registry native Mix proves on: another
  * registry than the relay one, always run at @ref kMixEpochSizeSec and
  * @ref kMixMaxEpochGap. The rates are the one thing that may differ by mode
  * (@ref rates). How a membership is obtained (an allocator, a funded
@@ -98,6 +99,12 @@ struct RlnPresetEntry {
 
     /** @brief Whether the deployment names a registry for native Mix. */
     bool hasMix() const { return !mixRegistryId.empty(); }
+
+    /**
+     * @brief Whether the node takes any RLN membership: relay (`enabled`),
+     * Mix (@ref hasMix), or both. The two are independent.
+     */
+    bool runsRln() const { return enabled || hasMix(); }
 };
 
 /**
@@ -134,8 +141,9 @@ std::string parseRlnPresetTable(const std::string& json,
 /**
  * @brief RLN settings for a `createNode` preset.
  *
- * Of the built-in presets only `logos.test` has RLN on (the LEZ testnet
- * registry, 600 s epochs, validation off); `""` and `logos.dev` ship with it off. The file named by
+ * Of the built-in presets `logos.test` has relay RLN on (the LEZ testnet
+ * registry, 600 s epochs, validation off) and `logos.dev` relay and Mix RLN
+ * (placeholder registries); `""` ships with it off. The file named by
  * @ref kRlnPresetsEnvVar is merged over them, which is how a test or local
  * deployment supplies its own registry with no public API for it. That file
  * may only key entries by preset names the delivery library accepts — it
