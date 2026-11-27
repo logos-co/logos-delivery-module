@@ -1221,9 +1221,34 @@ LOGOS_TEST(discovery_from_requirements_builds_the_libp2p_config) {
     const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
     LOGOS_ASSERT_TRUE(libp2p["mountKad"].get<bool>());
     LOGOS_ASSERT_TRUE(libp2p["mountServiceDiscovery"].get<bool>());
+    LOGOS_ASSERT_FALSE(libp2p["mountGossipsub"].get<bool>());
     LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"].size(), size_t{2});
     LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["peerId"].get<std::string>(), std::string("16Uiu2HAmB"));
     LOGOS_ASSERT_EQ(libp2p["bootstrapNodes"][1]["addrs"][0].get<std::string>(), std::string("/ip4/10.0.0.2/tcp/30303"));
+}
+
+LOGOS_TEST(discovery_from_requirements_disables_gossipsub_unless_configured) {
+    {
+        delivery_discovery::PluginRequest req;
+        const auto base = parseJson(R"({"mountGossipsub":true})");
+        LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, base, req).empty());
+        const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+        LOGOS_ASSERT_TRUE(libp2p["mountGossipsub"].get<bool>());
+    }
+    {
+        delivery_discovery::PluginRequest req;
+        const auto base = parseJson(R"({"gossipsubMaxMessageSize":1048576})");
+        LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, base, req).empty());
+        const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+        LOGOS_ASSERT_FALSE(libp2p.contains("mountGossipsub"));
+    }
+    {
+        delivery_discovery::PluginRequest req;
+        const auto base = parseJson(R"({"gossipsubMaxMessageSize":0,"gossipsubDisconnectPeerAboveRateLimit":false})");
+        LOGOS_ASSERT_TRUE(delivery_discovery::fromRequirements(kEnabledReply, base, req).empty());
+        const auto libp2p = nlohmann::json::parse(req.libp2pConfig);
+        LOGOS_ASSERT_FALSE(libp2p["mountGossipsub"].get<bool>());
+    }
 }
 
 LOGOS_TEST(discovery_from_requirements_keeps_libp2p_own_config_underneath) {

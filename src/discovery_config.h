@@ -47,6 +47,25 @@ inline std::string checkBootstrapNodes(const nlohmann::json& nodes)
     return {};
 }
 
+/// True when `base` sets a non-zero gossipsub ingress limit that nim-libp2p
+/// rejects unless gossipsub is mounted.
+inline bool hasGossipsubLimits(const nlohmann::json& base)
+{
+    for (const char* key : {"gossipsubMaxMessageSize",
+                            "gossipsubOverheadRateLimitBytes",
+                            "gossipsubOverheadRateLimitIntervalMs",
+                            "gossipsubDisconnectPeerAboveRateLimit"}) {
+        const auto it = base.find(key);
+        if (it == base.end()) {
+            continue;
+        }
+        if (it->is_boolean() ? it->get<bool>() : (it->is_number() && it->get<double>() != 0.0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace detail
 
 /// LIBP2P_MODULE_CONFIG as libp2p_module reads it (inline JSON or a file
@@ -137,6 +156,9 @@ inline std::string fromRequirements(const std::string& reply, const nlohmann::js
     full["bootstrapNodes"] = nodes;
     full["mountKad"] = true;
     full["mountServiceDiscovery"] = true;
+    if (!full.contains("mountGossipsub") && !detail::hasGossipsubLimits(full)) {
+        full["mountGossipsub"] = false;
+    }
 
     out.enabled = true;
     out.libp2pConfig = full.dump();
