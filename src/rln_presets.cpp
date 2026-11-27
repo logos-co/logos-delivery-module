@@ -46,7 +46,7 @@ std::string unknownPresetError(const std::string& name)
 }
 
 // The identifier is this application's and is known; the registry and epoch
-// size belong to a deployment. Only logos.test runs RLN, on the LEZ testnet
+// size belong to a deployment. logos.test runs relay RLN on the LEZ testnet
 // registry: the CAIP-10 account is the registration program's config account
 // (base58 J3NXPWUspX2zqJU3tUbR6MHmm83aJc5AzvidEaBBKnat) on the LEZ v0.3.1 zone
 // behind sequencer https://testnet.lez.logos.co/, channel
@@ -58,14 +58,24 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
         {"", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
-        {"logos.dev", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
+        // logos.dev runs relay RLN and Mix RLN on the LEZ devnet registries.
+        {"logos.dev",
+         RlnPresetEntry{.enabled = true,
+                        .registryId = "logos:devnet:570ed6252ddb9333458460f6342a221bf2b7bc7ececbe99957f165c00b15de1b",
+                        .rlnIdentifier = kLogosDeliveryRlnIdentifier,
+                        .epochSizeSec = 600,
+                        .mixRegistryId = "logos:devnet:c0ce2ec618137995d2894fc612a9211022217731bfb23112a9aaa8162e9b278f",
+                        .mixRlnIdentifier = kMixRlnIdentifierV1,
+                        .mixMetadataTopic = "/logos-delivery/1/mix-rln-metadata/proto",
+                        .rates = kDefaultRlnModeRates}},
         {"logos.test",
          RlnPresetEntry{.enabled = true,
                         .enableValidation = false,
                         .registryId = "logos:testnet:"
                                       "fd322d32a46ddf57eece9db8d68e9b722262d1f770760fca63b8cb9e7775b971",
                         .rlnIdentifier = kLogosDeliveryRlnIdentifier,
-                        .epochSizeSec = 600}},
+                        .epochSizeSec = 600,
+                        .rates = kDefaultRlnModeRates}},
     };
     return table;
 }
@@ -174,8 +184,13 @@ std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnP
     entry.mixRegistryId = read.str("mix-registry-id");
     entry.mixRlnIdentifier = read.str("mix-rln-identifier");
     entry.mixMetadataTopic = read.str("mix-metadata-topic");
-    const RlnRates rates{read.number("rate-limit"), read.number("mix-rate-limit")};
-    entry.rates = RlnModeRates{.core = rates, .edge = rates};
+    // A rate key sets both modes' rate; one left out keeps each mode's default.
+    entry.rates = kDefaultRlnModeRates;
+    for (RlnMode mode : {RlnMode::Core, RlnMode::Edge}) {
+        RlnRates& rates = entry.rates.of(mode);
+        rates.rateLimit = read.number("rate-limit", rates.rateLimit);
+        rates.mixRateLimit = read.number("mix-rate-limit", rates.mixRateLimit);
+    }
     if (!read.error.empty()) {
         return read.error;
     }
@@ -196,16 +211,12 @@ std::string parseEntry(const nlohmann::json& value, const std::string& who, RlnP
         }
     }
     if (entry.hasMix()) {
-        // Mix proofs ride the relay bridge; the library refuses mix
-        // without relay RLN.
-        if (!entry.enabled) {
-            return who + " has mix-registry-id but RLN is not enabled";
-        }
-        // Relay and Mix prove on two registries: the backend is started for
+        // Mix RLN is independent of relay RLN: a preset may name either.
+        // With both, they prove on two registries: the backend is started for
         // the mix one at Mix's own epoch size and gap. Ids that differ only
         // in letter case would be started as two registries, which the RLN
         // module may take for one.
-        if (equalIgnoringAsciiCase(entry.mixRegistryId, entry.registryId)) {
+        if (entry.enabled && equalIgnoringAsciiCase(entry.mixRegistryId, entry.registryId)) {
             return who + " mix-registry-id must name another registry than registry-id";
         }
         if (!isHex32Bytes(entry.mixRlnIdentifier)) {

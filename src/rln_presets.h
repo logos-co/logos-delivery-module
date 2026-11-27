@@ -70,6 +70,17 @@ struct RlnModeRates {
 };
 
 /**
+ * @brief The rates a preset runs at unless it sets its own: relay 600 for
+ * both modes (a message a second over a 600 s epoch), Mix 100 for Core and
+ * 20 for Edge (10 and 2 a second over Mix's 10 s epoch). The built-in
+ * presets use them as they are; a preset file overrides one by setting its
+ * key, and `0` leaves that rate to the RLN module.
+ */
+inline constexpr RlnModeRates kDefaultRlnModeRates{
+    .core = RlnRates{.rateLimit = 600, .mixRateLimit = 100},
+    .edge = RlnRates{.rateLimit = 600, .mixRateLimit = 20}};
+
+/**
  * @brief One deployment's RLN settings, selected by a `createNode` preset.
  *
  * `registryId`, `rlnIdentifier`, `epochSizeSec` and `maxEpochGap` are
@@ -77,7 +88,8 @@ struct RlnModeRates {
  * them, and `rlnIdentifier` in particular must match across every proof
  * generator and verifier or each message is rejected as invalid.
  *
- * The `mix*` fields describe the registry native Mix proves on: another
+ * `enabled` turns relay (messaging) RLN on. The `mix*` fields, independent
+ * of it, describe the registry native Mix proves on: another
  * registry than the relay one, always run at @ref kMixEpochSizeSec and
  * @ref kMixMaxEpochGap. The rates are the one thing that may differ by mode
  * (@ref rates). How a membership is obtained (an allocator, a funded
@@ -98,6 +110,12 @@ struct RlnPresetEntry {
 
     /** @brief Whether the deployment names a registry for native Mix. */
     bool hasMix() const { return !mixRegistryId.empty(); }
+
+    /**
+     * @brief Whether the node takes any RLN membership: relay (`enabled`),
+     * Mix (@ref hasMix), or both. The two are independent.
+     */
+    bool runsRln() const { return enabled || hasMix(); }
 };
 
 /**
@@ -108,7 +126,9 @@ struct RlnPresetEntry {
  * `rln-identifier`, `max-epoch-gap`, `rate-limit` and `enable-validation`.
  * An omitted `rln-identifier` defaults to @ref kLogosDeliveryRlnIdentifier;
  * an omitted `enable-validation` defaults to true. An enabled entry missing
- * a required field is rejected here rather than at node creation. A key that
+ * a required field is rejected here rather than at node creation. An omitted
+ * `rate-limit` or `mix-rate-limit` is that mode's @ref kDefaultRlnModeRates
+ * value; `0` leaves the rate to the RLN module. A key that
  * is present with the wrong JSON type (numbers are unsigned integers) is
  * rejected too, naming the preset and the key; it is never read as its
  * default.
@@ -134,8 +154,10 @@ std::string parseRlnPresetTable(const std::string& json,
 /**
  * @brief RLN settings for a `createNode` preset.
  *
- * Of the built-in presets only `logos.test` has RLN on (the LEZ testnet
- * registry, 600 s epochs, validation off); `""` and `logos.dev` ship with it off. The file named by
+ * Of the built-in presets `logos.test` has relay RLN on (the LEZ testnet
+ * registry, 600 s epochs, validation off) and `logos.dev` relay and Mix RLN
+ * (the LEZ devnet registries), both at @ref kDefaultRlnModeRates; `""` ships
+ * with it off. The file named by
  * @ref kRlnPresetsEnvVar is merged over them, which is how a test or local
  * deployment supplies its own registry with no public API for it. That file
  * may only key entries by preset names the delivery library accepts — it

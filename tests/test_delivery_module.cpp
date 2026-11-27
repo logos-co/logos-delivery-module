@@ -906,8 +906,8 @@ LOGOS_TEST(createNode_without_an_rln_preset_installs_no_plugin) {
     delete impl;
 }
 
-// Only logos.test ships with RLN on; "" and logos.dev stay off.
-LOGOS_TEST(builtin_presets_enable_rln_only_on_logos_test) {
+// logos.test ships relay RLN, logos.dev relay and Mix RLN; "" stays off.
+LOGOS_TEST(builtin_presets_enable_rln_on_logos_test_and_logos_dev) {
     ::unsetenv(kRlnPresetsEnvVar);
     std::string error;
 
@@ -922,8 +922,11 @@ LOGOS_TEST(builtin_presets_enable_rln_only_on_logos_test) {
     LOGOS_ASSERT_EQ(test.epochSizeSec, static_cast<uint64_t>(600));
     LOGOS_ASSERT_EQ(test.maxEpochGap, static_cast<uint64_t>(0));
 
-    LOGOS_ASSERT_FALSE(resolveRlnPreset("logos.dev", error).enabled);
+    const RlnPresetEntry dev = resolveRlnPreset("logos.dev", error);
     LOGOS_ASSERT_TRUE(error.empty());
+    LOGOS_ASSERT_TRUE(dev.enabled);
+    LOGOS_ASSERT_TRUE(dev.hasMix());
+    LOGOS_ASSERT_EQ(dev.mixRlnIdentifier, std::string(kMixRlnIdentifierV1));
     LOGOS_ASSERT_FALSE(resolveRlnPreset("", error).enabled);
     LOGOS_ASSERT_TRUE(error.empty());
 }
@@ -944,14 +947,30 @@ LOGOS_TEST(builtin_logos_test_preset_installs_the_rln_plugin) {
     LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
 }
 
-// logos.dev carries RLN off, so naming it must not turn it on.
-LOGOS_TEST(builtin_logos_dev_preset_leaves_rln_off) {
+// logos.dev runs relay RLN and, Mix being on by default there, Mix RLN.
+LOGOS_TEST(builtin_logos_dev_preset_runs_relay_and_mix_rln) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
+    ::unsetenv(kRlnPresetsEnvVar);
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.dev"})").success);
+    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_TRUE(libCfg.contains("mix-rln-registry-id"));
+    LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
+}
+
+// The empty preset carries no RLN, so naming it must not turn it on.
+LOGOS_TEST(builtin_empty_preset_leaves_rln_off) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    ::unsetenv(kRlnPresetsEnvVar);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":""})").success);
     LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
     LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
 }
@@ -1117,16 +1136,13 @@ LOGOS_TEST(preset_table_parses_the_mix_registry_with_defaults) {
     // Without a mix registry nothing mix-related is in force.
     LOGOS_ASSERT_TRUE(parseRlnPresetTable(kRlnPresetTable, table).empty());
     LOGOS_ASSERT_FALSE(table["logos.test"].hasMix());
-    LOGOS_ASSERT_EQ(table["logos.test"].rates.core.rateLimit, static_cast<uint64_t>(0));
+    // A preset that sets no rate runs at the default ones.
+    LOGOS_ASSERT_EQ(table["logos.test"].rates.core.rateLimit, static_cast<uint64_t>(600));
 }
 
 // A mix registry that cannot work is refused where it is written.
 LOGOS_TEST(preset_table_refuses_an_unusable_mix_entry) {
     std::map<std::string, RlnPresetEntry> table;
-    // Mix proofs ride relay RLN.
-    LOGOS_ASSERT_FALSE(parseRlnPresetTable(
-        R"({"logos.test":{"enabled":false,"mix-registry-id":"mixreg","mix-metadata-topic":"/t"}})",
-        table).empty());
     // The library needs the topic the proof metadata is published on.
     LOGOS_ASSERT_FALSE(parseRlnPresetTable(
         R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,
@@ -1234,7 +1250,8 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
         LOGOS_ASSERT_EQ(core.mixRateLimit, static_cast<uint64_t>(100));
     }
 
-    // One mode named: the other runs at the entry's rates.
+    // One mode named: the other runs at the entry's rates, and a rate the
+    // entry leaves out at that mode's default.
     LOGOS_ASSERT_EQ(parseRlnPresetTable(
         R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,"rate-limit":100,
             "mix-registry-id":"mixreg","mix-metadata-topic":"/t",
@@ -1244,7 +1261,7 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
         const RlnModeRates& rates = table["logos.test"].rates;
         LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(20));
         LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(100));
-        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(0));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(100));
         LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(100));
     }
 
@@ -1273,6 +1290,64 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
                     rlnBackendStartConfig(builtin, RlnMode::Core));
     LOGOS_ASSERT_EQ(std::string(rlnModeName(RlnMode::Core)), std::string("Core"));
     LOGOS_ASSERT_EQ(std::string(rlnModeName(RlnMode::Edge)), std::string("Edge"));
+}
+
+// The built-in presets run at the default rates: relay 600 for both modes,
+// Mix 100 for Core and 20 for Edge. A preset file that sets no rate gets the
+// same; one that sets a rate overrides it, and 0 leaves it to the RLN module.
+LOGOS_TEST(presets_default_to_the_logos_rates) {
+    std::string err;
+    ::unsetenv(kRlnPresetsEnvVar);
+    const RlnPresetEntry dev = resolveRlnPreset("logos.dev", err);
+    LOGOS_ASSERT_TRUE(err.empty());
+    auto core = nlohmann::json::parse(rlnBackendStartConfig(dev, RlnMode::Core));
+    LOGOS_ASSERT_EQ(core["registries"][0].value("rate_limit", 0), 600);
+    LOGOS_ASSERT_EQ(core["registries"][1].value("rate_limit", 0), 100);
+    auto edge = nlohmann::json::parse(rlnBackendStartConfig(dev, RlnMode::Edge));
+    LOGOS_ASSERT_EQ(edge["registries"][0].value("rate_limit", 0), 600);
+    LOGOS_ASSERT_EQ(edge["registries"][1].value("rate_limit", 0), 20);
+
+    const RlnPresetEntry test = resolveRlnPreset("logos.test", err);
+    LOGOS_ASSERT_TRUE(err.empty());
+    auto testCore = nlohmann::json::parse(rlnBackendStartConfig(test, RlnMode::Core));
+    LOGOS_ASSERT_EQ(testCore["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(testCore["registries"][0].value("rate_limit", 0), 600);
+
+    const std::string withMix =
+        R"("enabled":true,"registry-id":"reg","epoch-size-sec":600,)"
+        R"("mix-registry-id":"mixreg","mix-metadata-topic":"/t")";
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix + "}}", table),
+                    std::string());
+    {
+        const RlnModeRates& rates = table["logos.dev"].rates;
+        LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(600));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(600));
+        LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(20));
+    }
+
+    // A top-level rate sets both modes; a mode's key then overrides one.
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix
+                                            + R"(,"rate-limit":300,"modes":{"edge":{"mix-rate-limit":5}}}})",
+                                        table),
+                    std::string());
+    {
+        const RlnModeRates& rates = table["logos.dev"].rates;
+        LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(300));
+        LOGOS_ASSERT_EQ(rates.edge.rateLimit, static_cast<uint64_t>(300));
+        LOGOS_ASSERT_EQ(rates.core.mixRateLimit, static_cast<uint64_t>(100));
+        LOGOS_ASSERT_EQ(rates.edge.mixRateLimit, static_cast<uint64_t>(5));
+    }
+
+    // 0 leaves the rate to the RLN module: the start config carries none.
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix
+                                            + R"(,"rate-limit":0,"mix-rate-limit":0}})",
+                                        table),
+                    std::string());
+    auto none = nlohmann::json::parse(rlnBackendStartConfig(table["logos.dev"], RlnMode::Edge));
+    LOGOS_ASSERT_FALSE(none["registries"][0].contains("rate_limit"));
+    LOGOS_ASSERT_FALSE(none["registries"][1].contains("rate_limit"));
 }
 
 // What `modes` cannot say is refused where it is written, naming the mode.
@@ -1436,14 +1511,15 @@ LOGOS_TEST(a_caller_supplied_mix_key_wins_and_a_relay_only_node_gets_none) {
     }
     delivery_test_rln::resetRlnMockState();
     {
-        // mix off (or absent): the library is told nothing about mix.
+        // mix off: the library is told nothing about mix, and the node takes
+        // no mix membership.
         DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(kRlnNodeCfg).success);
+        LOGOS_ASSERT_TRUE(
+            impl.createNode(R"({"logLevel":"INFO","preset":"logos.test","mix":false})").success);
         auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
         LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-registry-id"));
         LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-identifier-hex"));
-        // But the deployment is still reported.
-        LOGOS_ASSERT_EQ(impl.rlnState().value.value("mixRegistryId", ""), std::string("mixreg"));
+        LOGOS_ASSERT_FALSE(impl.rlnState().value.contains("mixRegistryId"));
         (void)settledRlnState(impl);
     }
 }
@@ -1492,6 +1568,14 @@ LOGOS_TEST(a_caller_supplied_mix_registry_the_preset_does_not_serve_is_refused) 
              Refused{R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":10,"max-epoch-gap":3}})",
                      R"({"preset":"logos.test","mix":true,"mix-rln-registry-id":"reg"})",
                      "the preset names no mix registry"},
+             // The config drops both memberships: the key still names one the
+             // node does not take, the preset's own registry included.
+             Refused{kRlnPresetTableWithMix,
+                     R"({"preset":"logos.test","rln-relay":false,"mix":false,"mix-rln-registry-id":"mixreg"})",
+                     "this node takes no Mix membership"},
+             Refused{kRlnPresetTable,
+                     R"({"preset":"logos.test","rln-relay":false,"mix-rln-registry-id":"reg"})",
+                     "this node takes no Mix membership"},
          }) {
         RlnPresetsFile presets(r.table);
         DeliveryModuleImpl impl;
@@ -1501,6 +1585,44 @@ LOGOS_TEST(a_caller_supplied_mix_registry_the_preset_does_not_serve_is_refused) 
         LOGOS_ASSERT_TRUE(result.error.find(r.needle) != std::string::npos);
     }
     LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_create"));
+}
+
+// A key that decides the memberships, with a value relayRlnIsOn / mixIsOn would
+// not read, fails createNode before the plugin is installed: ignored, it would
+// leave on a membership the caller meant to drop.
+LOGOS_TEST(a_wrong_typed_membership_key_is_refused_before_the_plugin_is_installed) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableWithMix);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    struct Refused { const char* cfg; const char* needle; };
+    for (const Refused& r : {
+             Refused{R"({"preset":"logos.test","messagingOverrides":{"rln-relay":"false"}})",
+                     "rln-relay must be a boolean"},
+             Refused{R"({"preset":"logos.test","kernelConf":{"rlnRelay":0}})",
+                     "rlnRelay must be a boolean"},
+             Refused{R"({"preset":"logos.test","mix":"no"})", "mix must be a boolean"},
+             Refused{R"({"preset":"logos.test","messagingOverrides":{"anonymityLevel":"Off"}})",
+                     "anonymityLevel must be one of None, Preferred, Required"},
+             Refused{R"({"preset":"logos.test","anonymity-level":2})",
+                     "anonymity-level must be one of None, Preferred, Required"},
+             Refused{R"({"preset":"logos.test","rln-relay-eth-contract-address":1})",
+                     "rln-relay-eth-contract-address must be a string"},
+         }) {
+        DeliveryModuleImpl impl;
+        const auto result = impl.createNode(r.cfg);
+        LOGOS_ASSERT_FALSE(result.success);
+        LOGOS_ASSERT_TRUE(result.error.find(r.needle) != std::string::npos);
+    }
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_rln_set_plugin"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_create"));
+
+    // Any spelling and case of a level passes.
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(
+        impl.createNode(R"({"preset":"logos.test","messagingOverrides":{"anonymityLevel":"preferred","rln-relay":true}})")
+            .success);
 }
 
 // A host that manages the backend names the registries in its own start, so
@@ -1537,10 +1659,11 @@ LOGOS_TEST(a_caller_supplied_mix_registry_that_is_the_presets_passes) {
     }
     delivery_test_rln::resetRlnMockState();
     {
-        // logos.dev runs no RLN: nothing to check the key against.
+        // The empty preset runs no RLN: nothing to check the key against.
+        ::unsetenv(kRlnPresetsEnvVar);
         DeliveryModuleImpl impl;
         LOGOS_ASSERT_TRUE(impl.createNode(
-            R"({"logLevel":"INFO","preset":"logos.dev","mix":true,"mix-rln-registry-id":"other"})")
+            R"({"logLevel":"INFO","preset":"","mix":true,"mix-rln-registry-id":"other"})")
             .success);
     }
 }
@@ -1577,8 +1700,9 @@ LOGOS_TEST(createNode_resolves_the_preset_for_the_config_mode) {
     delivery_test_rln::resetRlnMockState();
 }
 
-// A rate the preset leaves to the RLN module is not reported, and a preset
-// without modes still names the node's mode.
+// A preset that sets no rate reports the default ones, a rate it leaves to
+// the RLN module (0) is not reported, and a preset without modes still names
+// the node's mode.
 LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
@@ -1590,15 +1714,25 @@ LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
         LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"edge","preset":"logos.test"})").success);
         const auto state = impl.rlnState().value;
         LOGOS_ASSERT_EQ(state.value("mode", ""), std::string("Edge"));
-        LOGOS_ASSERT_FALSE(state.contains("rateLimit"));
+        LOGOS_ASSERT_EQ(state.value("rateLimit", 0), 600);
         LOGOS_ASSERT_FALSE(state.contains("mixRateLimit"));
         (void)settledRlnState(impl);
     }
     delivery_test_rln::resetRlnMockState();
     {
-        // No RLN: nothing but the state.
+        RlnPresetsFile presets(
+            R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":600,"rate-limit":0}})");
         DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"Edge","preset":"logos.dev"})").success);
+        LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"edge","preset":"logos.test"})").success);
+        LOGOS_ASSERT_FALSE(impl.rlnState().value.contains("rateLimit"));
+        (void)settledRlnState(impl);
+    }
+    delivery_test_rln::resetRlnMockState();
+    {
+        // No RLN: nothing but the state.
+        ::unsetenv(kRlnPresetsEnvVar);
+        DeliveryModuleImpl impl;
+        LOGOS_ASSERT_TRUE(impl.createNode(R"({"mode":"Edge","preset":""})").success);
         LOGOS_ASSERT_FALSE(impl.rlnState().value.contains("mode"));
     }
 }
@@ -1606,8 +1740,9 @@ LOGOS_TEST(rlnState_reports_the_mode_and_the_rates_asked) {
 // An anonymity level above None mounts Mix as `mix: true` does, so it gets
 // the preset's mix keys too: at the top level of a flat config, in
 // messagingOverrides for a layered one, which is where that shape carries the
-// level. The kernel entry ignores the messaging layer: there only `mix: true`
-// inside kernelConf turns the keys on.
+// level. Without a level the network preset decides (logos.test runs Mix).
+// The kernel entry reads no level: there `mix` in kernelConf, else the preset,
+// turns the keys on.
 LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
@@ -1639,7 +1774,6 @@ LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
     }
     for (const char* cfg : {
              R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":"None"})",
-             R"({"logLevel":"INFO","preset":"logos.test","anonymityLevel":2})",
              R"({"logLevel":"INFO","preset":"logos.test","mix":false})",
          }) {
         DeliveryModuleImpl impl;
@@ -1654,6 +1788,9 @@ LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
     for (const char* cfg : {
              R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{"anonymityLevel":"Preferred"}})",
              R"({"preset":"logos.test","messagingOverrides":{"anonymity-level":"required"}})",
+             // No level: logos.test runs Mix, as the library defaults it.
+             R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{}})",
+             R"({"mode":"Edge","preset":"logos.test"})",
          }) {
         DeliveryModuleImpl impl;
         LOGOS_ASSERT_TRUE(impl.createNode(cfg).success);
@@ -1666,8 +1803,7 @@ LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
     }
     for (const char* cfg : {
              R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{"anonymityLevel":"None"}})",
-             R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{}})",
-             R"({"mode":"Edge","preset":"logos.test"})",
+             R"({"mode":"Edge","preset":"logos.test","messagingOverrides":{"mix":false}})",
          }) {
         DeliveryModuleImpl impl;
         LOGOS_ASSERT_TRUE(impl.createNode(cfg).success);
@@ -1695,7 +1831,7 @@ LOGOS_TEST(a_mix_preset_supplies_the_mix_keys_for_an_anonymity_level) {
     {
         DeliveryModuleImpl impl;
         LOGOS_ASSERT_TRUE(impl.createNode(
-            R"({"entryLayer":"kernel","preset":"logos.test","kernelConf":{"logLevel":"INFO"}})")
+            R"({"entryLayer":"kernel","preset":"logos.test","kernelConf":{"logLevel":"INFO","mix":false}})")
             .success);
         auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
         LOGOS_ASSERT_TRUE(hasNoMixKeys(libCfg["kernelConf"]));
@@ -2209,4 +2345,129 @@ LOGOS_TEST(mix_rln_callback_remains_until_the_last_instance_is_released) {
     second.reset();
     LOGOS_ASSERT(delivery_test_rln::g_mixCallback == nullptr);
     LOGOS_ASSERT_EQ(delivery_test_rln::g_mixSetCallbackCalls, 2);
+}
+
+// Relay RLN and Mix RLN are independent: a preset may name a mix registry
+// without relay RLN.
+LOGOS_TEST(a_preset_may_name_a_mix_registry_without_relay_rln) {
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_TRUE(parseRlnPresetTable(R"({"": {"enabled": false, "mix-registry-id": "mixreg",
+        "mix-metadata-topic": "/mix/1/metadata/proto"}})",
+                                          table)
+                          .empty());
+    const RlnPresetEntry& entry = table.at("");
+    LOGOS_ASSERT_FALSE(entry.enabled);
+    LOGOS_ASSERT_TRUE(entry.hasMix());
+    LOGOS_ASSERT_TRUE(entry.runsRln());
+}
+
+// Mix only: one registry, and the top-level epoch size is Mix's.
+LOGOS_TEST(the_backend_start_config_for_mix_rln_only) {
+    RlnPresetEntry cfg;
+    cfg.mixRegistryId = "mixreg";
+    auto start = nlohmann::json::parse(rlnBackendStartConfig(cfg, RlnMode::Core));
+    LOGOS_ASSERT_EQ(start.value("epoch_size_sec", 0), static_cast<int>(kMixEpochSizeSec));
+    LOGOS_ASSERT_EQ(start["registries"].size(), static_cast<size_t>(1));
+    LOGOS_ASSERT_EQ(start["registries"][0].value("registry_id", ""), std::string("mixreg"));
+}
+
+// Mix as the delivery library decides it: `mix: true` whatever the level, else
+// a level above None, else `mix`, else the network preset.
+LOGOS_TEST(mixIsOn_follows_the_library_rule) {
+    const auto on = [](const char* cfg, const char* preset) {
+        return mixIsOn(nlohmann::json::parse(cfg), preset);
+    };
+    // The network preset's default.
+    LOGOS_ASSERT_TRUE(on(R"({})", "logos.dev"));
+    LOGOS_ASSERT_TRUE(on(R"({})", "logos.test"));
+    LOGOS_ASSERT_FALSE(on(R"({})", ""));
+    LOGOS_ASSERT_FALSE(on(R"({})", "twn"));
+    // `mix` in any layer, messagingOverrides last.
+    LOGOS_ASSERT_FALSE(on(R"({"mix":false})", "logos.dev"));
+    LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"mix":false}})", "logos.dev"));
+    LOGOS_ASSERT_TRUE(on(R"({"messagingOverrides":{"mix":true}})", ""));
+    LOGOS_ASSERT_TRUE(on(R"({"entryLayer":"kernel","kernelConf":{"mix":true}})", ""));
+    // The level.
+    LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"anonymityLevel":"None"}})", "logos.dev"));
+    LOGOS_ASSERT_TRUE(on(R"({"messagingOverrides":{"anonymity-level":"Preferred"}})", ""));
+    LOGOS_ASSERT_TRUE(on(R"({"anonymityLevel":"Required"})", ""));
+    // `mix: true` mounts Mix at level None too: the library keeps a set `mix`,
+    // and only a level above None forces it on (logos_delivery_conf.nim).
+    LOGOS_ASSERT_TRUE(on(R"({"messagingOverrides":{"mix":true,"anonymityLevel":"None"}})", ""));
+    LOGOS_ASSERT_TRUE(
+        on(R"({"messagingOverrides":{"mix":true,"anonymityLevel":"None"}})", "logos.dev"));
+    // The kernel entry reads no level.
+    LOGOS_ASSERT_FALSE(on(R"({"entryLayer":"kernel","anonymityLevel":"Required"})", ""));
+}
+
+LOGOS_TEST(relayRlnIsOn_drops_relay_rln_on_the_callers_word) {
+    const auto on = [](const char* cfg) { return relayRlnIsOn(nlohmann::json::parse(cfg)); };
+    LOGOS_ASSERT_TRUE(on(R"({})"));
+    LOGOS_ASSERT_TRUE(on(R"({"rln-relay":true})"));
+    LOGOS_ASSERT_FALSE(on(R"({"rln-relay":false})"));
+    LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"rln-relay":false}})"));
+    LOGOS_ASSERT_FALSE(on(R"({"kernelConf":{"rlnRelay":false}})"));
+    // An on-chain contract picks the library's own backend.
+    LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"rln-relay-eth-contract-address":"0xabc"}})"));
+    LOGOS_ASSERT_TRUE(on(R"({"rln-relay-eth-contract-address":""})"));
+    // So does a keystore: the library's RLN conf builder reads it as on-chain.
+    LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"rln-relay-cred-path":"/k.json"}})"));
+    LOGOS_ASSERT_FALSE(on(R"({"kernelConf":{"rlnRelayCredPath":"/k.json"}})"));
+}
+
+// The preset decides which memberships exist; the config only drops them, each
+// on its own.
+LOGOS_TEST(nodeRlnPreset_drops_each_membership_independently) {
+    RlnPresetEntry preset;
+    preset.enabled = true;
+    preset.registryId = "reg";
+    preset.epochSizeSec = 600;
+    preset.mixRegistryId = "mixreg";
+    const auto node = [&](const char* cfg, const char* name) {
+        return nodeRlnPreset(preset, nlohmann::json::parse(cfg), name);
+    };
+
+    auto both = node(R"({})", "logos.dev");
+    LOGOS_ASSERT_TRUE(both.enabled);
+    LOGOS_ASSERT_TRUE(both.hasMix());
+
+    auto relayOnly = node(R"({"messagingOverrides":{"mix":false}})", "logos.dev");
+    LOGOS_ASSERT_TRUE(relayOnly.enabled);
+    LOGOS_ASSERT_FALSE(relayOnly.hasMix());
+
+    auto mixOnly = node(R"({"messagingOverrides":{"rln-relay":false}})", "logos.dev");
+    LOGOS_ASSERT_FALSE(mixOnly.enabled);
+    LOGOS_ASSERT_TRUE(mixOnly.hasMix());
+
+    auto none = node(R"({"messagingOverrides":{"rln-relay":false,"anonymityLevel":"None"}})",
+                     "logos.dev");
+    LOGOS_ASSERT_FALSE(none.runsRln());
+
+    // Config cannot add a membership the preset lacks.
+    RlnPresetEntry off;
+    LOGOS_ASSERT_FALSE(
+        nodeRlnPreset(off, nlohmann::json::parse(R"({"rln-relay":true,"mix":true})"), "")
+            .runsRln());
+}
+
+// Mix RLN without relay RLN: the library's relay plugin is not installed, the
+// mix keys still reach the library, and the bring-up still runs.
+LOGOS_TEST(a_mix_only_node_installs_no_relay_plugin_but_gets_the_mix_keys) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableWithMix);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(impl.createNode(
+        R"({"preset":"logos.test","messagingOverrides":{"rln-relay":false,"anonymityLevel":"Required"}})")
+        .success);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
+    auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
+    LOGOS_ASSERT_EQ(libCfg["messagingOverrides"].value("mix-rln-registry-id", ""),
+                    std::string("mixreg"));
+    const auto state = impl.rlnState().value;
+    LOGOS_ASSERT_FALSE(state.contains("registryId"));
+    LOGOS_ASSERT_EQ(state.value("mixRegistryId", ""), std::string("mixreg"));
+    LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
 }

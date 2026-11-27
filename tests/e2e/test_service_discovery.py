@@ -169,12 +169,12 @@ def test_plugin_node_without_libp2p_module_fails_to_start(daemon_factory):
     assert event_arg(stopped, 0) is True
 
 
-def test_edge_node_finds_lightpush_node_but_send_is_refused(daemon_factory, delivery_node_factory):
-    """The Edge node's lookup adds the light push node to its peer store, but only the
-    relay connectivity loop dials found peers, so the Edge node's send is refused."""
+def test_edge_node_sends_through_a_discovered_lightpush_node(daemon_factory, delivery_node_factory):
+    """The Edge node's lookup stores the light push node with the codecs and shard its
+    record claims, so the Edge node's send selects it, dials it and reaches the receiver."""
     libp2p_bootstrap = daemon_factory("libp2p-bootstrap")
     bootstrap = setup_libp2p_bootstrap(libp2p_bootstrap)
-    # The light push node relays to it, so a push from the Edge node would succeed.
+    # The light push node relays to it.
     receiver = delivery_node_factory("receiver", make_delivery_config())
     service = _connected_node(
         delivery_node_factory,
@@ -197,12 +197,7 @@ def test_edge_node_finds_lightpush_node_but_send_is_refused(daemon_factory, deli
         message="edge: lookup added no peer",
     )
 
-    result = edge.send_result(CONTENT_TOPIC, "edge")
-
-    assert (result.get("success"), result.get("error")) == (
-        False,
-        "Send failed: node has no connected peer (NotConnected)",
-    )
+    _assert_delivered(edge, receiver, "edge")
 
 
 def test_restarted_node_reconnects_while_old_advert_is_served(daemon_factory, delivery_node_factory):
