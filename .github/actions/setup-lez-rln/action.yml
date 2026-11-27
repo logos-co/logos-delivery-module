@@ -8,10 +8,10 @@ description: >
 inputs:
   sequencer-image:
     description: The standalone LEZ sequencer.
-    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone:v0.3.2
+    default: harbor.status.im/logos-blockchain/logos-execution-zone/sequencer_service-standalone:v0.4.0-rc3
   sequencer-ref:
     description: The logos-execution-zone tag that the sequencer image is built from when the registry is unreachable.
-    default: v0.3.2
+    default: v0.4.0-rc3
   recursion-zkr-url:
     description: >
       risc0-circuit-recursion's recursion_zkr.zip for that build. Its build script
@@ -22,12 +22,12 @@ inputs:
     default: 744b999f0a35b3c86753311c7efb2a0054be21727095cf105af6ee7d3f4d8849
   lez-rln-commit:
     description: The logos-lez-rln commit to build.
-    default: 235ddaeee84eec385a2d4b68d69f702a29c14cf3
+    default: 7b47822c7f6c453266de48d81e10dd7d3166ccf9
   rzup-version:
     description: The rzup, from crates.io, that installs cargo-risczero and the risc0 Rust toolchain.
     default: 0.5.2
   cargo-risczero-version:
-    description: The cargo-risczero that builds the guest programs.
+    description: The cargo-risczero that builds the guest programs, and the r0vm the tools run them with.
     default: 3.0.5
   risc0-rust-version:
     description: The risc0 Rust toolchain cargo-risczero checks for.
@@ -86,6 +86,14 @@ runs:
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
           ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
         key: ${{ steps.lez-rln.outputs.cache-primary-key }}
+
+    # logos-lez-rln's tools simulate each transaction with r0vm before sending it.
+    - name: Install r0vm
+      shell: bash
+      run: |
+        command -v rzup >/dev/null || cargo install rzup --version ${{ inputs.rzup-version }} --locked
+        rzup install r0vm ${{ inputs.cargo-risczero-version }}
+        echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
 
     - name: Export E2E_LEZ_RLN_DIR
       shell: bash

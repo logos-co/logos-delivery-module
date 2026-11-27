@@ -25,8 +25,6 @@ from logos_integration_test_framework import subscribe as _watch_events
 from libs.constants import (
     CLUSTER_ID,
     FLEET_PRESET,
-    LEZ_CLOCK_50_ACCOUNT,
-    LEZ_CLOCK_SHARD,
     LEZ_SEQUENCER_URL,
     LIBP2P_TCP_PORT,
     LOGOS_DELIVERY_SERVICE_ID,
@@ -404,7 +402,7 @@ def rln_membership_state(node: DeliveryNode) -> dict:
 def register_membership(node: DeliveryNode, fund: Callable[[str], None], *, timeout: float) -> None:
     """Fund the node's LEZ payer and wait for its RLN module to register an `active`
     membership."""
-    fund(wait_for_lez_wallet(node, timeout=timeout)["payer"])
+    fund(wait_for_lez_wallet(node, timeout=timeout)["payer_public_key"])
 
     def settled():
         state = rln_membership_state(node)
@@ -460,14 +458,6 @@ def lez_rpc(sequencer_url: str, method: str, *params: Any) -> Any:
 def lez_last_block_id() -> int:
     """The LEZ testnet sequencer's `getLastBlockId`."""
     return lez_rpc(LEZ_SEQUENCER_URL, "getLastBlockId")
-
-
-def lez_clock_ms(sequencer_url: str) -> int:
-    """CLOCK_50's timestamp in ms. LEZ's clock program writes CLOCK_50 every 50 blocks, and
-    the RLN registry refuses registrations while the timestamp is still 0."""
-    account = lez_rpc(sequencer_url, "getAccount", LEZ_CLOCK_50_ACCOUNT)
-    shard = account["data"]["shards"].get(LEZ_CLOCK_SHARD, [])
-    return int.from_bytes(bytes(shard[8:16]), "little")
 
 
 def is_connected(event: dict) -> bool:

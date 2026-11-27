@@ -84,9 +84,8 @@ freshly published message should pin `arg3` to `"live"`.
 starts the standalone LEZ sequencer on the worker's docker network and deploys an RLN
 registry on it with logos-lez-rln's `run_setup`. Nodes read the sequencer's URL from
 `LEZ_RLN_SEQUENCER` and the registry id from the presets file named by
-`LOGOS_DELIVERY_RLN_PRESETS`. After `lez_registry.fund` funds a node's LEZ payer, the
-node's RLN module registers a membership by itself. Funding waits for the chain's `CLOCK_50`,
-because the registry refuses registrations before it.
+`LOGOS_DELIVERY_RLN_PRESETS`. After `lez_registry.fund` funds a node's LEZ payer by its
+public key, the node's RLN module registers a membership by itself.
 
 A node on the LEZ testnet starts from `lez_wallet` and sends with `rln_membership`. A LEZ
 wallet syncs the chain from the block after its last synced one, and RLN waits for that
@@ -142,7 +141,8 @@ the tests read adverts with `libp2p_module`'s `discoLookup`.
 - `LOGOSCTL_IMAGE` env: `logosctl:smoke-portable`, built once from
   `logos-co/logos-logoscore-py/tests/logosctl/docker_smoke/build_smoke_image.sh`.
 - `LOGOS_MODULES_DIR` env: the `modules/` of a logosctl session where `logosctl install`
-  put this repo's `nix build .#lgx-portable` and its released dependencies.
+  put this repo's `nix build .#lgx-portable`, the RLN modules at this flake's pins and
+  the released `libp2p_module`.
 - A host-side `logosctl` CLI on `PATH` (the client shells out to it): the image's own,
   copied out of `/opt/logosctl`, or a `logos-co/logos-logoscore-cli` release.
 - For `test_rln.py`:
@@ -175,17 +175,21 @@ docker cp logosctl-cli:/opt/logosctl - | tar -x -C /tmp
 docker rm logosctl-cli
 export PATH="/tmp/logosctl/bin:$PATH"
 
-# 2. Build the module and install it into its own logosctl session, next to the
-#    released RLN modules and libp2p_module. CI runs the same commands. Bump these
-#    versions by hand when flake.lock moves the modules.
+# 2. Build the module and the RLN modules at this flake's pins, and install them into
+#    their own logosctl session next to the released libp2p_module. CI runs the same
+#    commands. Bump the libp2p_module version by hand when flake.lock moves it.
 nix build .#lgx-portable
+nix build --inputs-from . 'membership_allocation_client_module#lgx-portable' --out-link result-membership
+nix build --inputs-from . 'rln_lez_module#lgx-portable' --out-link result-rln-lez
+nix build --inputs-from . 'rln_module#lgx-portable' --out-link result-rln
 export LOGOSCTL_CONFIG_DIR=/tmp/logosctl-modules
 logosctl daemon start --detach
 logosctl catalog refresh
-logosctl install liblogos_lez_rln_module --version 5.1.0 -y
-logosctl install liblogos_rln_module --version 0.12.0 --no-deps -y
 logosctl install libp2p_module --version 1.1.0 -y
-logosctl install result/*.lgx -y
+logosctl install result-membership/*.lgx --no-deps -y
+logosctl install result-rln-lez/*.lgx --no-deps -y
+logosctl install result-rln/*.lgx --no-deps -y
+logosctl install result/*.lgx --no-deps -y
 logosctl daemon stop
 export LOGOS_MODULES_DIR=$LOGOSCTL_CONFIG_DIR/modules
 unset LOGOSCTL_CONFIG_DIR
