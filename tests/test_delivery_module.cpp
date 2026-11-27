@@ -1568,6 +1568,14 @@ LOGOS_TEST(a_caller_supplied_mix_registry_the_preset_does_not_serve_is_refused) 
              Refused{R"({"logos.test":{"enabled":true,"registry-id":"reg","epoch-size-sec":10,"max-epoch-gap":3}})",
                      R"({"preset":"logos.test","mix":true,"mix-rln-registry-id":"reg"})",
                      "the preset names no mix registry"},
+             // The config drops both memberships: the key still names one the
+             // node does not take, the preset's own registry included.
+             Refused{kRlnPresetTableWithMix,
+                     R"({"preset":"logos.test","rln-relay":false,"mix":false,"mix-rln-registry-id":"mixreg"})",
+                     "this node takes no Mix membership"},
+             Refused{kRlnPresetTable,
+                     R"({"preset":"logos.test","rln-relay":false,"mix-rln-registry-id":"reg"})",
+                     "this node takes no Mix membership"},
          }) {
         RlnPresetsFile presets(r.table);
         DeliveryModuleImpl impl;
@@ -1577,6 +1585,44 @@ LOGOS_TEST(a_caller_supplied_mix_registry_the_preset_does_not_serve_is_refused) 
         LOGOS_ASSERT_TRUE(result.error.find(r.needle) != std::string::npos);
     }
     LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_create"));
+}
+
+// A key that decides the memberships, with a value relayRlnIsOn / mixIsOn would
+// not read, fails createNode before the plugin is installed: ignored, it would
+// leave on a membership the caller meant to drop.
+LOGOS_TEST(a_wrong_typed_membership_key_is_refused_before_the_plugin_is_installed) {
+    auto t = LogosTestContext("delivery_module");
+    delivery_test_rln::resetRlnMockState();
+    RlnPresetsFile presets(kRlnPresetTableWithMix);
+    t.mockCFunction("logosdelivery_ctx_create").returns(1);
+
+    struct Refused { const char* cfg; const char* needle; };
+    for (const Refused& r : {
+             Refused{R"({"preset":"logos.test","messagingOverrides":{"rln-relay":"false"}})",
+                     "rln-relay must be a boolean"},
+             Refused{R"({"preset":"logos.test","kernelConf":{"rlnRelay":0}})",
+                     "rlnRelay must be a boolean"},
+             Refused{R"({"preset":"logos.test","mix":"no"})", "mix must be a boolean"},
+             Refused{R"({"preset":"logos.test","messagingOverrides":{"anonymityLevel":"Off"}})",
+                     "anonymityLevel must be one of None, Preferred, Required"},
+             Refused{R"({"preset":"logos.test","anonymity-level":2})",
+                     "anonymity-level must be one of None, Preferred, Required"},
+             Refused{R"({"preset":"logos.test","rln-relay-eth-contract-address":1})",
+                     "rln-relay-eth-contract-address must be a string"},
+         }) {
+        DeliveryModuleImpl impl;
+        const auto result = impl.createNode(r.cfg);
+        LOGOS_ASSERT_FALSE(result.success);
+        LOGOS_ASSERT_TRUE(result.error.find(r.needle) != std::string::npos);
+    }
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_rln_set_plugin"));
+    LOGOS_ASSERT_FALSE(t.cFunctionCalled("logosdelivery_ctx_create"));
+
+    // Any spelling and case of a level passes.
+    DeliveryModuleImpl impl;
+    LOGOS_ASSERT_TRUE(
+        impl.createNode(R"({"preset":"logos.test","messagingOverrides":{"anonymityLevel":"preferred","rln-relay":true}})")
+            .success);
 }
 
 // A host that manages the backend names the registries in its own start, so
@@ -2325,8 +2371,8 @@ LOGOS_TEST(the_backend_start_config_for_mix_rln_only) {
     LOGOS_ASSERT_EQ(start["registries"][0].value("registry_id", ""), std::string("mixreg"));
 }
 
-// Mix as the delivery library decides it: a level above None, else `mix`,
-// else the network preset.
+// Mix as the delivery library decides it: `mix: true` whatever the level, else
+// a level above None, else `mix`, else the network preset.
 LOGOS_TEST(mixIsOn_follows_the_library_rule) {
     const auto on = [](const char* cfg, const char* preset) {
         return mixIsOn(nlohmann::json::parse(cfg), preset);
@@ -2345,6 +2391,11 @@ LOGOS_TEST(mixIsOn_follows_the_library_rule) {
     LOGOS_ASSERT_FALSE(on(R"({"messagingOverrides":{"anonymityLevel":"None"}})", "logos.dev"));
     LOGOS_ASSERT_TRUE(on(R"({"messagingOverrides":{"anonymity-level":"Preferred"}})", ""));
     LOGOS_ASSERT_TRUE(on(R"({"anonymityLevel":"Required"})", ""));
+    // `mix: true` mounts Mix at level None too: the library keeps a set `mix`,
+    // and only a level above None forces it on (logos_delivery_conf.nim).
+    LOGOS_ASSERT_TRUE(on(R"({"messagingOverrides":{"mix":true,"anonymityLevel":"None"}})", ""));
+    LOGOS_ASSERT_TRUE(
+        on(R"({"messagingOverrides":{"mix":true,"anonymityLevel":"None"}})", "logos.dev"));
     // The kernel entry reads no level.
     LOGOS_ASSERT_FALSE(on(R"({"entryLayer":"kernel","anonymityLevel":"Required"})", ""));
 }

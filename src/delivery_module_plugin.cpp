@@ -603,7 +603,12 @@ RlnMode configMode(const nlohmann::json& cfg)
 }
 
 // The objects the library reads node keys from, in the order a later one
-// wins: the top level (flat shape), kernelConf, messagingOverrides.
+// wins: the top level (flat shape), kernelConf, messagingOverrides. This
+// module reads these keys through it, each in every spelling findKey matches:
+// `rln-relay`, `rln-relay-eth-contract-address`, `rln-relay-cred-path`
+// (relayRlnIsOn), `mix`, `anonymityLevel` (mixIsOn) and
+// `mix-rln-registry-id` (callerMixRegistryError); membershipKeyError checks
+// the types of the first five.
 static std::vector<const nlohmann::json*> configLayers(const nlohmann::json& cfgObj)
 {
     std::vector<const nlohmann::json*> layers{&cfgObj};
@@ -637,9 +642,11 @@ static bool libraryPresetRunsMix(const std::string& preset)
 }
 
 // Whether the node mounts Mix, as the delivery library decides it
-// (api/conf/logos_delivery_conf.nim): an anonymity level above None turns it
-// on; without a level, `mix` decides; without either, the network preset
-// (libraryPresetRunsMix). The kernel entry reads no level.
+// (api/conf/logos_delivery_conf.nim): `mix: true` mounts it whatever the
+// anonymity level, a level of None included; otherwise a level above None
+// turns it on and None leaves it off; without a level, `mix` decides; without
+// either, the network preset (libraryPresetRunsMix). The kernel entry reads no
+// level.
 bool mixIsOn(const nlohmann::json& cfgObj, const std::string& preset)
 {
     if (!cfgObj.is_object()) {
@@ -699,6 +706,46 @@ RlnPresetEntry nodeRlnPreset(const RlnPresetEntry& preset, const nlohmann::json&
     return node;
 }
 
+// Why a key that decides the node's memberships (relayRlnIsOn, mixIsOn) has a
+// value they would not read; empty when every one, in every layer, is usable.
+// A `"false"` string, a number or a misspelt level would otherwise be ignored
+// and leave a membership on that the caller meant to drop.
+static std::string membershipKeyError(const nlohmann::json& cfgObj)
+{
+    struct Key {
+        std::initializer_list<const char*> names;
+        const char* expected;
+        bool (*valid)(const nlohmann::json&);
+    };
+    static const auto isBool = [](const nlohmann::json& v) { return v.is_boolean(); };
+    static const auto isString = [](const nlohmann::json& v) { return v.is_string(); };
+    static const auto isLevel = [](const nlohmann::json& v) {
+        if (!v.is_string()) {
+            return false;
+        }
+        const std::string level = toLowerCopy(v.get<std::string>());
+        return level == "none" || level == "preferred" || level == "required";
+    };
+    const Key keys[] = {
+        {{"rln-relay", "rlnrelay"}, "a boolean", isBool},
+        {{"mix"}, "a boolean", isBool},
+        {{"anonymitylevel", "anonymity-level"}, "one of None, Preferred, Required", isLevel},
+        {{"rln-relay-eth-contract-address", "rlnrelayethcontractaddress", "rlncontractaddress"},
+         "a string",
+         isString},
+        {{"rln-relay-cred-path", "rlnrelaycredpath"}, "a string", isString},
+    };
+    for (const nlohmann::json* layer : configLayers(cfgObj)) {
+        for (const Key& key : keys) {
+            if (const auto name = findKey(*layer, key.names);
+                name && !key.valid((*layer)[*name])) {
+                return *name + " must be " + key.expected + ", not " + (*layer)[*name].dump();
+            }
+        }
+    }
+    return {};
+}
+
 // Why the caller's mix-rln-registry-id is not the registry the backend serves
 // for Mix; empty when it is.
 static std::string callerMixRegistryError(const nlohmann::json& value, const RlnPresetEntry& preset)
@@ -725,10 +772,12 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 // accepts it: kernelConf when present, messagingOverrides (created if needed)
 // for the layered shapes, top level for a bare WakuNodeConf. A
 // mix-rln-registry-id the caller wrote, in any of those objects, must pass
-// callerMixRegistryError. nullopt on failure, with the createNode error in
-// `error`.
+// callerMixRegistryError. `namedPreset` is the preset as named, `preset` the
+// memberships this node takes (nodeRlnPreset). nullopt on failure, with the
+// createNode error in `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
+                                                      const RlnPresetEntry& namedPreset,
                                                       const RlnPresetEntry& preset,
                                                       std::string& error)
 {
@@ -748,9 +797,16 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         return std::nullopt;
     }
 
+    error = membershipKeyError(cfgObj);
+    if (!error.empty()) {
+        return std::nullopt;
+    }
+
     // Checked only when this module starts the backend: a host-managed one
-    // serves registries the preset does not describe.
-    if (preset.runsRln() && preset.manageBackend) {
+    // serves registries the preset does not describe. Gated on the named
+    // preset, so a node whose config drops both memberships is still checked:
+    // a mix-rln-registry-id there names a membership it does not take.
+    if (namedPreset.runsRln() && namedPreset.manageBackend) {
         // Every object the library reads node keys from, whichever exist, and
         // every spelling of the key findKey's lower-casing matches.
         for (const nlohmann::json* layer : configLayers(cfgObj)) {
@@ -850,7 +906,8 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
     const RlnPresetEntry rlnPreset = nodeRlnPreset(namedPreset, cfgObj, presetName);
 
     std::string cfgError;
-    auto cfgWithDefaults = applyConfigDefaults(cfg, instancePersistencePath(), rlnPreset, cfgError);
+    auto cfgWithDefaults =
+        applyConfigDefaults(cfg, instancePersistencePath(), namedPreset, rlnPreset, cfgError);
     if (!cfgWithDefaults) {
         return {false, {}, cfgError};
     }

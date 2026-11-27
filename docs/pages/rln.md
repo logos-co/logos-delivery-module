@@ -41,7 +41,7 @@ decides which exist; the `createNode` config can only drop one, never add one:
 | Membership | The preset has it with | The config drops it with |
 |---|---|---|
 | relay RLN | `enabled: true` | `rln-relay: false`, or an `rln-relay-eth-contract-address` or `rln-relay-cred-path` (the library's on-chain backend instead) |
-| Mix RLN | `mix-registry-id` | anything that leaves Mix off, by the library's rule: an anonymity level of `None`, else `mix: false`, else a network preset that runs no Mix (Mix runs by default on `logos.dev` and `logos.test`) |
+| Mix RLN | `mix-registry-id` | anything that leaves Mix off, by the library's rule: `mix: true` keeps Mix on whatever the anonymity level; otherwise a level of `None`, else `mix: false`, else a network preset that runs no Mix (Mix runs by default on `logos.dev` and `logos.test`) |
 
 Either key may be in any layer the library reads (top level, `kernelConf`,
 `messagingOverrides`). With relay RLN dropped, or with a preset that has only a
