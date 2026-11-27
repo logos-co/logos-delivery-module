@@ -27,11 +27,13 @@ intro: |
   through a real `logosctl` daemon, a green run is real evidence that this change
   keeps the delivery module loadable and callable.
 
-  This walkthrough runs on Linux and macOS. On Windows, CI only cross-builds
-  the module: it cannot be loaded there, because the RLN chain it requires
-  includes `membership_allocation_client_module`, which has no Windows build.
+  On Windows, CI cross-builds the module and the RLN modules it requires, and
+  uses a staged native `logosctl` host to load them and create a node with RLN
+  (Rate Limiting Nullifier) off. `libp2p_module`, which has no Windows build,
+  is left out. That leg uses an offline config, verifies RLN stays disabled,
+  and stops before `start`, which requires network access.
 
-what_you_build: "This `delivery_module`, packaged as `.lgx` and installed into a `logosctl` session on Linux/macOS."
+what_you_build: "This `delivery_module`, packaged as `.lgx` and installed into a `logosctl` session on Linux/macOS, then loaded by a native `logosctl` daemon on Windows."
 
 what_you_learn:
   - How to build the `logosctl` runtime from its flake
@@ -42,6 +44,7 @@ what_you_learn:
   - How to create and start a delivery node with `createNode` and `start`
   - How to tell a created node from a running one, and read its connection status
   - How to shut the daemon down and confirm it has exited
+  - How to load the module and its RLN dependencies and create a node on Windows
 
 prerequisites:
   - |
@@ -53,7 +56,7 @@ prerequisites:
     ```
 
     Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
-  - "**A Linux or macOS machine.**"
+  - "**A Linux or macOS machine for the package walkthrough.** The Windows section runs in CI against staged cross-built artifacts."
 
 sections:
   - title: "Build logosctl"
@@ -151,7 +154,7 @@ sections:
         run: |
           nix build 'github:logos-co/logos-rln-module/992fab9747aa84a3c72a36176470dccf226130f6#lgx' -o rln-lgx
           nix build 'github:logos-co/logos-rln-lez-module/5a3b87dd0fecf22e97ce81603eba348d2bff69cc#lgx' -o rln-lez-lgx
-          nix build 'github:logos-co/logos-membership-allocation-client-module/ea9f179f1bfaab1b770600d4c6371b88fd02a029#lgx' -o allocation-client-lgx
+          nix build 'github:igor-sirotin/logos-membership-allocation-client-module/82660ca1b8cb19118b2ce1cba72752fc6baa4897#lgx' -o allocation-client-lgx
           cp -f rln-lgx/*.lgx rln-lez-lgx/*.lgx allocation-client-lgx/*.lgx packages/
         post_text: "Three more `.lgx` packages, one per module in the chain:"
         extra_run:
@@ -369,3 +372,83 @@ sections:
         code_block: "logosctl daemon status"
         expect_contains:
           - '"status":"not_running"'
+
+  - title: "Create a Windows node with the RLN modules installed"
+    platform: windows
+    step: true
+    text: |
+      CI stages the Windows modules, their DLLs, and a native `logosctl` host.
+      Copy `delivery_module` and the RLN chain it requires into a private
+      session's `modules/` directory, then start a daemon on that session and
+      use an offline node config. The shared Windows runner provides `run` to
+      launch each staged executable.
+    steps:
+      - title: "Stage the delivery module and the RLN chain"
+        run: |
+          mkdir -p windows-smoke-config/modules
+          cp -R install-portable/modules/delivery_module windows-smoke-config/modules/
+          for m in rln_module rln_lez_module membership_allocation_client_module; do
+            cp -R "$m-install-portable/modules/$m" windows-smoke-config/modules/
+          done
+        check_file: windows-smoke-config/modules/rln_module/manifest.json
+
+      - title: "Write an offline node config"
+        file:
+          path: windows-smoke-node.json
+          language: json
+          content: |
+            {"logLevel":"INFO"}
+
+      - title: "Start the Windows daemon"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon start --detach"
+        expect_contains:
+          - "Daemon started"
+
+      - title: "Discover the modules"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module ls"
+        expect_contains:
+          - '"name":"delivery_module"'
+          - '"name":"rln_module"'
+          - '"name":"membership_allocation_client_module"'
+
+      - title: "Load the module with its RLN dependencies"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module load delivery_module"
+        expect_contains:
+          - '"status":"ok"'
+          - '"dependencies_loaded":['
+          - '"rln_module"'
+          - '"membership_allocation_client_module"'
+
+      - title: "Confirm the RLN modules are loaded"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon status"
+        expect_contains:
+          - '"name":"delivery_module","status":"loaded"'
+          - '"name":"rln_module","status":"loaded"'
+          - '"name":"rln_lez_module","status":"loaded"'
+          - '"name":"membership_allocation_client_module","status":"loaded"'
+
+      - title: "Inspect the module methods"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module show delivery_module"
+        expect_contains:
+          - '"name":"delivery_module"'
+          - '"name":"createNode"'
+
+      - title: "Create an offline delivery node"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json"
+        expect_contains:
+          - '"success":true'
+
+      - title: "Confirm RLN remains disabled"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module rlnState"
+        expect_contains:
+          - '"state":"Disabled"'
+
+      - title: "Confirm the node is created but not running"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module getNodeInfo IsRunning"
+        expect_contains:
+          - '"value":"false"'
+
+      - title: "Stop the Windows daemon"
+        run: "run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon stop"
+        expect_contains:
+          - '"status":"ok"'

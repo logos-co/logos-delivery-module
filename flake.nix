@@ -23,6 +23,7 @@
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module?ref=refs/tags/v1.1.1";
     rln_module = {
       url = "github:logos-co/logos-rln-module/992fab9747aa84a3c72a36176470dccf226130f6";
+      inputs.membership_allocation_client_module.url = "github:igor-sirotin/logos-membership-allocation-client-module/82660ca1b8cb19118b2ce1cba72752fc6baa4897";
       inputs.membership_allocation_client_module.inputs.libp2p_module.follows = "libp2p_module";
     };
     # rln_module's own dependencies, at the revs its lock pins (relock with
@@ -152,7 +153,7 @@
       };
 
       # The module dependencies (the RLN chain, optional libp2p), re-exported
-      # from their top-level inputs as `<name>-lgx`.
+      # from their top-level inputs as `<name>-<lgx|install-portable|default>`.
       reexported = [
         "rln_module"
         "rln_lez_module"
@@ -171,6 +172,8 @@
       packages = builtins.mapAttrs (system: pkgs: pkgs // (
         builtins.foldl' (acc: name:
           acc // (reexport system name "lgx")
+          // (reexport system name "install-portable")
+          // (reexport system name "default")
         ) { } reexported
       )) module.packages;
     };

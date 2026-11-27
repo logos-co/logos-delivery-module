@@ -134,11 +134,29 @@ jobs:
           echo "Generated markdown successfully"
 
   windows:
-    # Compile-only: the required RLN chain has no Windows build.
+    # Shared CI stages logosctl from the logos-logoscore-cli flake, as the Unix
+    # doctests do.
     uses: logos-co/logos-windows-ci/.github/workflows/windows-ci.yml@v1
     secrets: inherit
     with:
-      targets: default install-portable
+      # Stage each module's DLL closure and installable layout.
+      targets: >-
+        default install-portable
+        rln_module-default rln_module-install-portable
+        rln_lez_module-default rln_lez_module-install-portable
+        membership_allocation_client_module-default membership_allocation_client_module-install-portable
+      extra-targets: >-
+        {"windows-logosctl": {
+          "ref": "github:logos-co/logos-logoscore-cli#packages.x86_64-windows.ctl-bundle-dir",
+          "omit": ["lib/qt-6/plugins"]
+        }}
+      assemble: >-
+        {"install-portable": ["default/lib", "windows-logosctl/bin"],
+         "rln_module-install-portable": ["rln_module-default/lib", "windows-logosctl/bin"],
+         "rln_lez_module-install-portable": ["rln_lez_module-default/lib", "windows-logosctl/bin"],
+         "membership_allocation_client_module-install-portable": ["membership_allocation_client_module-default/lib", "windows-logosctl/bin"]}
+      doctest-spec: doctests/delivery-module-runtime.test.yaml
+      doctest-artifact: delivery-doctest-report
 
   publish-report:
     name: Publish report to GitHub Pages
