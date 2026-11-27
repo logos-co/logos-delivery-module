@@ -84,9 +84,8 @@ freshly published message should pin `arg3` to `"live"`.
 starts the standalone LEZ sequencer on the worker's docker network and deploys an RLN
 registry on it with logos-lez-rln's `run_setup`. Nodes read the sequencer's URL from
 `LEZ_RLN_SEQUENCER` and the registry id from the presets file named by
-`LOGOS_DELIVERY_RLN_PRESETS`. After `lez_registry.fund` funds a node's LEZ payer, the
-node's RLN module registers a membership by itself. Funding waits for the chain's `CLOCK_50`,
-because the registry refuses registrations before it.
+`LOGOS_DELIVERY_RLN_PRESETS`. After `lez_registry.fund` funds a node's LEZ payer by its
+public key, the node's RLN module registers a membership by itself.
 
 A node on the LEZ testnet starts from `lez_wallet` and sends with `rln_membership`. A LEZ
 wallet syncs the chain from the block after its last synced one, and RLN waits for that

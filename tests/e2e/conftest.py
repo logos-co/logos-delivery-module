@@ -44,7 +44,6 @@ from libs.helpers import (
     RLN_PRESETS_FILE,
     DeliveryNode,
     current_epoch,
-    lez_clock_ms,
     lez_last_block_id,
     lez_rpc,
     make_rln_presets,
@@ -61,8 +60,10 @@ LEZ_WALLET_TIMEOUT_S = 60.0
 LEZ_TESTNET_TIMEOUT_S = 60.0
 UNREACHABLE_SEQUENCER = "http://127.0.0.1:1"
 
-LEZ_START_TIMEOUT_S = 20.0
-LEZ_CLOCK_TIMEOUT_S = 75.0
+LEZ_START_TIMEOUT_S = 60.0
+LEZ_SEQUENCER_HOME = "/var/lib/sequencer_service"
+# The standalone sequencer's default in logos-lez-rln's dev.sh.
+LEZ_BEDROCK_FUNDING_PUBLIC_KEY = "2e03b2eff5a45478e7e79668d2a146cf2c5c7925bce927f2b1c67f2ab4fc0d26"
 LEZ_RLN_TOOL_TIMEOUT_S = 120.0
 LEZ_GENESIS_BALANCE = 10**13
 # A registration needs the price (100 × 10,000) plus a fee reserve of at most 646,400,000.
@@ -70,8 +71,8 @@ LEZ_PAYER_FUNDING = 10**10
 
 
 class LezRegistry(NamedTuple):
-    """An RLN registry on a local LEZ sequencer. `fund` sends native balance to an
-    account id once CLOCK_50 has ticked."""
+    """An RLN registry on a local LEZ sequencer. `fund` sends native balance to the
+    account of a public key (64 hex)."""
 
     registry_id: str
     sequencer_url: str
@@ -294,28 +295,34 @@ def shared_docker_network(_e2e_env: tuple[str, Path], worker_id: str) -> Iterato
         _remove_network(name)
 
 
-def _lez_sequencer_config(payer: str) -> dict:
-    """`lez/sequencer/service/configs/docker/sequencer_config.json`, with
-    `payer` as the only genesis account and 500 ms blocks so CLOCK_50 ticks within half
-    a minute."""
+def _lez_sequencer_config(payer_public_key: str) -> dict:
+    """`lez/sequencer/service/networks/local.json`, with the account of
+    `payer_public_key` as the only genesis account and 500 ms blocks."""
     return {
-        "home": "/var/lib/sequencer_service",
+        "home": LEZ_SEQUENCER_HOME,
         "max_num_tx_in_block": 20,
         "mempool_max_size": 10000,
         "block_create_timeout": "500ms",
-        "retry_pending_blocks_timeout": "7s",
-        "bedrock_config": {
-            "channel_id": "01" * 32,
-            "node_url": "http://host.docker.internal:18080",
-            "funding_key": "2e03b2eff5a45478e7e79668d2a146cf2c5c7925bce927f2b1c67f2ab4fc0d26",
+        "retry_pending_blocks_timeout": "5s",
+        "bedrock_config": {"channel_id": "01" * 32, "node_url": "http://localhost:18080"},
+        "genesis": {
             "channel_params": {
                 "minimum_sequencer_stake": 149,
                 "posting_timeframe": 300,
                 "posting_timeout": 25,
                 "exit_delay": 100,
+                "max_block_size": 1048576,
             },
+            "actions": [
+                {
+                    "supply_account": {
+                        "recipient": {"identified": {"key": payer_public_key}},
+                        "balance": LEZ_GENESIS_BALANCE,
+                    }
+                }
+            ],
         },
-        "genesis": [{"supply_account": {"account_id": payer, "balance": LEZ_GENESIS_BALANCE}}],
+        "gossip": {"listen_addr": "/ip4/0.0.0.0/udp/0/quic-v1", "bootstrap_peers": []},
     }
 
 
@@ -366,7 +373,11 @@ def _start_lez_sequencer(image: str, network: str, sequencer_config: Path) -> st
             "docker", "run", "-d", "--name", container_name, "--network", network,
             "-p", f"127.0.0.1::{LEZ_SEQUENCER_PORT}",
             "-v", f"{sequencer_config}:/etc/sequencer_service/sequencer_config.json:ro",
-            image,
+            image, "sh", "-c",
+            f"sequencer_service setup {LEZ_SEQUENCER_HOME}"
+            " --config /etc/sequencer_service/sequencer_config.json"
+            f" --funding-public-key {LEZ_BEDROCK_FUNDING_PUBLIC_KEY} --create-channel"
+            " && exec sequencer_service start",
         ],
         capture_output=True, text=True,
     )
@@ -404,14 +415,13 @@ def lez_registry(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[LezRegistry]:
     """An RLN registry deployed with `run_setup` on a local LEZ sequencer in
-    `shared_docker_network`. `fund` waits for CLOCK_50, because the registry refuses
-    registrations before it."""
+    `shared_docker_network`."""
     image = os.environ["E2E_LEZ_SEQUENCER_IMAGE"]
     lez_rln = Path(os.environ["E2E_LEZ_RLN_DIR"]) / "lez-rln"
     home = tmp_path_factory.mktemp("lez-rln-home")
-    payer = _lez_rln_tool(lez_rln, "mint_payer", home).split()[-1]
+    payer, payer_public_key = _lez_rln_tool(lez_rln, "mint_payer", home).split()[-2:]
     sequencer_config = home / "sequencer_config.json"
-    sequencer_config.write_text(json.dumps(_lez_sequencer_config(payer)))
+    sequencer_config.write_text(json.dumps(_lez_sequencer_config(payer_public_key)))
     container_name = _start_lez_sequencer(image, shared_docker_network, sequencer_config)
     try:
         host_url = _lez_host_url(container_name)
@@ -423,15 +433,10 @@ def lez_registry(
         )
         config_account = _run_setup(lez_rln, home, payer)
 
-        def fund(account_id: str) -> None:
-            wait_until(
-                lambda: lez_clock_ms(host_url) > 0,
-                timeout=LEZ_CLOCK_TIMEOUT_S,
-                interval=1.0,
-                message="CLOCK_50 never ticked",
-            )
+        def fund(public_key: str) -> None:
             _lez_rln_tool(
-                lez_rln, "fund_account", home, "--to", account_id, "--amount", str(LEZ_PAYER_FUNDING),
+                lez_rln, "fund_account", home,
+                "--to-public-key", public_key, "--amount", str(LEZ_PAYER_FUNDING),
                 env={"LEZ_RLN_PAYER": payer},
             )
 
