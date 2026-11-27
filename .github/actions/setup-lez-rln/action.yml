@@ -27,7 +27,7 @@ inputs:
     description: The rzup, from crates.io, that installs cargo-risczero and the risc0 Rust toolchain.
     default: 0.5.2
   cargo-risczero-version:
-    description: The cargo-risczero that builds the guest programs.
+    description: The cargo-risczero that builds the guest programs, and the r0vm the tools run them with.
     default: 3.0.5
   risc0-rust-version:
     description: The risc0 Rust toolchain cargo-risczero checks for.
@@ -86,6 +86,14 @@ runs:
           ${{ runner.temp }}/logos-lez-rln/lez-rln/target/release/fund_account
           ${{ runner.temp }}/logos-lez-rln/lez-rln/methods/guest/target/riscv32im-risc0-zkvm-elf/docker/*.bin
         key: ${{ steps.lez-rln.outputs.cache-primary-key }}
+
+    # logos-lez-rln's tools simulate each transaction with r0vm before sending it.
+    - name: Install r0vm
+      shell: bash
+      run: |
+        command -v rzup >/dev/null || cargo install rzup --version ${{ inputs.rzup-version }} --locked
+        rzup install r0vm ${{ inputs.cargo-risczero-version }}
+        echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
 
     - name: Export E2E_LEZ_RLN_DIR
       shell: bash
