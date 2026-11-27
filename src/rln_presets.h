@@ -156,7 +156,7 @@ std::string parseRlnPresetTable(const std::string& json,
  *
  * Of the built-in presets `logos.test` has relay RLN on (the LEZ testnet
  * registry, 600 s epochs, validation off) and `logos.dev` relay and Mix RLN
- * (placeholder registries), both at @ref kDefaultRlnModeRates; `""` ships
+ * (the LEZ devnet registries), both at @ref kDefaultRlnModeRates; `""` ships
  * with it off. The file named by
  * @ref kRlnPresetsEnvVar is merged over them, which is how a test or local
  * deployment supplies its own registry with no public API for it. That file

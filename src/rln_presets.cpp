@@ -58,9 +58,7 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
         {"", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
-        // logos.dev runs relay RLN and Mix RLN. TODO(D1): the registry ids,
-        // epoch size and metadata topic are placeholders until the logos.dev
-        // LEZ deployment is chosen; a node on them cannot register yet.
+        // logos.dev runs relay RLN and Mix RLN on the LEZ devnet registries.
         {"logos.dev",
          RlnPresetEntry{.enabled = true,
                         .registryId = "logos:devnet:570ed6252ddb9333458460f6342a221bf2b7bc7ececbe99957f165c00b15de1b",

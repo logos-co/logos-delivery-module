@@ -31,9 +31,7 @@ limiting that network runs.
 
 Of the shipped presets `logos.test` runs relay RLN and `logos.dev` runs relay
 RLN and Mix RLN; the preset-less `""` has it off (see
-[`networks.md`](./networks.md)). The `logos.dev` registries, epoch size and
-metadata topic are placeholders until its LEZ deployment is chosen: a node on
-them cannot register yet.
+[`networks.md`](./networks.md)). `logos.dev` uses the LEZ devnet registries.
 
 Relay (messaging) RLN and Mix RLN are independent memberships. The preset
 decides which exist; the `createNode` config can only drop one, never add one:
