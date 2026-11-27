@@ -14,8 +14,8 @@ delivery-module commit end-to-end through the headless `logosctl` runtime:
    module you run is built from exactly what is checked out here, not the latest
    published release.
 3. Start the `logosctl` daemon and install the `.lgx` into its session,
-   together with the optional `libp2p_module` and RLN modules
-   `delivery_module` can use.
+   together with the RLN modules `delivery_module` requires and the
+   optional `libp2p_module`.
 4. Load `delivery_module`, introspect it with `module show`, call
    `createNode` with a Waku node config, then call `start` — verifying the
    module actually runs and boots a delivery node.
@@ -24,13 +24,11 @@ Because the module is built from the commit under test and then loaded and calle
 through a real `logosctl` daemon, a green run is real evidence that this change
 keeps the delivery module loadable and callable.
 
-On Windows, CI cross-builds the module and uses a staged native `logosctl`
-host to create a node without RLN (Rate Limiting Nullifier), the optional
-rate-limiting feature, and without `libp2p_module`, which has no Windows
-build. That leg uses an offline config, verifies RLN stays disabled, and
-stops before `start`, which requires network access.
+This walkthrough runs on Linux and macOS. On Windows, CI only cross-builds
+the module: it cannot be loaded there, because the RLN chain it requires
+includes `membership_allocation_client_module`, which has no Windows build.
 
-**What you'll build:** This `delivery_module`, packaged as `.lgx` and installed into a `logosctl` session on Linux/macOS, then loaded by a native `logosctl` daemon on Windows.
+**What you'll build:** This `delivery_module`, packaged as `.lgx` and installed into a `logosctl` session on Linux/macOS.
 
 **What you'll learn:**
 
@@ -42,7 +40,6 @@ stops before `start`, which requires network access.
 - How to create and start a delivery node with `createNode` and `start`
 - How to tell a created node from a running one, and read its connection status
 - How to shut the daemon down and confirm it has exited
-- How to load the module and create a node on Windows without its optional RLN rate-limiting dependency
 
 ## Prerequisites
 
@@ -55,7 +52,7 @@ echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
 
 Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
 
-- **A Linux or macOS machine for the package walkthrough.** The Windows section runs in CI against staged cross-built artifacts.
+- **A Linux or macOS machine.**
 
 ---
 
@@ -81,7 +78,8 @@ modules). The daemon scans that directory on its own.
 ## Step 2: Build this delivery module
 
 Build **this** delivery module's `.lgx` straight from its flake's `#lgx`
-output, along with the optional `libp2p_module` and RLN modules. Each
+output, along with the RLN modules it requires and the optional
+`libp2p_module`. Each
 build drops its package into `./packages/`, which the next section
 installs into a `logosctl` session in one go. Every module built with
 [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
@@ -142,12 +140,12 @@ ls packages/
 
 ### 2.3 Build the RLN dependency chain
 
-`rln_module` is an optional dependency of `delivery_module`:
-a node whose preset has RLN off loads without it. A node on an
-RLN-enabled preset needs the whole chain installed alongside it —
-`rln_module` → `rln_lez_module` (the registry provider) and
+`rln_module` is a required dependency of `delivery_module`: the
+module does not load unless the whole chain is installed alongside
+it — `rln_module` → `rln_lez_module` (the registry provider) and
 `membership_allocation_client_module` (the allocator client, which
-brings its own libp2p node) — so this walkthrough installs it too.
+brings its own libp2p node). That holds even for a node whose preset
+has RLN off.
 
 Each is built at the rev this module's `flake.lock` pins for it, so
 the RLN modules you install are the ones the delivery module was
@@ -278,9 +276,8 @@ logosctl module ls
 
 ### 3.8 Load the module
 
-Load `delivery_module` into the running daemon. Its dependencies are
-all optional, so the host loads this module plus whichever of them are
-installed:
+Load `delivery_module` into the running daemon. The host loads the
+RLN chain it requires along with it:
 
 ```bash
 logosctl module load delivery_module
@@ -386,81 +383,4 @@ non-zero, so we add `|| true` to let the doc-test assert on the output:
 
 ```bash
 logosctl daemon status
-```
-
----
-
-## Step 4: Create a Windows node without the optional RLN module
-
-CI stages the Windows module, its DLLs, and a native `logosctl` host.
-Copy the module into a private session's `modules/` directory, then start
-a daemon on that session and use an offline node config. The shared
-Windows runner provides `run` to launch each staged executable.
-
-### 4.1 Stage the delivery module
-
-```bash
-mkdir -p windows-smoke-config/modules
-cp -R install-portable/modules/delivery_module windows-smoke-config/modules/
-
-```
-
-### 4.2 Write an offline node config
-
-```json
-{"logLevel":"INFO"}
-```
-
-### 4.3 Start the Windows daemon
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon start --detach
-```
-
-### 4.4 Discover the module
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module ls
-```
-
-### 4.5 Load the module without its optional RLN dependency
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module load delivery_module
-```
-
-### 4.6 Inspect the module methods
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config module show delivery_module
-```
-
-### 4.7 Create an offline delivery node
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module createNode @windows-smoke-node.json
-```
-
-### 4.8 Confirm RLN remains disabled
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module rlnState
-```
-
-### 4.9 Confirm the node is created but not running
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module getNodeInfo IsRunning
-```
-
-### 4.10 Read the connection status of the stopped node
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config call delivery_module getConnectionStatus
-```
-
-### 4.11 Stop the Windows daemon
-
-```bash
-run windows-logosctl/bin/logosctl.exe --config-dir ./windows-smoke-config daemon stop
 ```

@@ -19,7 +19,7 @@
       flake = false;
     };
     # Names are load-bearing: the builder resolves metadata.json's
-    # optional_dependencies as inputs of those names.
+    # dependencies and optional_dependencies as inputs of those names.
     libp2p_module.url = "git+https://github.com/logos-co/logos-libp2p-module?ref=refs/tags/v1.1.1";
     rln_module = {
       url = "github:logos-co/logos-rln-module/992fab9747aa84a3c72a36176470dccf226130f6";
@@ -151,7 +151,7 @@
         '';
       };
 
-      # The optional module dependencies (libp2p, the RLN chain), re-exported
+      # The module dependencies (the RLN chain, optional libp2p), re-exported
       # from their top-level inputs as `<name>-lgx`.
       reexported = [
         "rln_module"

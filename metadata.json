@@ -11,8 +11,8 @@
     "codegen": {
         "impl_header": "delivery_module_plugin.h"
     },
-    "dependencies": [],
-    "optional_dependencies": ["libp2p_module", "rln_module"],
+    "dependencies": ["rln_module"],
+    "optional_dependencies": ["libp2p_module"],
     "include": [
         "liblogosdelivery.so",
         "liblogosdelivery.dylib",
