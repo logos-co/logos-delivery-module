@@ -58,16 +58,7 @@ const std::map<std::string, RlnPresetEntry>& builtinPresets()
 {
     static const std::map<std::string, RlnPresetEntry> table = {
         {"", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
-        // logos.dev runs relay RLN and Mix RLN on the LEZ devnet registries.
-        {"logos.dev",
-         RlnPresetEntry{.enabled = true,
-                        .registryId = "logos:devnet:570ed6252ddb9333458460f6342a221bf2b7bc7ececbe99957f165c00b15de1b",
-                        .rlnIdentifier = kLogosDeliveryRlnIdentifier,
-                        .epochSizeSec = 600,
-                        .mixRegistryId = "logos:devnet:c0ce2ec618137995d2894fc612a9211022217731bfb23112a9aaa8162e9b278f",
-                        .mixRlnIdentifier = kMixRlnIdentifierV1,
-                        .mixMetadataTopic = "/logos-delivery/1/mix-rln-metadata/proto",
-                        .rates = kDefaultRlnModeRates}},
+        {"logos.dev", RlnPresetEntry{.enabled = false, .rlnIdentifier = kLogosDeliveryRlnIdentifier}},
         {"logos.test",
          RlnPresetEntry{.enabled = true,
                         .enableValidation = false,
