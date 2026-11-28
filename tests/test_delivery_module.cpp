@@ -945,105 +945,20 @@ LOGOS_TEST(builtin_logos_test_preset_installs_the_rln_plugin) {
     LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
 }
 
-// logos.dev carries no RLN: no plugin is installed, and the library is told
-// rln-relay is off, where the config shape takes it.
+// logos.dev carries no RLN: no plugin is installed and no RLN key is set.
 LOGOS_TEST(builtin_logos_dev_preset_leaves_rln_off) {
     auto t = LogosTestContext("delivery_module");
-    ::unsetenv(kRlnPresetsEnvVar);
-    t.mockCFunction("logosdelivery_ctx_create").returns(1);
-
-    {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.dev"})").success);
-        LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
-        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-        LOGOS_ASSERT_TRUE(libCfg.contains("rln-relay"));
-        LOGOS_ASSERT_FALSE(libCfg.value("rln-relay", true));
-        LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-registry-id"));
-        LOGOS_ASSERT_FALSE(libCfg.contains("mix"));
-        LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
-    }
-    {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(
-            impl.createNode(R"({"preset":"logos.dev","messagingOverrides":{"mix":false}})").success);
-        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-        LOGOS_ASSERT_FALSE(libCfg.contains("rln-relay"));
-        LOGOS_ASSERT_FALSE(libCfg["messagingOverrides"].value("rln-relay", true));
-    }
-    {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(
-            impl.createNode(R"({"preset":"logos.dev","kernelConf":{"relay":true}})").success);
-        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-        LOGOS_ASSERT_FALSE(libCfg["kernelConf"].value("rln-relay", true));
-    }
-}
-
-// A caller's own rln-relay, in any layer and spelling, is left as written, and
-// so is a config that picks the library's on-chain backend.
-LOGOS_TEST(logos_dev_preset_keeps_the_callers_relay_rln_choice) {
-    auto t = LogosTestContext("delivery_module");
-    ::unsetenv(kRlnPresetsEnvVar);
-    t.mockCFunction("logosdelivery_ctx_create").returns(1);
-
-    {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(R"({"preset":"logos.dev","rln-relay":true})").success);
-        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-        LOGOS_ASSERT_TRUE(libCfg.value("rln-relay", false));
-    }
-    {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(
-            impl.createNode(R"({"preset":"logos.dev","messagingOverrides":{"rlnRelay":true}})").success);
-        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-        LOGOS_ASSERT_FALSE(libCfg["messagingOverrides"].contains("rln-relay"));
-    }
-    {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(
-            R"({"preset":"logos.dev","rln-relay-eth-contract-address":"0xabc"})").success);
-        auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-        LOGOS_ASSERT_FALSE(libCfg.contains("rln-relay"));
-    }
-}
-
-// Only logos.dev is told: the other presets' relay RLN is the library's own.
-LOGOS_TEST(presets_other_than_logos_dev_get_no_rln_relay_key) {
-    auto t = LogosTestContext("delivery_module");
-    ::unsetenv(kRlnPresetsEnvVar);
-    t.mockCFunction("logosdelivery_ctx_create").returns(1);
-
-    for (const char* cfg : {R"({"preset":""})", R"({"preset":"twn"})",
-                            R"({"preset":"logos.test","messagingOverrides":{"mix":false}})"}) {
-        delivery_test_rln::resetRlnMockState();
-        DeliveryModuleImpl impl;
-        LOGOS_ASSERT_TRUE(impl.createNode(cfg).success);
-        LOGOS_ASSERT_TRUE(delivery_test_rln::g_lastCreateConfigJson.find("rln-relay\"")
-                          == std::string::npos);
-    }
-}
-
-// A presets file that turns relay RLN on for logos.dev leaves rln-relay unset.
-LOGOS_TEST(logos_dev_preset_file_with_relay_rln_sets_no_rln_relay_key) {
-    auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
-    RlnPresetsFile presets(
-        R"({"logos.dev":{"enabled":true,"registry-id":"reg","epoch-size-sec":600}})");
+    ::unsetenv(kRlnPresetsEnvVar);
     t.mockCFunction("logosdelivery_ctx_create").returns(1);
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.dev"})").success);
-    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
     auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-    LOGOS_ASSERT_FALSE(libCfg.contains("rln-relay"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-registry-id"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("rln-disable-validation"));
+    LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
 }
 
 // The empty preset carries no RLN, so naming it must not turn it on.

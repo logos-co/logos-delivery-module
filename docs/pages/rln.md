@@ -31,9 +31,6 @@ limiting that network runs.
 
 Of the shipped presets only `logos.test` runs RLN — relay RLN; `logos.dev`
 and the preset-less `""` have it off (see [`networks.md`](./networks.md)).
-The library's own `logos.dev` preset turns relay RLN on for a host's plugin,
-so on `logos.dev` this module passes `rln-relay: false` to the library unless
-the config sets `rln-relay` itself or a presets file turns relay RLN on.
 
 Relay (messaging) RLN and Mix RLN are independent memberships. The preset
 decides which exist; the `createNode` config can only drop one, never add one:

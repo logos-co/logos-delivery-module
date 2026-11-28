@@ -641,15 +641,6 @@ static bool libraryPresetRunsMix(const std::string& preset)
     return preset == "logos.dev" || preset == "logos.test";
 }
 
-// The delivery library's network presets that turn relay RLN on for a host's
-// plugin (`rlnRelay: true` with no contract address in networks_config.nim).
-// A relaying node on one fails to start unless a plugin is installed or
-// `rln-relay` is false.
-static bool libraryPresetExpectsRlnPlugin(const std::string& preset)
-{
-    return preset == "logos.dev";
-}
-
 // Whether the node mounts Mix, as the delivery library decides it
 // (api/conf/logos_delivery_conf.nim): `mix: true` mounts it whatever the
 // anonymity level, a level of None included; otherwise a level above None
@@ -776,8 +767,6 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 // side-by-side instances don't share upstream's cwd-relative "./data". Also
 // carries the preset's validation switch into the config as
 // rln-disable-validation: deployment policy, so it overrides any client key.
-// On a library preset that expects a host RLN plugin, with relay RLN off in
-// this module's preset, sets rln-relay false unless the caller decided it.
 // With a mix preset, sets each mix-rln-* key the caller left unset where the
 // target turns Mix on (mixIsOn). Each setting goes where the config shape
 // accepts it: kernelConf when present, messagingOverrides (created if needed)
@@ -788,7 +777,6 @@ static std::string callerMixRegistryError(const nlohmann::json& value, const Rln
 // createNode error in `error`.
 static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
                                                       const std::string& persistencePath,
-                                                      const std::string& presetName,
                                                       const RlnPresetEntry& namedPreset,
                                                       const RlnPresetEntry& preset,
                                                       std::string& error)
@@ -839,10 +827,7 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
     // `preset` is this node's (nodeRlnPreset): a mix registry is left only
     // when the node runs Mix.
     const bool mixRegistry = preset.hasMix();
-    const bool relayRlnOff =
-        !namedPreset.enabled && libraryPresetExpectsRlnPlugin(presetName)
-        && !lastValue(configLayers(cfgObj), {"rln-relay", "rlnrelay"}) && relayRlnIsOn(cfgObj);
-    if (!persistencePath.empty() || disableRlnValidation || mixRegistry || relayRlnOff) {
+    if (!persistencePath.empty() || disableRlnValidation || mixRegistry) {
         nlohmann::json* target = &cfgObj;
         const bool kernelEntry = isKernelEntry(cfgObj);
         if (auto kernelConfKey = findKey(cfgObj, {"kernelconf"});
@@ -866,9 +851,6 @@ static std::optional<std::string> applyConfigDefaults(const std::string& cfg,
         }
         if (target && disableRlnValidation) {
             (*target)["rln-disable-validation"] = true;
-        }
-        if (target && relayRlnOff) {
-            (*target)["rln-relay"] = false;
         }
         if (target && mixRegistry) {
             const auto callerSet = [&](const char* dashed, const char* joined) {
@@ -925,8 +907,7 @@ StdLogosResult DeliveryModuleImpl::createNode(const std::string& cfg)
 
     std::string cfgError;
     auto cfgWithDefaults =
-        applyConfigDefaults(cfg, instancePersistencePath(), presetName, namedPreset, rlnPreset,
-                            cfgError);
+        applyConfigDefaults(cfg, instancePersistencePath(), namedPreset, rlnPreset, cfgError);
     if (!cfgWithDefaults) {
         return {false, {}, cfgError};
     }
