@@ -93,12 +93,11 @@ funded payer on that registry's zone.
   reach the backend fails the start.
 - This module starts `rln_module` itself; the library does not. With
   `manage-backend: false` the host does.
-- `rln_module` is an `optional_dependency`, so the host loads it with this
-  module when it is installed and skips it when it is not: a node whose
-  preset has RLN off runs without the RLN stack installed at all. A node on
-  an RLN-enabled preset needs it — and its own deps, `rln_lez_module` and
-  `membership_allocation_client_module` —
-  installed next to this module, or bring-up ends in `Failed`.
+- `rln_module` is a required `dependency`: the host loads it with this
+  module, and loading this module fails when it — or one of its own deps,
+  `rln_lez_module` and `membership_allocation_client_module` — is not
+  installed. That holds for every node, including one whose preset has RLN
+  off: such a node loads the RLN stack but never starts it.
 - Bring-up fires one `start` from this module, naming every registry the
   node takes a membership on (the relay one, and the mix one when the preset
   has it) with its epoch and rate. If it fails, `rlnState` goes to `Failed`

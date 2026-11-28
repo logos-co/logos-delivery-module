@@ -52331,16 +52331,17 @@
         "logos-module-builder": "logos-module-builder_12"
       },
       "locked": {
-        "lastModified": 1795578810,
-        "narHash": "sha256-T4OqNw2hIZZ1UrKAvqeWe/4+j2+OZSjD0EjtXMG3m20=",
-        "owner": "logos-co",
+        "lastModified": 1795746642,
+        "narHash": "sha256-pN9ifhRknx1h3kcX2tf9e/jn3XIhkqudK/TSJZsnd6Y=",
+        "owner": "igor-sirotin",
         "repo": "logos-membership-allocation-client-module",
-        "rev": "ea9f179f1bfaab1b770600d4c6371b88fd02a029",
+        "rev": "82660ca1b8cb19118b2ce1cba72752fc6baa4897",
         "type": "github"
       },
       "original": {
-        "owner": "logos-co",
+        "owner": "igor-sirotin",
         "repo": "logos-membership-allocation-client-module",
+        "rev": "82660ca1b8cb19118b2ce1cba72752fc6baa4897",
         "type": "github"
       }
     },

@@ -1,5 +1,5 @@
 #include "rln_bridge.h"
-#include "rln_module_api.h" // generated from metadata.json#optional_dependencies
+#include "rln_module_api.h" // generated from metadata.json#dependencies
 
 #include <nlohmann/json.hpp>
 #include <stdexcept>

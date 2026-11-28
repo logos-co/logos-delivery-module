@@ -46,7 +46,7 @@
 
 struct StdLogosResult;
 namespace logos { struct CallError; }
-class RlnModule; // generated from metadata.json#optional_dependencies
+class RlnModule; // generated from metadata.json#dependencies
 
 class RlnBridge {
 public:
