@@ -29,9 +29,8 @@ epoch size, the application identifier — is a property of the deployment
 rather than of the caller. A client picks a network and gets whatever rate
 limiting that network runs.
 
-Of the shipped presets `logos.test` runs relay RLN and `logos.dev` runs relay
-RLN and Mix RLN; the preset-less `""` has it off (see
-[`networks.md`](./networks.md)). `logos.dev` uses the LEZ devnet registries.
+Of the shipped presets only `logos.test` runs RLN — relay RLN; `logos.dev`
+and the preset-less `""` have it off (see [`networks.md`](./networks.md)).
 
 Relay (messaging) RLN and Mix RLN are independent memberships. The preset
 decides which exist; the `createNode` config can only drop one, never add one:
@@ -179,7 +178,8 @@ module's own default (100). An allocator may grant less, a registry the node
 already holds a membership on keeps that membership's rate, and the RLN
 module refuses a rate outside the registry's bounds.
 
-The built-in `logos.dev` and `logos.test` presets run at the defaults:
+The built-in `logos.test` preset runs at the defaults, and so does a preset
+in this file that sets no rate:
 
 | Rate | Core | Edge |
 |---|---|---|
@@ -187,7 +187,7 @@ The built-in `logos.dev` and `logos.test` presets run at the defaults:
 | `mix-rate-limit` (Mix, 10 s epoch) | 100 | 20 |
 
 `logos.test` has no mix registry, so only its relay rate is asked. An entry
-for either name in this file replaces the built-in one, and a rate it leaves
+for a name in this file replaces the built-in one, and a rate it leaves
 out is again the default.
 
 ### How a membership is obtained

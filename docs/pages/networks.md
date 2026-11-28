@@ -42,11 +42,11 @@ dotless spelling (`logosdev`, `logostest`).
 
 The preset also selects the node's RLN settings — registry, epoch size and
 application identifier — which is why RLN needs no configuration of its own.
-`logos.test` runs relay RLN on the LEZ testnet registry; `logos.dev` runs
-relay RLN and Mix RLN on the LEZ devnet registries. A node on either needs
-the RLN modules, and an active RLN membership
-to send; see [`rln.md`](./rln.md) for how a preset turns
-it on and how a local deployment supplies its own.
+`logos.test` runs relay RLN on the LEZ testnet registry, so a node on it
+needs the RLN modules, and an active RLN membership to send. `logos.dev` runs
+with RLN off, relay and Mix alike: Mix routing stays on there, with no hop
+rate limited. See [`rln.md`](./rln.md) for how a preset turns RLN on and how
+a local deployment supplies its own.
 
 The live node list and status for both fleets is at
 [fleets.logos.co](https://fleets.logos.co/).

@@ -906,8 +906,8 @@ LOGOS_TEST(createNode_without_an_rln_preset_installs_no_plugin) {
     delete impl;
 }
 
-// logos.test ships relay RLN, logos.dev relay and Mix RLN; "" stays off.
-LOGOS_TEST(builtin_presets_enable_rln_on_logos_test_and_logos_dev) {
+// logos.test ships relay RLN; logos.dev and "" stay off.
+LOGOS_TEST(builtin_presets_enable_rln_on_logos_test_only) {
     ::unsetenv(kRlnPresetsEnvVar);
     std::string error;
 
@@ -924,9 +924,7 @@ LOGOS_TEST(builtin_presets_enable_rln_on_logos_test_and_logos_dev) {
 
     const RlnPresetEntry dev = resolveRlnPreset("logos.dev", error);
     LOGOS_ASSERT_TRUE(error.empty());
-    LOGOS_ASSERT_TRUE(dev.enabled);
-    LOGOS_ASSERT_TRUE(dev.hasMix());
-    LOGOS_ASSERT_EQ(dev.mixRlnIdentifier, std::string(kMixRlnIdentifierV1));
+    LOGOS_ASSERT_FALSE(dev.runsRln());
     LOGOS_ASSERT_FALSE(resolveRlnPreset("", error).enabled);
     LOGOS_ASSERT_TRUE(error.empty());
 }
@@ -947,8 +945,8 @@ LOGOS_TEST(builtin_logos_test_preset_installs_the_rln_plugin) {
     LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
 }
 
-// logos.dev runs relay RLN and, Mix being on by default there, Mix RLN.
-LOGOS_TEST(builtin_logos_dev_preset_runs_relay_and_mix_rln) {
+// logos.dev carries no RLN: no plugin is installed and no RLN key is set.
+LOGOS_TEST(builtin_logos_dev_preset_leaves_rln_off) {
     auto t = LogosTestContext("delivery_module");
     delivery_test_rln::resetRlnMockState();
     ::unsetenv(kRlnPresetsEnvVar);
@@ -956,10 +954,11 @@ LOGOS_TEST(builtin_logos_dev_preset_runs_relay_and_mix_rln) {
 
     DeliveryModuleImpl impl;
     LOGOS_ASSERT_TRUE(impl.createNode(R"({"logLevel":"INFO","preset":"logos.dev"})").success);
-    LOGOS_ASSERT_TRUE(delivery_test_rln::g_callbacksSet);
+    LOGOS_ASSERT_FALSE(delivery_test_rln::g_callbacksSet);
     auto libCfg = nlohmann::json::parse(delivery_test_rln::g_lastCreateConfigJson);
-    LOGOS_ASSERT_TRUE(libCfg.contains("mix-rln-registry-id"));
-    LOGOS_ASSERT_EQ(settledRlnState(impl), std::string("Failed"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("mix-rln-registry-id"));
+    LOGOS_ASSERT_FALSE(libCfg.contains("rln-disable-validation"));
+    LOGOS_ASSERT_EQ(impl.rlnState().value.value("state", ""), std::string("Disabled"));
 }
 
 // The empty preset carries no RLN, so naming it must not turn it on.
@@ -1298,8 +1297,13 @@ LOGOS_TEST(preset_table_parses_modes_over_the_entry) {
 LOGOS_TEST(presets_default_to_the_logos_rates) {
     std::string err;
     ::unsetenv(kRlnPresetsEnvVar);
-    const RlnPresetEntry dev = resolveRlnPreset("logos.dev", err);
-    LOGOS_ASSERT_TRUE(err.empty());
+    const std::string withMix =
+        R"("enabled":true,"registry-id":"reg","epoch-size-sec":600,)"
+        R"("mix-registry-id":"mixreg","mix-metadata-topic":"/t")";
+    std::map<std::string, RlnPresetEntry> table;
+    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix + "}}", table),
+                    std::string());
+    const RlnPresetEntry dev = table["logos.dev"];
     auto core = nlohmann::json::parse(rlnBackendStartConfig(dev, RlnMode::Core));
     LOGOS_ASSERT_EQ(core["registries"][0].value("rate_limit", 0), 600);
     LOGOS_ASSERT_EQ(core["registries"][1].value("rate_limit", 0), 100);
@@ -1313,12 +1317,6 @@ LOGOS_TEST(presets_default_to_the_logos_rates) {
     LOGOS_ASSERT_EQ(testCore["registries"].size(), static_cast<size_t>(1));
     LOGOS_ASSERT_EQ(testCore["registries"][0].value("rate_limit", 0), 600);
 
-    const std::string withMix =
-        R"("enabled":true,"registry-id":"reg","epoch-size-sec":600,)"
-        R"("mix-registry-id":"mixreg","mix-metadata-topic":"/t")";
-    std::map<std::string, RlnPresetEntry> table;
-    LOGOS_ASSERT_EQ(parseRlnPresetTable(R"({"logos.dev":{)" + withMix + "}}", table),
-                    std::string());
     {
         const RlnModeRates& rates = table["logos.dev"].rates;
         LOGOS_ASSERT_EQ(rates.core.rateLimit, static_cast<uint64_t>(600));
